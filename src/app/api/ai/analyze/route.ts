@@ -1,7 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
-
-const client = new Anthropic();
 
 export interface AnalyzeRequest {
   courseName: string;
@@ -22,8 +20,8 @@ export interface AnalyzeResponse {
 }
 
 export async function POST(request: Request) {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({ error: "ANTHROPIC_API_KEY가 설정되지 않았습니다." }, { status: 500 });
+  if (!process.env.GEMINI_API_KEY) {
+    return NextResponse.json({ error: "GEMINI_API_KEY가 설정되지 않았습니다." }, { status: 500 });
   }
 
   let body: AnalyzeRequest;
@@ -66,18 +64,16 @@ ${extraNotes || "(추가 필기 없음)"}
 }`;
 
   try {
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 2048,
-      messages: [{ role: "user", content: prompt }],
-    });
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const result = await model.generateContent(prompt);
+    const raw = result.response.text().trim();
 
-    const raw = (message.content[0] as { type: string; text: string }).text.trim();
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("JSON 파싱 실패");
 
-    const result: AnalyzeResponse = JSON.parse(jsonMatch[0]);
-    return NextResponse.json(result);
+    const analysis: AnalyzeResponse = JSON.parse(jsonMatch[0]);
+    return NextResponse.json(analysis);
   } catch (err) {
     console.error("[AI analyze]", err);
     return NextResponse.json({ error: "AI 분석 중 오류가 발생했습니다." }, { status: 500 });
