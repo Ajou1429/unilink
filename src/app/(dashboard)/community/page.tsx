@@ -7,10 +7,22 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   ThumbsUp,
@@ -22,7 +34,7 @@ import {
   Users,
   Flame,
 } from "lucide-react";
-import { mockPosts } from "@/lib/mock-data";
+import { mockCourses, mockPosts } from "@/lib/mock-data";
 import { Post, PostCategory } from "@/lib/types";
 
 const CATEGORIES: PostCategory[] = ["자유", "질문", "정보", "수업", "시험"];
@@ -49,23 +61,36 @@ function PostCard({ post }: { post: Post }) {
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           <Avatar className="h-8 w-8 shrink-0">
-            <AvatarFallback className="text-xs bg-muted">익</AvatarFallback>
+            <AvatarFallback className="text-xs bg-muted">익명</AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-              <Badge className={`text-[10px] px-1.5 py-0 border-0 font-medium ${CATEGORY_COLORS[post.category]}`}>
+              <Badge
+                className={`text-[10px] px-1.5 py-0 border-0 font-medium ${
+                  CATEGORY_COLORS[post.category]
+                }`}
+              >
                 {post.category}
               </Badge>
               <span className="text-xs text-muted-foreground">{post.authorName}</span>
               <span className="text-xs text-muted-foreground">
-                · {new Date(post.createdAt).toLocaleDateString("ko-KR", { month: "short", day: "numeric" })}
+                ·{" "}
+                {new Date(post.createdAt).toLocaleDateString("ko-KR", {
+                  month: "short",
+                  day: "numeric",
+                })}
               </span>
             </div>
             <h3 className="font-semibold text-sm leading-snug mb-1">{post.title}</h3>
-            <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{post.content}</p>
+            <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+              {post.content}
+            </p>
             <div className="flex items-center gap-4 mt-3">
               <button
-                onClick={(e) => { e.stopPropagation(); handleLike(); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleLike();
+                }}
                 className={`flex items-center gap-1.5 text-xs transition-colors ${
                   liked ? "text-primary" : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -90,11 +115,16 @@ export default function CommunityPage() {
   const [activeTab, setActiveTab] = useState<"all" | PostCategory>("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [newPost, setNewPost] = useState({ title: "", content: "", category: "자유" as PostCategory });
+  const [newPost, setNewPost] = useState({
+    title: "",
+    content: "",
+    category: "자유" as PostCategory,
+  });
 
   const filtered = posts.filter((p) => {
     const matchCat = activeTab === "all" || p.category === activeTab;
-    const matchSearch = !search || p.title.includes(search) || p.content.includes(search);
+    const matchSearch =
+      !search || p.title.includes(search) || p.content.includes(search);
     return matchCat && matchSearch;
   });
 
@@ -122,10 +152,7 @@ export default function CommunityPage() {
       <Header title="커뮤니티" />
       <div className="flex-1 p-6 max-w-5xl mx-auto w-full">
         <div className="grid lg:grid-cols-4 gap-6">
-
-          {/* Main feed */}
           <div className="lg:col-span-3 space-y-4">
-            {/* Controls */}
             <div className="flex gap-3">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -149,14 +176,18 @@ export default function CommunityPage() {
                       <Label>카테고리</Label>
                       <Select
                         value={newPost.category}
-                        onValueChange={(v) => setNewPost((p) => ({ ...p, category: v as PostCategory }))}
+                        onValueChange={(v) =>
+                          setNewPost((p) => ({ ...p, category: v as PostCategory }))
+                        }
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className="w-full">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           {CATEGORIES.map((c) => (
-                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                            <SelectItem key={c} value={c}>
+                              {c}
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -166,20 +197,24 @@ export default function CommunityPage() {
                       <Input
                         placeholder="제목을 입력하세요"
                         value={newPost.title}
-                        onChange={(e) => setNewPost((p) => ({ ...p, title: e.target.value }))}
+                        onChange={(e) =>
+                          setNewPost((p) => ({ ...p, title: e.target.value }))
+                        }
                       />
                     </div>
                     <div className="space-y-2">
                       <Label>내용</Label>
                       <Textarea
-                        placeholder="내용을 입력하세요..."
+                        placeholder="내용을 입력하세요"
                         rows={6}
                         value={newPost.content}
-                        onChange={(e) => setNewPost((p) => ({ ...p, content: e.target.value }))}
+                        onChange={(e) =>
+                          setNewPost((p) => ({ ...p, content: e.target.value }))
+                        }
                       />
                     </div>
                     <div className="flex items-center justify-between text-sm text-muted-foreground">
-                      <span>익명으로 게시됩니다</span>
+                      <span>익명으로 게시됩니다.</span>
                       <Button onClick={submitPost}>게시하기</Button>
                     </div>
                   </div>
@@ -187,17 +222,22 @@ export default function CommunityPage() {
               </Dialog>
             </div>
 
-            {/* Category tabs */}
-            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+            <Tabs
+              value={activeTab}
+              onValueChange={(v) => setActiveTab(v as typeof activeTab)}
+            >
               <TabsList className="bg-white border shadow-sm h-10">
-                <TabsTrigger value="all" className="text-xs">전체</TabsTrigger>
+                <TabsTrigger value="all" className="text-xs">
+                  전체
+                </TabsTrigger>
                 {CATEGORIES.map((c) => (
-                  <TabsTrigger key={c} value={c} className="text-xs">{c}</TabsTrigger>
+                  <TabsTrigger key={c} value={c} className="text-xs">
+                    {c}
+                  </TabsTrigger>
                 ))}
               </TabsList>
             </Tabs>
 
-            {/* Post list */}
             <div className="space-y-3">
               {filtered.length > 0 ? (
                 filtered.map((post) => <PostCard key={post.id} post={post} />)
@@ -212,53 +252,58 @@ export default function CommunityPage() {
             </div>
           </div>
 
-          {/* Sidebar */}
           <div className="space-y-4">
-            {/* Hot posts */}
             <Card className="border-0 shadow-sm">
               <CardContent className="p-4">
                 <h3 className="font-semibold text-sm mb-3 flex items-center gap-1.5">
                   <Flame className="h-4 w-4 text-orange-500" /> 인기글
                 </h3>
                 <div className="space-y-3">
-                  {[...mockPosts].sort((a, b) => b.likes - a.likes).slice(0, 3).map((post, idx) => (
-                    <div key={post.id} className="flex gap-2">
-                      <span className="text-xs font-bold text-primary w-4 shrink-0">{idx + 1}</span>
-                      <p className="text-xs line-clamp-2 leading-snug flex-1">{post.title}</p>
-                    </div>
-                  ))}
+                  {[...mockPosts]
+                    .sort((a, b) => b.likes - a.likes)
+                    .slice(0, 3)
+                    .map((post, idx) => (
+                      <div key={post.id} className="flex gap-2">
+                        <span className="text-xs font-bold text-primary w-4 shrink-0">
+                          {idx + 1}
+                        </span>
+                        <p className="text-xs line-clamp-2 leading-snug flex-1">
+                          {post.title}
+                        </p>
+                      </div>
+                    ))}
                 </div>
               </CardContent>
             </Card>
 
-            {/* Course communities */}
             <Card className="border-0 shadow-sm">
               <CardContent className="p-4">
                 <h3 className="font-semibold text-sm mb-3 flex items-center gap-1.5">
                   <Users className="h-4 w-4 text-primary" /> 내 수업 커뮤니티
                 </h3>
                 <div className="space-y-2">
-                  {[
-                    { name: "운영체제", color: "#4F46E5", members: 49, new: 3 },
-                    { name: "데이터베이스", color: "#7C3AED", members: 62, new: 1 },
-                    { name: "알고리즘", color: "#059669", members: 53, new: 5 },
-                  ].map((c) => (
-                    <button key={c.name} className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-accent transition-colors text-left">
-                      <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />
+                  {mockCourses.slice(0, 3).map((course, idx) => (
+                    <button
+                      key={course.id}
+                      className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-accent transition-colors text-left"
+                    >
+                      <div
+                        className="h-2.5 w-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: course.color }}
+                      />
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium">{c.name}</p>
-                        <p className="text-[10px] text-muted-foreground">{c.members}명</p>
+                        <p className="text-xs font-medium">{course.name}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {[49, 62, 53][idx]}명
+                        </p>
                       </div>
-                      {c.new > 0 && (
-                        <Badge className="h-4 text-[10px] px-1.5">{c.new}</Badge>
-                      )}
+                      <Badge className="h-4 text-[10px] px-1.5">{[3, 1, 5][idx]}</Badge>
                     </button>
                   ))}
                 </div>
               </CardContent>
             </Card>
 
-            {/* Stats */}
             <Card className="border-0 shadow-sm">
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-center justify-between text-xs">

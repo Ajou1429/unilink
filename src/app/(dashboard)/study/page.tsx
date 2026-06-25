@@ -9,8 +9,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   CheckCircle2,
   Circle,
@@ -23,8 +35,8 @@ import {
   Tag,
   Loader2,
 } from "lucide-react";
-import { mockStudyPlans, mockNotes, mockCourses } from "@/lib/mock-data";
-import { StudyPlan, LectureNote } from "@/lib/types";
+import { mockCourses, mockNotes, mockStudyPlans } from "@/lib/mock-data";
+import { LectureNote, StudyPlan } from "@/lib/types";
 
 export default function StudyPage() {
   const [plans, setPlans] = useState<StudyPlan[]>(mockStudyPlans);
@@ -57,7 +69,7 @@ export default function StudyPage() {
 
   function togglePlan(id: string) {
     setPlans((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, isCompleted: !p.isCompleted } : p))
+      prev.map((p) => (p.id === id ? { ...p, isCompleted: !p.isCompleted } : p)),
     );
   }
 
@@ -92,7 +104,10 @@ export default function StudyPage() {
       week: newNote.week,
       title: newNote.title,
       content: newNote.content,
-      tags: newNote.tags.split(",").map((t) => t.trim()).filter(Boolean),
+      tags: newNote.tags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -102,41 +117,37 @@ export default function StudyPage() {
   }
 
   function generateAIPlan() {
+    setAiOpen(true);
     setAiLoading(true);
     setAiResult("");
-    // Simulate AI response
-    setTimeout(() => {
+    window.setTimeout(() => {
       setAiLoading(false);
       setAiResult(`## 이번 주 맞춤 학습 플랜 (8주차)
 
-### 우선순위 1 — 운영체제 (중간고사 D-7)
-- [ ] 1~7장 요약 노트 복습 (예상 소요: 2시간)
-- [ ] 교착상태, 메모리 관리 파트 집중 복습
-- [ ] 기출 문제 5년치 풀기
+### 우선순위 1 - 운영체제 (중간고사 D-7)
+- [ ] 1~7주차 요약 노트 복습 (예상 소요: 2시간)
+- [ ] 교착상태와 메모리 관리 파트 집중 복습
+- [ ] 기출 문제 5개 풀기
 
-### 우선순위 2 — 데이터베이스
+### 우선순위 2 - 데이터베이스
 - [ ] 정규화 개념 정리 및 예제 풀기 (1시간)
-- [ ] SQL JOIN 쿼리 작성 연습 10개
+- [ ] SQL JOIN 쿼리 연습 10개
 
-### 우선순위 3 — 알고리즘
-- [ ] 그리디 알고리즘 직접 구현해보기
-- [ ] 백준 문제 3개 풀기 (골드 이하)
+### 우선순위 3 - 알고리즘
+- [ ] 그래프 알고리즘 직접 구현해보기
+- [ ] 백준 문제 3개 풀기
 
 ### 추천 공부 시간
-- 월/수: 운영체제 집중 (저녁 7–9시)
-- 화/목: 데이터베이스 + 알고리즘 (저녁 8–10시)
-- 금: 전체 복습 및 정리
-
-> 중간고사까지 총 예상 공부 시간: **약 18시간**`);
-    }, 2000);
+- 월/화: 운영체제 집중
+- 수/목: 데이터베이스와 알고리즘
+- 금: 전체 복습 및 오답 정리`);
+    }, 800);
   }
 
   return (
     <div className="flex flex-col min-h-screen">
       <Header title="학습 플랜" />
       <div className="flex-1 p-6 max-w-6xl mx-auto w-full">
-
-        {/* Progress bar */}
         <div className="mb-6 flex items-center gap-4">
           <div className="flex-1 bg-muted rounded-full h-2">
             <div
@@ -148,7 +159,9 @@ export default function StudyPage() {
             {completed}/{total} 완료
           </span>
           <Dialog open={aiOpen} onOpenChange={setAiOpen}>
-            <DialogTrigger render={<Button className="gap-2 shrink-0" onClick={generateAIPlan} />}>
+            <DialogTrigger
+              render={<Button className="gap-2 shrink-0" onClick={generateAIPlan} />}
+            >
               <Sparkles className="h-4 w-4" /> AI 플랜 생성
             </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
@@ -166,11 +179,11 @@ export default function StudyPage() {
                     </p>
                   </div>
                 ) : (
-                  <div className="prose prose-sm max-w-none">
+                  <div>
                     <pre className="whitespace-pre-wrap text-sm leading-relaxed font-sans bg-muted/50 rounded-lg p-4">
                       {aiResult}
                     </pre>
-                    <Button className="mt-4 w-full">이 플랜으로 할일 추가하기</Button>
+                    <Button className="mt-4 w-full">내 플랜으로 추가하기</Button>
                   </div>
                 )}
               </div>
@@ -188,12 +201,15 @@ export default function StudyPage() {
             </TabsTrigger>
           </TabsList>
 
-          {/* Study Plans Tab */}
           <TabsContent value="plans" className="space-y-4">
             <div className="flex justify-between items-center">
-              <h2 className="text-sm font-medium text-muted-foreground">8주차 · 이번 주</h2>
+              <h2 className="text-sm font-medium text-muted-foreground">
+                8주차 · 이번 주
+              </h2>
               <Dialog open={planOpen} onOpenChange={setPlanOpen}>
-                <DialogTrigger render={<Button size="sm" variant="outline" className="gap-1.5" />}>
+                <DialogTrigger
+                  render={<Button size="sm" variant="outline" className="gap-1.5" />}
+                >
                   <Plus className="h-3.5 w-3.5" /> 계획 추가
                 </DialogTrigger>
                 <DialogContent className="max-w-md">
@@ -203,28 +219,57 @@ export default function StudyPage() {
                   <div className="space-y-4 pt-2">
                     <div className="space-y-2">
                       <Label>수업</Label>
-                      <Select value={newPlan.courseId} onValueChange={(v) => v != null && setNewPlan((p) => ({ ...p, courseId: v }))}>
-                        <SelectTrigger><SelectValue placeholder="수업 선택" /></SelectTrigger>
+                      <Select
+                        value={newPlan.courseId}
+                        onValueChange={(v) =>
+                          v != null && setNewPlan((p) => ({ ...p, courseId: v }))
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="수업 선택" />
+                        </SelectTrigger>
                         <SelectContent>
                           {mockCourses.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name}
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2">
                       <Label>제목</Label>
-                      <Input placeholder="예) 중간고사 복습" value={newPlan.title} onChange={(e) => setNewPlan((p) => ({ ...p, title: e.target.value }))} />
+                      <Input
+                        placeholder="예: 중간고사 복습"
+                        value={newPlan.title}
+                        onChange={(e) =>
+                          setNewPlan((p) => ({ ...p, title: e.target.value }))
+                        }
+                      />
                     </div>
                     <div className="space-y-2">
-                      <Label>내용 (선택)</Label>
-                      <Textarea placeholder="세부 내용을 입력하세요" value={newPlan.description} onChange={(e) => setNewPlan((p) => ({ ...p, description: e.target.value }))} />
+                      <Label>내용 선택</Label>
+                      <Textarea
+                        placeholder="세부 내용을 입력하세요"
+                        value={newPlan.description}
+                        onChange={(e) =>
+                          setNewPlan((p) => ({ ...p, description: e.target.value }))
+                        }
+                      />
                     </div>
                     <div className="space-y-2">
                       <Label>마감일</Label>
-                      <Input type="date" value={newPlan.dueDate} onChange={(e) => setNewPlan((p) => ({ ...p, dueDate: e.target.value }))} />
+                      <Input
+                        type="date"
+                        value={newPlan.dueDate}
+                        onChange={(e) =>
+                          setNewPlan((p) => ({ ...p, dueDate: e.target.value }))
+                        }
+                      />
                     </div>
-                    <Button onClick={addPlan} className="w-full">추가하기</Button>
+                    <Button onClick={addPlan} className="w-full">
+                      추가하기
+                    </Button>
                   </div>
                 </DialogContent>
               </Dialog>
@@ -232,7 +277,12 @@ export default function StudyPage() {
 
             <div className="grid md:grid-cols-2 gap-3">
               {plans.map((plan) => (
-                <Card key={plan.id} className={`border-0 shadow-sm transition-opacity ${plan.isCompleted ? "opacity-60" : ""}`}>
+                <Card
+                  key={plan.id}
+                  className={`border-0 shadow-sm transition-opacity ${
+                    plan.isCompleted ? "opacity-60" : ""
+                  }`}
+                >
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">
                       <button onClick={() => togglePlan(plan.id)} className="mt-0.5 shrink-0">
@@ -243,17 +293,26 @@ export default function StudyPage() {
                         )}
                       </button>
                       <div className="min-w-0 flex-1">
-                        <p className={`font-medium text-sm ${plan.isCompleted ? "line-through text-muted-foreground" : ""}`}>
+                        <p
+                          className={`font-medium text-sm ${
+                            plan.isCompleted ? "line-through text-muted-foreground" : ""
+                          }`}
+                        >
                           {plan.title}
                         </p>
                         {plan.description && (
-                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{plan.description}</p>
+                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                            {plan.description}
+                          </p>
                         )}
                         <div className="flex items-center gap-2 mt-2 flex-wrap">
-                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{plan.courseName}</Badge>
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                            {plan.courseName}
+                          </Badge>
                           {plan.dueDate && (
                             <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                              <Clock className="h-3 w-3" />{plan.dueDate}
+                              <Clock className="h-3 w-3" />
+                              {plan.dueDate}
                             </span>
                           )}
                         </div>
@@ -265,15 +324,17 @@ export default function StudyPage() {
             </div>
           </TabsContent>
 
-          {/* Lecture Notes Tab */}
           <TabsContent value="notes">
             <div className="grid lg:grid-cols-3 gap-6">
-              {/* Notes list */}
               <div className="lg:col-span-1 space-y-3">
                 <div className="flex justify-between items-center">
-                  <h2 className="text-sm font-medium text-muted-foreground">강의 노트</h2>
+                  <h2 className="text-sm font-medium text-muted-foreground">
+                    강의 노트
+                  </h2>
                   <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
-                    <DialogTrigger render={<Button size="sm" variant="outline" className="gap-1.5" />}>
+                    <DialogTrigger
+                      render={<Button size="sm" variant="outline" className="gap-1.5" />}
+                    >
                       <Plus className="h-3.5 w-3.5" /> 노트 추가
                     </DialogTrigger>
                     <DialogContent className="max-w-2xl">
@@ -284,33 +345,74 @@ export default function StudyPage() {
                         <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-2">
                             <Label>수업</Label>
-                            <Select value={newNote.courseId} onValueChange={(v) => v != null && setNewNote((p) => ({ ...p, courseId: v }))}>
-                              <SelectTrigger><SelectValue placeholder="수업 선택" /></SelectTrigger>
+                            <Select
+                              value={newNote.courseId}
+                              onValueChange={(v) =>
+                                v != null && setNewNote((p) => ({ ...p, courseId: v }))
+                              }
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="수업 선택" />
+                              </SelectTrigger>
                               <SelectContent>
                                 {mockCourses.map((c) => (
-                                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                  <SelectItem key={c.id} value={c.id}>
+                                    {c.name}
+                                  </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           </div>
                           <div className="space-y-2">
                             <Label>주차</Label>
-                            <Input type="number" min={1} max={16} value={newNote.week} onChange={(e) => setNewNote((p) => ({ ...p, week: Number(e.target.value) }))} />
+                            <Input
+                              type="number"
+                              min={1}
+                              max={16}
+                              value={newNote.week}
+                              onChange={(e) =>
+                                setNewNote((p) => ({
+                                  ...p,
+                                  week: Number(e.target.value),
+                                }))
+                              }
+                            />
                           </div>
                         </div>
                         <div className="space-y-2">
                           <Label>제목</Label>
-                          <Input placeholder="예) 7주차 - 교착상태" value={newNote.title} onChange={(e) => setNewNote((p) => ({ ...p, title: e.target.value }))} />
+                          <Input
+                            placeholder="예: 7주차 - 교착상태"
+                            value={newNote.title}
+                            onChange={(e) =>
+                              setNewNote((p) => ({ ...p, title: e.target.value }))
+                            }
+                          />
                         </div>
                         <div className="space-y-2">
-                          <Label>내용 (마크다운 지원)</Label>
-                          <Textarea placeholder="강의 내용을 정리하세요..." rows={8} value={newNote.content} onChange={(e) => setNewNote((p) => ({ ...p, content: e.target.value }))} />
+                          <Label>내용</Label>
+                          <Textarea
+                            placeholder="강의 내용을 정리하세요"
+                            rows={8}
+                            value={newNote.content}
+                            onChange={(e) =>
+                              setNewNote((p) => ({ ...p, content: e.target.value }))
+                            }
+                          />
                         </div>
                         <div className="space-y-2">
-                          <Label>태그 (쉼표로 구분)</Label>
-                          <Input placeholder="예) 교착상태, OS, 운영체제" value={newNote.tags} onChange={(e) => setNewNote((p) => ({ ...p, tags: e.target.value }))} />
+                          <Label>태그</Label>
+                          <Input
+                            placeholder="예: 교착상태, OS, 운영체제"
+                            value={newNote.tags}
+                            onChange={(e) =>
+                              setNewNote((p) => ({ ...p, tags: e.target.value }))
+                            }
+                          />
                         </div>
-                        <Button onClick={addNote} className="w-full">저장하기</Button>
+                        <Button onClick={addNote} className="w-full">
+                          저장하기
+                        </Button>
                       </div>
                     </DialogContent>
                   </Dialog>
@@ -320,7 +422,9 @@ export default function StudyPage() {
                   <Card
                     key={note.id}
                     onClick={() => setSelectedNote(note)}
-                    className={`border-0 shadow-sm cursor-pointer transition-all hover:shadow-md ${selectedNote?.id === note.id ? "ring-2 ring-primary" : ""}`}
+                    className={`border-0 shadow-sm cursor-pointer transition-all hover:shadow-md ${
+                      selectedNote?.id === note.id ? "ring-2 ring-primary" : ""
+                    }`}
                   >
                     <CardContent className="p-3">
                       <div className="flex items-start gap-2">
@@ -333,7 +437,13 @@ export default function StudyPage() {
                           </p>
                           <div className="flex flex-wrap gap-1 mt-2">
                             {note.tags.map((tag) => (
-                              <Badge key={tag} variant="secondary" className="text-[10px] px-1.5 py-0">{tag}</Badge>
+                              <Badge
+                                key={tag}
+                                variant="secondary"
+                                className="text-[10px] px-1.5 py-0"
+                              >
+                                {tag}
+                              </Badge>
                             ))}
                           </div>
                         </div>
@@ -343,7 +453,6 @@ export default function StudyPage() {
                 ))}
               </div>
 
-              {/* Note viewer */}
               <div className="lg:col-span-2">
                 {selectedNote ? (
                   <Card className="border-0 shadow-sm h-full">
@@ -362,7 +471,8 @@ export default function StudyPage() {
                       <div className="flex flex-wrap gap-1 mt-2">
                         {selectedNote.tags.map((tag) => (
                           <Badge key={tag} variant="secondary" className="text-xs gap-1">
-                            <Tag className="h-2.5 w-2.5" />{tag}
+                            <Tag className="h-2.5 w-2.5" />
+                            {tag}
                           </Badge>
                         ))}
                       </div>
@@ -377,7 +487,7 @@ export default function StudyPage() {
                   <Card className="border-0 shadow-sm h-64 flex items-center justify-center">
                     <div className="text-center text-muted-foreground">
                       <FileText className="h-8 w-8 mx-auto mb-3 opacity-30" />
-                      <p className="text-sm">노트를 선택하면 여기서 볼 수 있어요</p>
+                      <p className="text-sm">노트를 선택하면 여기에 표시됩니다.</p>
                     </div>
                   </Card>
                 )}

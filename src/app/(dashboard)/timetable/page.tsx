@@ -6,10 +6,22 @@ import { TimetableGrid } from "@/components/timetable/TimetableGrid";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Plus, Users, MapPin, Clock, BookOpen, X } from "lucide-react";
 import { mockCourses, COURSE_COLORS } from "@/lib/mock-data";
 import { Course, DayOfWeek } from "@/lib/types";
@@ -73,7 +85,9 @@ export default function TimetablePage() {
       <div className="flex-1 p-6 max-w-6xl mx-auto w-full">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <p className="text-muted-foreground text-sm">2024년 1학기 · 총 {totalCredits}학점</p>
+            <p className="text-muted-foreground text-sm">
+              2024년 1학기 · 총 {totalCredits}학점
+            </p>
           </div>
           <Dialog open={addOpen} onOpenChange={setAddOpen}>
             <DialogTrigger render={<Button className="gap-2" />}>
@@ -87,30 +101,41 @@ export default function TimetablePage() {
                 <div className="space-y-2">
                   <Label>수업명</Label>
                   <Input
-                    placeholder="예) 운영체제"
+                    placeholder="예: 운영체제"
                     value={newCourse.name}
-                    onChange={(e) => setNewCourse((p) => ({ ...p, name: e.target.value }))}
+                    onChange={(e) =>
+                      setNewCourse((p) => ({ ...p, name: e.target.value }))
+                    }
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label>교수명</Label>
                     <Input
-                      placeholder="예) 김철수"
+                      placeholder="예: 김철수"
                       value={newCourse.professor}
-                      onChange={(e) => setNewCourse((p) => ({ ...p, professor: e.target.value }))}
+                      onChange={(e) =>
+                        setNewCourse((p) => ({ ...p, professor: e.target.value }))
+                      }
                     />
                   </div>
                   <div className="space-y-2">
                     <Label>학점</Label>
                     <Select
                       value={String(newCourse.credits)}
-                      onValueChange={(v) => v != null && setNewCourse((p) => ({ ...p, credits: Number(v) }))}
+                      onValueChange={(v) =>
+                        v != null &&
+                        setNewCourse((p) => ({ ...p, credits: Number(v) }))
+                      }
                     >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
                       <SelectContent>
                         {[1, 2, 3, 4].map((n) => (
-                          <SelectItem key={n} value={String(n)}>{n}학점</SelectItem>
+                          <SelectItem key={n} value={String(n)}>
+                            {n}학점
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -119,9 +144,11 @@ export default function TimetablePage() {
                 <div className="space-y-2">
                   <Label>강의실</Label>
                   <Input
-                    placeholder="예) 공학관 301"
+                    placeholder="예: 공학관 301"
                     value={newCourse.location}
-                    onChange={(e) => setNewCourse((p) => ({ ...p, location: e.target.value }))}
+                    onChange={(e) =>
+                      setNewCourse((p) => ({ ...p, location: e.target.value }))
+                    }
                   />
                 </div>
                 <div className="space-y-2">
@@ -149,7 +176,9 @@ export default function TimetablePage() {
                     <Input
                       type="time"
                       value={newCourse.startTime}
-                      onChange={(e) => setNewCourse((p) => ({ ...p, startTime: e.target.value }))}
+                      onChange={(e) =>
+                        setNewCourse((p) => ({ ...p, startTime: e.target.value }))
+                      }
                     />
                   </div>
                   <div className="space-y-2">
@@ -157,7 +186,9 @@ export default function TimetablePage() {
                     <Input
                       type="time"
                       value={newCourse.endTime}
-                      onChange={(e) => setNewCourse((p) => ({ ...p, endTime: e.target.value }))}
+                      onChange={(e) =>
+                        setNewCourse((p) => ({ ...p, endTime: e.target.value }))
+                      }
                     />
                   </div>
                 </div>
@@ -168,23 +199,27 @@ export default function TimetablePage() {
                       <button
                         key={color}
                         type="button"
+                        aria-label={`${color} 색상 선택`}
                         onClick={() => setNewCourse((p) => ({ ...p, color }))}
                         className={`h-7 w-7 rounded-full transition-transform ${
-                          newCourse.color === color ? "scale-125 ring-2 ring-offset-1 ring-gray-400" : "hover:scale-110"
+                          newCourse.color === color
+                            ? "scale-125 ring-2 ring-offset-1 ring-gray-400"
+                            : "hover:scale-110"
                         }`}
                         style={{ backgroundColor: color }}
                       />
                     ))}
                   </div>
                 </div>
-                <Button onClick={addCourse} className="w-full">추가하기</Button>
+                <Button onClick={addCourse} className="w-full">
+                  추가하기
+                </Button>
               </div>
             </DialogContent>
           </Dialog>
         </div>
 
         <div className="grid lg:grid-cols-4 gap-6">
-          {/* Timetable */}
           <div className="lg:col-span-3">
             <Card className="border-0 shadow-sm">
               <CardContent className="p-4">
@@ -193,21 +228,26 @@ export default function TimetablePage() {
             </Card>
           </div>
 
-          {/* Course list / detail */}
           <div className="space-y-4">
             {selectedCourse ? (
               <Card className="border-0 shadow-sm">
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-sm">수업 상세</CardTitle>
-                    <button onClick={() => setSelectedCourse(null)} className="text-muted-foreground hover:text-foreground">
+                    <button
+                      onClick={() => setSelectedCourse(null)}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
                       <X className="h-4 w-4" />
                     </button>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-full" style={{ backgroundColor: selectedCourse.color }} />
+                    <div
+                      className="h-3 w-3 rounded-full"
+                      style={{ backgroundColor: selectedCourse.color }}
+                    />
                     <span className="font-semibold">{selectedCourse.name}</span>
                   </div>
                   <div className="space-y-2 text-sm text-muted-foreground">
@@ -221,7 +261,10 @@ export default function TimetablePage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <Clock className="h-3.5 w-3.5" />
-                      <span>{selectedCourse.days.join(", ")} {selectedCourse.startTime}–{selectedCourse.endTime}</span>
+                      <span>
+                        {selectedCourse.days.join(", ")} {selectedCourse.startTime} -{" "}
+                        {selectedCourse.endTime}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Users className="h-3.5 w-3.5" />
@@ -255,10 +298,15 @@ export default function TimetablePage() {
                       onClick={() => setSelectedCourse(course)}
                       className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-accent transition-colors text-left"
                     >
-                      <div className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: course.color }} />
+                      <div
+                        className="h-3 w-3 rounded-full shrink-0"
+                        style={{ backgroundColor: course.color }}
+                      />
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">{course.name}</p>
-                        <p className="text-xs text-muted-foreground">{course.days.join("")} · {course.credits}학점</p>
+                        <p className="text-xs text-muted-foreground">
+                          {course.days.join("")} · {course.credits}학점
+                        </p>
                       </div>
                     </button>
                   ))}
@@ -272,8 +320,13 @@ export default function TimetablePage() {
                   <div className="text-3xl font-bold text-primary">{totalCredits}</div>
                   <div className="text-xs text-muted-foreground">총 학점</div>
                   <div className="flex justify-center gap-2 mt-3">
-                    <Badge variant="secondary" className="text-[10px]">수업 {courses.length}개</Badge>
-                    <Badge variant={totalCredits >= 18 ? "destructive" : "secondary"} className="text-[10px]">
+                    <Badge variant="secondary" className="text-[10px]">
+                      수업 {courses.length}개
+                    </Badge>
+                    <Badge
+                      variant={totalCredits >= 18 ? "destructive" : "secondary"}
+                      className="text-[10px]"
+                    >
                       {totalCredits >= 18 ? "최대 학점" : `${18 - totalCredits}학점 여유`}
                     </Badge>
                   </div>
