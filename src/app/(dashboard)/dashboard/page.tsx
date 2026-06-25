@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -17,12 +20,78 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { mockCourses, mockPosts, mockStudyPlans } from "@/lib/mock-data";
+import { getStoredCourses } from "@/lib/course-storage";
+import {
+  getWeeklyStudyPlans,
+  saveWeeklyStudyPlans,
+  STUDY_PLANS_CHANGED_EVENT,
+} from "@/lib/study-storage";
+import { Course, DayOfWeek, StudyPlan } from "@/lib/types";
 
-const todaySchedule = mockCourses.filter((c) => c.days.includes("월"));
 const recentPosts = mockPosts.slice(0, 3);
-const upcomingPlans = mockStudyPlans.filter((p) => !p.isCompleted).slice(0, 3);
+const KOREA_TIME_ZONE = "Asia/Seoul";
+const COURSE_WEEKDAYS: DayOfWeek[] = ["월", "화", "수", "목", "금"];
+
+function getKoreanToday() {
+  const now = new Date();
+  const dateParts = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: KOREA_TIME_ZONE,
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).formatToParts(now);
+  const weekday = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: KOREA_TIME_ZONE,
+    weekday: "long",
+  }).format(now);
+  const compactWeekday = weekday.replace("요일", "") as DayOfWeek;
+
+  return {
+    label: `${dateParts.find((part) => part.type === "year")?.value}년 ${
+      dateParts.find((part) => part.type === "month")?.value
+    } ${dateParts.find((part) => part.type === "day")?.value}일 ${weekday}`,
+    courseDayOfWeek: COURSE_WEEKDAYS.includes(compactWeekday) ? compactWeekday : null,
+  };
+}
 
 export default function DashboardPage() {
+  const [courses, setCourses] = useState<Course[]>(mockCourses);
+  const [plans, setPlans] = useState<StudyPlan[]>(mockStudyPlans);
+  const [koreanToday, setKoreanToday] = useState(getKoreanToday);
+
+  useEffect(() => {
+    function loadDashboardData() {
+      setCourses(getStoredCourses());
+      setPlans(getWeeklyStudyPlans(mockStudyPlans));
+      setKoreanToday(getKoreanToday());
+    }
+
+    window.setTimeout(loadDashboardData, 0);
+    window.addEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
+    window.addEventListener("storage", loadDashboardData);
+
+    return () => {
+      window.removeEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
+      window.removeEventListener("storage", loadDashboardData);
+    };
+  }, []);
+
+  const todaySchedule = courses.filter((course) =>
+    koreanToday.courseDayOfWeek
+      ? course.days.includes(koreanToday.courseDayOfWeek)
+      : false,
+  );
+  const completedPlans = plans.filter((plan) => plan.isCompleted).length;
+  const upcomingPlans = plans.filter((plan) => !plan.isCompleted).slice(0, 4);
+
+  function completePlan(planId: string) {
+    const nextPlans = plans.map((plan) =>
+      plan.id === planId ? { ...plan, isCompleted: true } : plan,
+    );
+    setPlans(nextPlans);
+    saveWeeklyStudyPlans(nextPlans);
+  }
+
   return (
     <div className="flex flex-col min-h-screen">
       <Header title="대시보드" />
@@ -39,7 +108,7 @@ export default function DashboardPage() {
             className="gap-1 text-primary border-primary/30 bg-primary/5 hidden md:flex"
           >
             <CalendarDays className="h-3.5 w-3.5" />
-            2024년 3월 25일 월요일
+            {koreanToday.label}
           </Badge>
         </div>
 
@@ -47,7 +116,7 @@ export default function DashboardPage() {
           {[
             {
               label: "수강 중인 수업",
-              value: "5",
+              value: String(courses.length),
               icon: BookOpen,
               color: "text-blue-600 bg-blue-50",
             },
@@ -59,7 +128,7 @@ export default function DashboardPage() {
             },
             {
               label: "이번 주 학습 목표",
-              value: "3/5",
+              value: `${completedPlans}/${plans.length}`,
               icon: CheckCircle2,
               color: "text-green-600 bg-green-50",
             },
@@ -89,11 +158,14 @@ export default function DashboardPage() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">오늘 수업</CardTitle>
-                <Link href="/timetable">
-                  <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 text-primary">
-                    시간표 <ArrowRight className="h-3 w-3" />
-                  </Button>
-                </Link>
+                <Button
+                  render={<Link href="/timetable" />}
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs gap-1 text-primary"
+                >
+                  시간표 <ArrowRight className="h-3 w-3" />
+                </Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -125,31 +197,49 @@ export default function DashboardPage() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">이번 주 학습 계획</CardTitle>
-                <Link href="/study">
-                  <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 text-primary">
-                    전체 보기 <ArrowRight className="h-3 w-3" />
-                  </Button>
-                </Link>
+                <Button
+                  render={<Link href="/study" />}
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs gap-1 text-primary"
+                >
+                  전체 보기 <ArrowRight className="h-3 w-3" />
+                </Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {upcomingPlans.map((plan) => (
-                <div key={plan.id} className="flex items-start gap-3">
-                  <Circle className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{plan.title}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                        {plan.courseName}
-                      </Badge>
-                      <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {plan.dueDate}
-                      </span>
+              {upcomingPlans.length > 0 ? (
+                upcomingPlans.map((plan) => (
+                  <div key={plan.id} className="flex items-start gap-3">
+                    <button
+                      type="button"
+                      onClick={() => completePlan(plan.id)}
+                      className="mt-0.5 shrink-0 rounded-full text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={`${plan.title} 완료 처리`}
+                    >
+                      <Circle className="h-4 w-4" />
+                    </button>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{plan.title}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                          {plan.courseName}
+                        </Badge>
+                        {plan.dueDate && (
+                          <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {plan.dueDate}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
+                ))
+              ) : (
+                <div className="py-6 text-center text-sm text-muted-foreground">
+                  아직 해결 안 된 이번주 계획이 없어요.
                 </div>
-              ))}
+              )}
             </CardContent>
           </Card>
 
@@ -185,18 +275,21 @@ export default function DashboardPage() {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">커뮤니티 최신 글</CardTitle>
-              <Link href="/community">
-                <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 text-primary">
-                  전체 보기 <ArrowRight className="h-3 w-3" />
-                </Button>
-              </Link>
+              <Button
+                render={<Link href="/community" />}
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1 text-primary"
+              >
+                전체 보기 <ArrowRight className="h-3 w-3" />
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
             <div className="space-y-0">
               {recentPosts.map((post, idx) => (
                 <div key={post.id}>
-                  <Link href={`/community/${post.id}`}>
+                  <Link href="/community">
                     <div className="py-3 flex items-center gap-3 hover:bg-accent/50 -mx-2 px-2 rounded-lg transition-colors cursor-pointer">
                       <Badge variant="outline" className="text-[10px] shrink-0">
                         {post.category}

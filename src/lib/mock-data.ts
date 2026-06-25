@@ -80,7 +80,7 @@ export const mockPosts: Post[] = [
     content:
       "교수님이 말씀하신 범위가 기억이 안 나는데 혹시 3장까지라고 하신 게 맞나요?",
     likes: 12,
-    commentCount: 8,
+    commentCount: 2,
     courseId: "1",
     createdAt: "2024-03-20T10:30:00Z",
   },
@@ -94,7 +94,7 @@ export const mockPosts: Post[] = [
     content:
       "오전 7시에 예약이 열리는데 바로 들어가면 원하는 시간대를 잡기 쉽습니다.",
     likes: 45,
-    commentCount: 15,
+    commentCount: 1,
     createdAt: "2024-03-19T14:00:00Z",
   },
   {
@@ -104,10 +104,9 @@ export const mockPosts: Post[] = [
     isAnonymous: true,
     category: "자유",
     title: "학생식당 오늘 메뉴 괜찮나요?",
-    content:
-      "오늘 학식 먹어본 분 있나요? 점심 메뉴 추천받습니다.",
+    content: "오늘 학식 먹어본 분 있나요? 점심 메뉴 추천받습니다.",
     likes: 28,
-    commentCount: 32,
+    commentCount: 0,
     createdAt: "2024-03-19T12:30:00Z",
   },
   {
@@ -120,7 +119,7 @@ export const mockPosts: Post[] = [
     content:
       "생각보다 어렵지는 않았고 동적 계획법과 그래프 기본 문제가 주로 나왔습니다.",
     likes: 67,
-    commentCount: 21,
+    commentCount: 0,
     createdAt: "2024-03-18T18:00:00Z",
   },
   {
@@ -133,7 +132,7 @@ export const mockPosts: Post[] = [
     content:
       "카카오 인턴 1차 합격했습니다. 코딩 테스트는 백준 골드 수준이면 충분했고 자기소개서가 중요했습니다.",
     likes: 89,
-    commentCount: 43,
+    commentCount: 0,
     createdAt: "2024-03-17T09:00:00Z",
   },
 ];

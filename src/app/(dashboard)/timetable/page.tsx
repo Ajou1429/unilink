@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { TimetableGrid } from "@/components/timetable/TimetableGrid";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -22,16 +24,34 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Users, MapPin, Clock, BookOpen, X } from "lucide-react";
-import { mockCourses, COURSE_COLORS } from "@/lib/mock-data";
+import {
+  Plus,
+  Users,
+  MapPin,
+  Clock,
+  BookOpen,
+  X,
+  Target,
+  Award,
+} from "lucide-react";
+import { COURSE_COLORS } from "@/lib/mock-data";
 import { Course, DayOfWeek } from "@/lib/types";
+import { getStoredCourses, saveStoredCourses } from "@/lib/course-storage";
+import {
+  getPersonalStudies,
+  PersonalStudy,
+  savePersonalStudies,
+} from "@/lib/personal-study-storage";
 
 const DAYS: DayOfWeek[] = ["월", "화", "수", "목", "금"];
+const PERSONAL_COLORS = ["#2563EB", "#7C3AED", "#059669", "#D97706", "#DB2777"];
 
 export default function TimetablePage() {
-  const [courses, setCourses] = useState<Course[]>(mockCourses);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [personalStudies, setPersonalStudies] = useState<PersonalStudy[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [personalOpen, setPersonalOpen] = useState(false);
   const [newCourse, setNewCourse] = useState({
     name: "",
     professor: "",
@@ -42,8 +62,33 @@ export default function TimetablePage() {
     credits: 3,
     color: COURSE_COLORS[0],
   });
+  const [newPersonalStudy, setNewPersonalStudy] = useState({
+    title: "",
+    category: "자격증",
+    goal: "",
+    color: PERSONAL_COLORS[0],
+  });
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setCourses(getStoredCourses());
+      setPersonalStudies(getPersonalStudies());
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   const totalCredits = courses.reduce((sum, c) => sum + c.credits, 0);
+
+  function persistCourses(nextCourses: Course[]) {
+    setCourses(nextCourses);
+    saveStoredCourses(nextCourses);
+  }
+
+  function persistPersonalStudies(nextStudies: PersonalStudy[]) {
+    setPersonalStudies(nextStudies);
+    savePersonalStudies(nextStudies);
+  }
 
   function toggleDay(day: DayOfWeek) {
     setNewCourse((prev) => ({
@@ -60,7 +105,7 @@ export default function TimetablePage() {
       ...newCourse,
       id: Date.now().toString(),
     };
-    setCourses((prev) => [...prev, course]);
+    persistCourses([...courses, course]);
     setAddOpen(false);
     setNewCourse({
       name: "",
@@ -74,8 +119,28 @@ export default function TimetablePage() {
     });
   }
 
+  function addPersonalStudy() {
+    if (!newPersonalStudy.title.trim()) return;
+    const study: PersonalStudy = {
+      id: Date.now().toString(),
+      title: newPersonalStudy.title.trim(),
+      category: newPersonalStudy.category,
+      goal: newPersonalStudy.goal.trim(),
+      color: newPersonalStudy.color,
+      createdAt: new Date().toISOString(),
+    };
+    persistPersonalStudies([...personalStudies, study]);
+    setPersonalOpen(false);
+    setNewPersonalStudy({
+      title: "",
+      category: "자격증",
+      goal: "",
+      color: PERSONAL_COLORS[personalStudies.length % PERSONAL_COLORS.length],
+    });
+  }
+
   function removeCourse(id: string) {
-    setCourses((prev) => prev.filter((c) => c.id !== id));
+    persistCourses(courses.filter((c) => c.id !== id));
     setSelectedCourse(null);
   }
 
@@ -272,9 +337,13 @@ export default function TimetablePage() {
                     </div>
                   </div>
                   <div className="pt-2 space-y-2">
-                    <Button size="sm" className="w-full text-xs gap-1">
-                      <Users className="h-3.5 w-3.5" /> 수업 커뮤니티 보기
-                    </Button>
+                    <Link
+                      href={`/course?courseId=${encodeURIComponent(selectedCourse.id)}`}
+                    >
+                      <Button size="sm" className="w-full text-xs gap-1">
+                        <Users className="h-3.5 w-3.5" /> 수업 페이지 열기
+                      </Button>
+                    </Link>
                     <Button
                       size="sm"
                       variant="destructive"
@@ -331,6 +400,132 @@ export default function TimetablePage() {
                     </Badge>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-0 shadow-sm">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Target className="h-4 w-4 text-primary" /> 개인 공부
+                  </CardTitle>
+                  <Dialog open={personalOpen} onOpenChange={setPersonalOpen}>
+                    <DialogTrigger render={<Button size="sm" variant="outline" className="h-7 gap-1" />}>
+                      <Plus className="h-3.5 w-3.5" /> 추가
+                    </DialogTrigger>
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>개인 공부 추가</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4 pt-2">
+                        <div className="space-y-2">
+                          <Label>공부 분야</Label>
+                          <Input
+                            placeholder="예: 정보처리기사, TOEIC, React"
+                            value={newPersonalStudy.title}
+                            onChange={(event) =>
+                              setNewPersonalStudy((prev) => ({
+                                ...prev,
+                                title: event.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>분류</Label>
+                          <Select
+                            value={newPersonalStudy.category}
+                            onValueChange={(value) =>
+                              setNewPersonalStudy((prev) => ({
+                                ...prev,
+                                category: value ?? prev.category,
+                              }))
+                            }
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {["자격증", "어학", "취업", "개발", "취미", "기타"].map(
+                                (category) => (
+                                  <SelectItem key={category} value={category}>
+                                    {category}
+                                  </SelectItem>
+                                ),
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>목표</Label>
+                          <Textarea
+                            rows={4}
+                            placeholder="예: 6월 시험 전까지 기출 5회독"
+                            value={newPersonalStudy.goal}
+                            onChange={(event) =>
+                              setNewPersonalStudy((prev) => ({
+                                ...prev,
+                                goal: event.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>색상</Label>
+                          <div className="flex gap-2">
+                            {PERSONAL_COLORS.map((color) => (
+                              <button
+                                key={color}
+                                type="button"
+                                aria-label={`${color} 색상 선택`}
+                                onClick={() =>
+                                  setNewPersonalStudy((prev) => ({ ...prev, color }))
+                                }
+                                className={`h-7 w-7 rounded-full transition-transform ${
+                                  newPersonalStudy.color === color
+                                    ? "scale-125 ring-2 ring-offset-1 ring-gray-400"
+                                    : "hover:scale-110"
+                                }`}
+                                style={{ backgroundColor: color }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        <Button onClick={addPersonalStudy} className="w-full">
+                          추가하기
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {personalStudies.length > 0 ? (
+                  personalStudies.map((study) => (
+                    <Link
+                      key={study.id}
+                      href={`/personal-study?studyId=${encodeURIComponent(study.id)}`}
+                      className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-accent transition-colors"
+                    >
+                      <div
+                        className="h-3 w-3 rounded-full shrink-0"
+                        style={{ backgroundColor: study.color }}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">{study.title}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {study.category}
+                          {study.goal ? ` · ${study.goal}` : ""}
+                        </p>
+                      </div>
+                    </Link>
+                  ))
+                ) : (
+                  <div className="text-center py-5 text-muted-foreground">
+                    <Award className="h-6 w-6 mx-auto mb-2 opacity-40" />
+                    <p className="text-xs">자격증이나 개인 공부를 추가하세요.</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

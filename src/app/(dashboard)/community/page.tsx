@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,9 +33,17 @@ import {
   Clock,
   Users,
   Flame,
+  Send,
 } from "lucide-react";
 import { mockCourses, mockPosts } from "@/lib/mock-data";
-import { Post, PostCategory } from "@/lib/types";
+import { Comment, Course, Post, PostCategory } from "@/lib/types";
+import {
+  addPostComment,
+  getCommunityPosts,
+  getPostComments,
+  saveCommunityPosts,
+} from "@/lib/community-storage";
+import { getStoredCourses } from "@/lib/course-storage";
 
 const CATEGORIES: PostCategory[] = ["자유", "질문", "정보", "수업", "시험"];
 
@@ -47,17 +55,56 @@ const CATEGORY_COLORS: Record<PostCategory, string> = {
   시험: "bg-red-50 text-red-700",
 };
 
-function PostCard({ post }: { post: Post }) {
+function PostCard({
+  post,
+  course,
+  onCommentAdded,
+}: {
+  post: Post;
+  course?: Course;
+  onCommentAdded: (postId: string) => void;
+}) {
   const [liked, setLiked] = useState(false);
   const [likes, setLikes] = useState(post.likes);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [commentText, setCommentText] = useState("");
 
   function handleLike() {
     setLiked((prev) => !prev);
     setLikes((prev) => (liked ? prev - 1 : prev + 1));
   }
 
+  function toggleComments() {
+    const nextOpen = !commentsOpen;
+    setCommentsOpen(nextOpen);
+    if (nextOpen) {
+      setComments(getPostComments(post.id));
+    }
+  }
+
+  function submitComment() {
+    const content = commentText.trim();
+    if (!content) return;
+
+    const comment: Comment = {
+      id: Date.now().toString(),
+      postId: post.id,
+      authorName: "익명",
+      isAnonymous: true,
+      content,
+      likes: 0,
+      createdAt: new Date().toISOString(),
+    };
+
+    addPostComment(comment);
+    setComments((prev) => [comment, ...prev]);
+    setCommentText("");
+    onCommentAdded(post.id);
+  }
+
   return (
-    <Card className="border-0 shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+    <Card className="border-0 shadow-sm hover:shadow-md transition-shadow">
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           <Avatar className="h-8 w-8 shrink-0">
@@ -73,6 +120,11 @@ function PostCard({ post }: { post: Post }) {
                 {post.category}
               </Badge>
               <span className="text-xs text-muted-foreground">{post.authorName}</span>
+              {course && (
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                  {course.name}
+                </Badge>
+              )}
               <span className="text-xs text-muted-foreground">
                 ·{" "}
                 {new Date(post.createdAt).toLocaleDateString("ko-KR", {
@@ -87,10 +139,7 @@ function PostCard({ post }: { post: Post }) {
             </p>
             <div className="flex items-center gap-4 mt-3">
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleLike();
-                }}
+                onClick={handleLike}
                 className={`flex items-center gap-1.5 text-xs transition-colors ${
                   liked ? "text-primary" : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -98,11 +147,76 @@ function PostCard({ post }: { post: Post }) {
                 <ThumbsUp className={`h-3.5 w-3.5 ${liked ? "fill-current" : ""}`} />
                 {likes}
               </button>
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <button
+                onClick={toggleComments}
+                className={`flex items-center gap-1.5 text-xs transition-colors ${
+                  commentsOpen
+                    ? "text-primary"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
                 <MessageSquare className="h-3.5 w-3.5" />
                 {post.commentCount}
-              </span>
+              </button>
             </div>
+
+            {commentsOpen && (
+              <div className="mt-4 border-t pt-4 space-y-3">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="댓글을 입력하세요"
+                    value={commentText}
+                    onChange={(event) => setCommentText(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        submitComment();
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="icon"
+                    onClick={submitComment}
+                    aria-label="댓글 등록"
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                {comments.length > 0 ? (
+                  <div className="space-y-2">
+                    {comments.map((comment) => (
+                      <div key={comment.id} className="flex gap-2 rounded-lg bg-muted/50 p-3">
+                        <Avatar className="h-6 w-6 shrink-0">
+                          <AvatarFallback className="text-[10px] bg-background">
+                            익명
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium">{comment.authorName}</span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {new Date(comment.createdAt).toLocaleString("ko-KR", {
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                          </div>
+                          <p className="text-sm mt-1 leading-relaxed">{comment.content}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground text-center py-2">
+                    아직 댓글이 없어요. 첫 댓글을 남겨보세요.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </CardContent>
@@ -113,38 +227,78 @@ function PostCard({ post }: { post: Post }) {
 export default function CommunityPage() {
   const [posts, setPosts] = useState<Post[]>(mockPosts);
   const [activeTab, setActiveTab] = useState<"all" | PostCategory>("all");
+  const [activeCourseId, setActiveCourseId] = useState<"all" | string>("all");
+  const [courses, setCourses] = useState<Course[]>(mockCourses);
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [newPost, setNewPost] = useState({
     title: "",
     content: "",
     category: "자유" as PostCategory,
+    courseId: "",
   });
+
+  useEffect(() => {
+    window.setTimeout(() => {
+      setCourses(getStoredCourses());
+      setPosts(getCommunityPosts());
+    }, 0);
+  }, []);
+
+  const courseById = useMemo(() => {
+    return new Map(courses.map((course) => [course.id, course]));
+  }, [courses]);
+
+  const requiresCourse =
+    newPost.category === "질문" ||
+    newPost.category === "수업" ||
+    newPost.category === "시험";
 
   const filtered = posts.filter((p) => {
     const matchCat = activeTab === "all" || p.category === activeTab;
+    const matchCourse = activeCourseId === "all" || p.courseId === activeCourseId;
     const matchSearch =
-      !search || p.title.includes(search) || p.content.includes(search);
-    return matchCat && matchSearch;
+      !search ||
+      p.title.includes(search) ||
+      p.content.includes(search) ||
+      (p.courseId ? courseById.get(p.courseId)?.name.includes(search) : false);
+    return matchCat && matchCourse && matchSearch;
   });
 
   function submitPost() {
-    if (!newPost.title || !newPost.content) return;
+    if (!newPost.title.trim() || !newPost.content.trim()) return;
+    if (requiresCourse && !newPost.courseId) return;
+
     const post: Post = {
       id: Date.now().toString(),
       authorId: "me",
       authorName: "익명",
       isAnonymous: true,
       category: newPost.category,
-      title: newPost.title,
-      content: newPost.content,
+      title: newPost.title.trim(),
+      content: newPost.content.trim(),
       likes: 0,
       commentCount: 0,
+      courseId: newPost.courseId || undefined,
       createdAt: new Date().toISOString(),
     };
-    setPosts((prev) => [post, ...prev]);
+    const nextPosts = [post, ...posts];
+    setPosts(nextPosts);
+    saveCommunityPosts(nextPosts);
     setCreateOpen(false);
-    setNewPost({ title: "", content: "", category: "자유" });
+    setNewPost({ title: "", content: "", category: "자유", courseId: "" });
+  }
+
+  function increaseCommentCount(postId: string) {
+    setPosts((prev) => {
+      const nextPosts = prev.map((post) =>
+        post.id === postId
+          ? { ...post, commentCount: post.commentCount + 1 }
+          : post,
+      );
+      saveCommunityPosts(nextPosts);
+      return nextPosts;
+    });
   }
 
   return (
@@ -177,7 +331,14 @@ export default function CommunityPage() {
                       <Select
                         value={newPost.category}
                         onValueChange={(v) =>
-                          setNewPost((p) => ({ ...p, category: v as PostCategory }))
+                          setNewPost((p) => ({
+                            ...p,
+                            category: v as PostCategory,
+                            courseId:
+                              v === "질문" || v === "수업" || v === "시험"
+                                ? p.courseId
+                                : "",
+                          }))
                         }
                       >
                         <SelectTrigger className="w-full">
@@ -192,6 +353,34 @@ export default function CommunityPage() {
                         </SelectContent>
                       </Select>
                     </div>
+                    {requiresCourse && (
+                      <div className="space-y-2">
+                        <Label>질문할 수업</Label>
+                        <Select
+                          value={newPost.courseId}
+                          onValueChange={(value) =>
+                            setNewPost((prev) => ({
+                              ...prev,
+                              courseId: value ?? prev.courseId,
+                            }))
+                          }
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="내 수업 중 선택" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {courses.map((course) => (
+                              <SelectItem key={course.id} value={course.id}>
+                                {course.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          선택한 수업 커뮤니티에 묶여 같은 수업 글로 분류됩니다.
+                        </p>
+                      </div>
+                    )}
                     <div className="space-y-2">
                       <Label>제목</Label>
                       <Input
@@ -215,7 +404,16 @@ export default function CommunityPage() {
                     </div>
                     <div className="flex items-center justify-between text-sm text-muted-foreground">
                       <span>익명으로 게시됩니다.</span>
-                      <Button onClick={submitPost}>게시하기</Button>
+                      <Button
+                        onClick={submitPost}
+                        disabled={
+                          !newPost.title.trim() ||
+                          !newPost.content.trim() ||
+                          (requiresCourse && !newPost.courseId)
+                        }
+                      >
+                        게시하기
+                      </Button>
                     </div>
                   </div>
                 </DialogContent>
@@ -240,7 +438,14 @@ export default function CommunityPage() {
 
             <div className="space-y-3">
               {filtered.length > 0 ? (
-                filtered.map((post) => <PostCard key={post.id} post={post} />)
+                filtered.map((post) => (
+                  <PostCard
+                    key={post.id}
+                    post={post}
+                    course={post.courseId ? courseById.get(post.courseId) : undefined}
+                    onCommentAdded={increaseCommentCount}
+                  />
+                ))
               ) : (
                 <Card className="border-0 shadow-sm">
                   <CardContent className="py-12 text-center text-muted-foreground">
@@ -282,10 +487,32 @@ export default function CommunityPage() {
                   <Users className="h-4 w-4 text-primary" /> 내 수업 커뮤니티
                 </h3>
                 <div className="space-y-2">
-                  {mockCourses.slice(0, 3).map((course, idx) => (
+                  <button
+                    type="button"
+                    onClick={() => setActiveCourseId("all")}
+                    className={`w-full flex items-center gap-2.5 p-2 rounded-lg transition-colors text-left ${
+                      activeCourseId === "all" ? "bg-primary/10" : "hover:bg-accent"
+                    }`}
+                  >
+                    <Users className="h-3.5 w-3.5 text-primary" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium">전체 수업</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        내 수업 글 모두 보기
+                      </p>
+                    </div>
+                    <Badge className="h-4 text-[10px] px-1.5">
+                      {posts.filter((post) => post.courseId).length}
+                    </Badge>
+                  </button>
+                  {courses.map((course) => (
                     <button
                       key={course.id}
-                      className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-accent transition-colors text-left"
+                      type="button"
+                      onClick={() => setActiveCourseId(course.id)}
+                      className={`w-full flex items-center gap-2.5 p-2 rounded-lg transition-colors text-left ${
+                        activeCourseId === course.id ? "bg-primary/10" : "hover:bg-accent"
+                      }`}
                     >
                       <div
                         className="h-2.5 w-2.5 rounded-full shrink-0"
@@ -294,10 +521,12 @@ export default function CommunityPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium">{course.name}</p>
                         <p className="text-[10px] text-muted-foreground">
-                          {[49, 62, 53][idx]}명
+                          같은 수업 커뮤니티
                         </p>
                       </div>
-                      <Badge className="h-4 text-[10px] px-1.5">{[3, 1, 5][idx]}</Badge>
+                      <Badge className="h-4 text-[10px] px-1.5">
+                        {posts.filter((post) => post.courseId === course.id).length}
+                      </Badge>
                     </button>
                   ))}
                 </div>
