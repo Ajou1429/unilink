@@ -119,7 +119,7 @@ export default function StudyPage() {
       id: Date.now().toString(),
       userId: "me",
       courseId: newPlan.courseId || "self",
-      courseName: course?.name ?? "개인 공부",
+      courseName: course?.name ?? "개인 과제",
       week: THIS_WEEK,
       title: newPlan.title.trim(),
       description: newPlan.description.trim(),
@@ -341,7 +341,7 @@ export default function StudyPage() {
                         }
                       >
                         <SelectTrigger className="w-full">
-                          <SelectValue placeholder="선택하지 않으면 개인 공부로 저장" />
+                          <SelectValue placeholder="선택하지 않으면 개인 과제로 저장" />
                         </SelectTrigger>
                         <SelectContent>
                           {courses.map((course) => (

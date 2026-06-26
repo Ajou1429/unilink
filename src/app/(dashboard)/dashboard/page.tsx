@@ -13,14 +13,19 @@ import {
   BookOpen,
   Sparkles,
   ArrowRight,
-  CheckCircle2,
   Circle,
   Clock,
+  Target,
   Users,
   TrendingUp,
 } from "lucide-react";
 import { mockCourses, mockPosts, mockStudyPlans } from "@/lib/mock-data";
 import { getStoredCourses } from "@/lib/course-storage";
+import {
+  getPersonalStudies,
+  PERSONAL_STUDIES_CHANGED_EVENT,
+  PersonalStudy,
+} from "@/lib/personal-study-storage";
 import {
   getWeeklyStudyPlans,
   saveWeeklyStudyPlans,
@@ -57,21 +62,25 @@ function getKoreanToday() {
 export default function DashboardPage() {
   const [courses, setCourses] = useState<Course[]>(mockCourses);
   const [plans, setPlans] = useState<StudyPlan[]>(mockStudyPlans);
+  const [personalStudies, setPersonalStudies] = useState<PersonalStudy[]>([]);
   const [koreanToday, setKoreanToday] = useState(getKoreanToday);
 
   useEffect(() => {
     function loadDashboardData() {
       setCourses(getStoredCourses());
       setPlans(getWeeklyStudyPlans(mockStudyPlans));
+      setPersonalStudies(getPersonalStudies());
       setKoreanToday(getKoreanToday());
     }
 
     window.setTimeout(loadDashboardData, 0);
     window.addEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
+    window.addEventListener(PERSONAL_STUDIES_CHANGED_EVENT, loadDashboardData);
     window.addEventListener("storage", loadDashboardData);
 
     return () => {
       window.removeEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
+      window.removeEventListener(PERSONAL_STUDIES_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener("storage", loadDashboardData);
     };
   }, []);
@@ -81,7 +90,6 @@ export default function DashboardPage() {
       ? course.days.includes(koreanToday.courseDayOfWeek)
       : false,
   );
-  const completedPlans = plans.filter((plan) => plan.isCompleted).length;
   const upcomingPlans = plans.filter((plan) => !plan.isCompleted).slice(0, 4);
 
   function completePlan(planId: string) {
@@ -127,9 +135,9 @@ export default function DashboardPage() {
               color: "text-violet-600 bg-violet-50",
             },
             {
-              label: "이번 주 학습 목표",
-              value: `${completedPlans}/${plans.length}`,
-              icon: CheckCircle2,
+              label: "개인 공부",
+              value: String(personalStudies.length),
+              icon: Target,
               color: "text-green-600 bg-green-50",
             },
             {
@@ -160,6 +168,7 @@ export default function DashboardPage() {
                 <CardTitle className="text-base">오늘 수업</CardTitle>
                 <Button
                   render={<Link href="/timetable" />}
+                  nativeButton={false}
                   variant="ghost"
                   size="sm"
                   className="h-7 text-xs gap-1 text-primary"
@@ -199,6 +208,7 @@ export default function DashboardPage() {
                 <CardTitle className="text-base">이번 주 학습 계획</CardTitle>
                 <Button
                   render={<Link href="/study" />}
+                  nativeButton={false}
                   variant="ghost"
                   size="sm"
                   className="h-7 text-xs gap-1 text-primary"
@@ -277,6 +287,7 @@ export default function DashboardPage() {
               <CardTitle className="text-base">커뮤니티 최신 글</CardTitle>
               <Button
                 render={<Link href="/community" />}
+                nativeButton={false}
                 variant="ghost"
                 size="sm"
                 className="h-7 text-xs gap-1 text-primary"

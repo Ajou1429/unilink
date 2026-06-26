@@ -407,7 +407,7 @@ export default function TimetablePage() {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-sm flex items-center gap-2">
-                    <Target className="h-4 w-4 text-primary" /> 개인 공부
+                    <Target className="h-4 w-4 text-primary" /> 개인 과제
                   </CardTitle>
                   <Dialog open={personalOpen} onOpenChange={setPersonalOpen}>
                     <DialogTrigger render={<Button size="sm" variant="outline" className="h-7 gap-1" />}>
@@ -415,7 +415,7 @@ export default function TimetablePage() {
                     </DialogTrigger>
                     <DialogContent className="max-w-md">
                       <DialogHeader>
-                        <DialogTitle>개인 공부 추가</DialogTitle>
+                        <DialogTitle>개인 과제 추가</DialogTitle>
                       </DialogHeader>
                       <div className="space-y-4 pt-2">
                         <div className="space-y-2">
@@ -523,7 +523,7 @@ export default function TimetablePage() {
                 ) : (
                   <div className="text-center py-5 text-muted-foreground">
                     <Award className="h-6 w-6 mx-auto mb-2 opacity-40" />
-                    <p className="text-xs">자격증이나 개인 공부를 추가하세요.</p>
+                    <p className="text-xs">자격증이나 개인 과제를 추가하세요.</p>
                   </div>
                 )}
               </CardContent>
