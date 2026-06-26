@@ -8,6 +8,7 @@ import {
   CalendarDays,
   MessageSquare,
   BookOpen,
+  FileText,
   GraduationCap,
   Settings,
   LogOut,
@@ -33,6 +34,7 @@ const navItems = [
   { href: "/timetable", icon: CalendarDays, label: "시간표" },
   { href: "/community", icon: MessageSquare, label: "커뮤니티" },
   { href: "/study", icon: BookOpen, label: "학습 플랜" },
+  { href: "/notes", icon: FileText, label: "나의 노트" },
 ];
 
 function useSidebarData() {

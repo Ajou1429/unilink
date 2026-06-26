@@ -33,6 +33,7 @@ import {
   savePersonalStudyNote,
   savePersonalStudyPlan,
 } from "@/lib/personal-study-storage";
+import { getMyNotes, MY_NOTES_CHANGED_EVENT, MyNote } from "@/lib/my-notes-storage";
 
 function formatBytes(size: number) {
   if (size < 1024) return `${size} B`;
@@ -69,6 +70,7 @@ function PersonalStudyContent() {
   const [notes, setNotes] = useState<PersonalStudyNote[]>([]);
   const [plans, setPlans] = useState<PersonalStudyPlan[]>([]);
   const [files, setFiles] = useState<PersonalStudyFile[]>([]);
+  const [linkedMyNotes, setLinkedMyNotes] = useState<MyNote[]>([]);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteContent, setNoteContent] = useState("");
   const [planTitle, setPlanTitle] = useState("");
@@ -81,6 +83,13 @@ function PersonalStudyContent() {
       setNotes(studyId ? getPersonalStudyNotes(studyId) : []);
       setPlans(studyId ? getPersonalStudyPlans(studyId) : []);
       setFiles(studyId ? getPersonalStudyFiles(studyId) : []);
+      setLinkedMyNotes(
+        studyId
+          ? getMyNotes().filter(
+              (note) => note.linkedType === "personal" && note.linkedId === studyId,
+            )
+          : [],
+      );
       setNoteTitle("");
       setNoteContent("");
       setPlanTitle("");
@@ -89,6 +98,26 @@ function PersonalStudyContent() {
     }, 0);
 
     return () => window.clearTimeout(timeout);
+  }, [studyId]);
+
+  useEffect(() => {
+    function syncLinkedNotes() {
+      setLinkedMyNotes(
+        studyId
+          ? getMyNotes().filter(
+              (note) => note.linkedType === "personal" && note.linkedId === studyId,
+            )
+          : [],
+      );
+    }
+
+    window.addEventListener(MY_NOTES_CHANGED_EVENT, syncLinkedNotes);
+    window.addEventListener("storage", syncLinkedNotes);
+
+    return () => {
+      window.removeEventListener(MY_NOTES_CHANGED_EVENT, syncLinkedNotes);
+      window.removeEventListener("storage", syncLinkedNotes);
+    };
   }, [studyId]);
 
   const study = studies.find((item) => item.id === studyId) ?? null;
@@ -236,6 +265,36 @@ function PersonalStudyContent() {
               </Card>
 
               <div className="lg:col-span-2 space-y-3">
+                {linkedMyNotes.length > 0 && (
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold text-muted-foreground">
+                      GoodNotes 연동 노트
+                    </p>
+                    {linkedMyNotes.map((note) => (
+                      <Card key={note.id} className="border-0 shadow-sm">
+                        <CardContent className="p-4">
+                          <div className="flex items-start gap-3">
+                            <Upload className="h-4 w-4 text-primary mt-1 shrink-0" />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-semibold">{note.title}</h3>
+                                <Badge variant="secondary">v{note.version}</Badge>
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {note.fileName ?? "GoodNotes PDF"} ·{" "}
+                                {new Date(note.updatedAt).toLocaleString("ko-KR")}
+                              </p>
+                              <p className="text-sm text-muted-foreground mt-3 whitespace-pre-wrap">
+                                {note.content || "내용이 비어 있습니다."}
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+
                 {notes.length > 0 ? (
                   notes.map((note) => (
                     <Card key={note.id} className="border-0 shadow-sm">
@@ -255,14 +314,14 @@ function PersonalStudyContent() {
                       </CardContent>
                     </Card>
                   ))
-                ) : (
+                ) : linkedMyNotes.length === 0 ? (
                   <Card className="border-0 shadow-sm">
                     <CardContent className="py-12 text-center text-muted-foreground">
                       <FileText className="h-8 w-8 mx-auto mb-3 opacity-30" />
                       <p className="text-sm">아직 정리한 노트가 없어요.</p>
                     </CardContent>
                   </Card>
-                )}
+                ) : null}
               </div>
             </div>
           </TabsContent>
