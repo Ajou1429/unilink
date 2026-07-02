@@ -1,4 +1,8 @@
+"use client";
+
+import { FormEvent, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,7 +13,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { GraduationCap } from "lucide-react";
+import { GraduationCap, Loader2 } from "lucide-react";
+import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 const universities = [
   "서울대학교",
@@ -29,6 +34,66 @@ const universities = [
 ];
 
 export default function SignupPage() {
+  const router = useRouter();
+  const [form, setForm] = useState({
+    name: "",
+    studentId: "",
+    university: "",
+    email: "",
+    password: "",
+    passwordConfirm: "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  function update<K extends keyof typeof form>(key: K, value: string) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setMessage(null);
+
+    if (!isSupabaseConfigured) {
+      router.push("/dashboard");
+      return;
+    }
+
+    if (form.password !== form.passwordConfirm) {
+      setError("비밀번호가 일치하지 않습니다.");
+      return;
+    }
+
+    setLoading(true);
+    const supabase = getSupabaseClient()!;
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email: form.email,
+      password: form.password,
+      options: {
+        data: {
+          name: form.name,
+          student_id: form.studentId,
+          university: form.university,
+        },
+      },
+    });
+    setLoading(false);
+
+    if (signUpError) {
+      setError(signUpError.message);
+      return;
+    }
+
+    if (data.session) {
+      router.push("/dashboard");
+      return;
+    }
+
+    setMessage("가입 확인 이메일을 보냈어요. 메일함을 확인한 뒤 로그인해주세요.");
+  }
+
   return (
     <div className="min-h-screen flex">
       <div className="hidden lg:flex lg:w-1/2 bg-primary flex-col justify-between p-12">
@@ -73,21 +138,42 @@ export default function SignupPage() {
             </Link>
           </p>
 
-          <form className="space-y-4">
+          {!isSupabaseConfigured && (
+            <p className="mb-4 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+              Supabase가 설정되지 않아 가입 없이 대시보드로 이동합니다. (개발 모드)
+            </p>
+          )}
+
+          <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="name">이름</Label>
-                <Input id="name" placeholder="홍길동" className="h-11" />
+                <Input
+                  id="name"
+                  placeholder="홍길동"
+                  className="h-11"
+                  value={form.name}
+                  onChange={(event) => update("name", event.target.value)}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="studentId">학번</Label>
-                <Input id="studentId" placeholder="20240001" className="h-11" />
+                <Input
+                  id="studentId"
+                  placeholder="20240001"
+                  className="h-11"
+                  value={form.studentId}
+                  onChange={(event) => update("studentId", event.target.value)}
+                />
               </div>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="university">대학교</Label>
-              <Select>
+              <Select
+                value={form.university}
+                onValueChange={(value) => update("university", value ?? "")}
+              >
                 <SelectTrigger className="h-11 w-full">
                   <SelectValue placeholder="학교를 선택하세요" />
                 </SelectTrigger>
@@ -108,6 +194,9 @@ export default function SignupPage() {
                 type="email"
                 placeholder="student@university.ac.kr"
                 className="h-11"
+                value={form.email}
+                onChange={(event) => update("email", event.target.value)}
+                required={isSupabaseConfigured}
               />
               <p className="text-xs text-muted-foreground">
                 학교 이메일로 가입하면 재학생 인증이 가능합니다.
@@ -121,6 +210,10 @@ export default function SignupPage() {
                 type="password"
                 placeholder="8자 이상 입력하세요"
                 className="h-11"
+                value={form.password}
+                onChange={(event) => update("password", event.target.value)}
+                required={isSupabaseConfigured}
+                minLength={isSupabaseConfigured ? 8 : undefined}
               />
             </div>
 
@@ -131,8 +224,14 @@ export default function SignupPage() {
                 type="password"
                 placeholder="비밀번호를 다시 입력하세요"
                 className="h-11"
+                value={form.passwordConfirm}
+                onChange={(event) => update("passwordConfirm", event.target.value)}
+                required={isSupabaseConfigured}
               />
             </div>
+
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            {message && <p className="text-sm text-primary">{message}</p>}
 
             <div className="pt-2">
               <p className="text-xs text-muted-foreground mb-3">
@@ -146,9 +245,10 @@ export default function SignupPage() {
                 </a>
                 에 동의하는 것으로 간주합니다.
               </p>
-              <Link href="/dashboard">
-                <Button className="w-full h-11">이메일 인증 후 가입하기</Button>
-              </Link>
+              <Button type="submit" className="w-full h-11 gap-2" disabled={loading}>
+                {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+                이메일 인증 후 가입하기
+              </Button>
             </div>
           </form>
 
@@ -163,7 +263,26 @@ export default function SignupPage() {
             </div>
           </div>
 
-          <Button variant="outline" className="w-full h-11 gap-3">
+          <Button
+            variant="outline"
+            className="w-full h-11 gap-3"
+            type="button"
+            onClick={async () => {
+              if (!isSupabaseConfigured) {
+                router.push("/dashboard");
+                return;
+              }
+              const supabase = getSupabaseClient()!;
+              const basePath =
+                process.env.NODE_ENV === "production" ? "/unilink" : "";
+              await supabase.auth.signInWithOAuth({
+                provider: "google",
+                options: {
+                  redirectTo: `${window.location.origin}${basePath}/dashboard`,
+                },
+              });
+            }}
+          >
             Google로 가입
           </Button>
         </div>

@@ -78,17 +78,16 @@ function CourseContent() {
   const [planDueDate, setPlanDueDate] = useState("");
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => {
+    const timeout = window.setTimeout(async () => {
       setCourses(getStoredCourses());
       setNotes(courseId ? getCourseNotes(courseId) : []);
       setPlans(courseId ? getCoursePlans(courseId) : []);
       setFiles(courseId ? getCourseFiles(courseId) : []);
+      const myNotes = courseId ? await getMyNotes() : [];
       setLinkedMyNotes(
-        courseId
-          ? getMyNotes().filter(
-              (note) => note.linkedType === "course" && note.linkedId === courseId,
-            )
-          : [],
+        myNotes.filter(
+          (note) => note.linkedType === "course" && note.linkedId === courseId,
+        ),
       );
       setNoteTitle("");
       setNoteContent("");
@@ -101,13 +100,12 @@ function CourseContent() {
   }, [courseId]);
 
   useEffect(() => {
-    function syncLinkedNotes() {
+    async function syncLinkedNotes() {
+      const myNotes = courseId ? await getMyNotes() : [];
       setLinkedMyNotes(
-        courseId
-          ? getMyNotes().filter(
-              (note) => note.linkedType === "course" && note.linkedId === courseId,
-            )
-          : [],
+        myNotes.filter(
+          (note) => note.linkedType === "course" && note.linkedId === courseId,
+        ),
       );
     }
 

@@ -1,0 +1,19 @@
+project_id = "unilink"
+
+[functions.google-auth]
+verify_jwt = false
+
+[functions.drive-watch]
+verify_jwt = true
+
+[functions.drive-sync]
+verify_jwt = true
+
+[functions.drive-disconnect]
+verify_jwt = true
+
+[functions.drive-webhook]
+verify_jwt = false
+
+[functions.drive-renew-channels]
+verify_jwt = false

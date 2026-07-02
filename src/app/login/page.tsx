@@ -1,10 +1,66 @@
+"use client";
+
+import { FormEvent, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { GraduationCap } from "lucide-react";
+import { GraduationCap, Loader2 } from "lucide-react";
+import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
+
+function dashboardRedirectUrl() {
+  if (typeof window === "undefined") return undefined;
+  const basePath = process.env.NODE_ENV === "production" ? "/unilink" : "";
+  return `${window.location.origin}${basePath}/dashboard`;
+}
 
 export default function LoginPage() {
+  const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+
+    if (!isSupabaseConfigured) {
+      router.push("/dashboard");
+      return;
+    }
+
+    setLoading(true);
+    const supabase = getSupabaseClient()!;
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    setLoading(false);
+
+    if (signInError) {
+      setError(signInError.message);
+      return;
+    }
+    router.push("/dashboard");
+  }
+
+  async function handleGoogleLogin() {
+    if (!isSupabaseConfigured) {
+      router.push("/dashboard");
+      return;
+    }
+
+    setError(null);
+    const supabase = getSupabaseClient()!;
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: dashboardRedirectUrl() },
+    });
+    if (oauthError) setError(oauthError.message);
+  }
+
   return (
     <div className="min-h-screen flex">
       <div className="hidden lg:flex lg:w-1/2 bg-primary flex-col justify-between p-12">
@@ -50,7 +106,13 @@ export default function LoginPage() {
             </Link>
           </p>
 
-          <form className="space-y-4">
+          {!isSupabaseConfigured && (
+            <p className="mb-4 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+              Supabase가 설정되지 않아 로그인 없이 대시보드로 이동합니다. (개발 모드)
+            </p>
+          )}
+
+          <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-2">
               <Label htmlFor="email">이메일</Label>
               <Input
@@ -58,6 +120,9 @@ export default function LoginPage() {
                 type="email"
                 placeholder="university@school.ac.kr"
                 className="h-11"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required={isSupabaseConfigured}
               />
             </div>
             <div className="space-y-2">
@@ -72,11 +137,16 @@ export default function LoginPage() {
                 type="password"
                 placeholder="비밀번호를 입력하세요"
                 className="h-11"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required={isSupabaseConfigured}
               />
             </div>
-            <Link href="/dashboard">
-              <Button className="w-full h-11 mt-2">로그인</Button>
-            </Link>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <Button type="submit" className="w-full h-11 mt-2 gap-2" disabled={loading}>
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+              로그인
+            </Button>
           </form>
 
           <div className="relative my-6">
@@ -89,7 +159,12 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-3">
-            <Button variant="outline" className="w-full h-11 gap-3">
+            <Button
+              variant="outline"
+              className="w-full h-11 gap-3"
+              onClick={handleGoogleLogin}
+              type="button"
+            >
               <svg className="h-5 w-5" viewBox="0 0 24 24">
                 <path
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -110,7 +185,7 @@ export default function LoginPage() {
               </svg>
               Google로 로그인
             </Button>
-            <Button variant="outline" className="w-full h-11 gap-3">
+            <Button variant="outline" className="w-full h-11 gap-3" type="button" disabled>
               카카오로 로그인
             </Button>
           </div>

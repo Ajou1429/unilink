@@ -27,17 +27,22 @@ import {
   Cloud,
   Clock,
   FileText,
+  FolderOpen,
+  Link2,
+  Loader2,
   Plus,
   RefreshCw,
   Search,
+  Unlink,
   Upload,
 } from "lucide-react";
 import { getStoredCourses } from "@/lib/course-storage";
 import {
+  addNote,
   getMyNotes,
   MyNote,
   NoteSource,
-  saveMyNotes,
+  updateNoteClassification,
   upsertGoodNotesDriveFiles,
 } from "@/lib/my-notes-storage";
 import {
@@ -45,6 +50,15 @@ import {
   PersonalStudy,
 } from "@/lib/personal-study-storage";
 import { Course } from "@/lib/types";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
+import {
+  DriveConnectionStatus,
+  disconnectDrive,
+  enableRealtimeWatch,
+  getDriveConnectionStatus,
+  startDriveConnection,
+  syncDriveFolder,
+} from "@/lib/drive-connection";
 
 const NOTE_SOURCES: NoteSource[] = [
   "GoodNotes",
@@ -88,12 +102,50 @@ export default function NotesPage() {
     fileSize: 0,
   });
 
+  const [driveStatus, setDriveStatus] = useState<DriveConnectionStatus | null>(null);
+  const [driveFolderInput, setDriveFolderInput] = useState("");
+  const [driveBusy, setDriveBusy] = useState(false);
+  const [driveMessage, setDriveMessage] = useState<string | null>(null);
+
+  async function loadNotes() {
+    setNotes(await getMyNotes());
+  }
+
+  async function loadDriveStatus() {
+    if (!isSupabaseConfigured) return;
+    const status = await getDriveConnectionStatus();
+    setDriveStatus(status);
+    if (status.folderId) setDriveFolderInput(status.folderId);
+  }
+
   useEffect(() => {
-    window.setTimeout(() => {
-      setNotes(getMyNotes());
-      setCourses(getStoredCourses());
-      setPersonalStudies(getPersonalStudies());
-    }, 0);
+    loadNotes();
+    setCourses(getStoredCourses());
+    setPersonalStudies(getPersonalStudies());
+    loadDriveStatus();
+
+    if (typeof window !== "undefined" && isSupabaseConfigured) {
+      const params = new URLSearchParams(window.location.search);
+      const driveParam = params.get("drive");
+      if (driveParam === "connected") {
+        setDriveMessage("Google Drive 연결에 성공했습니다.");
+      } else if (driveParam === "error") {
+        setDriveMessage(
+          `Google Drive 연결에 실패했습니다. (${params.get("reason") ?? "알 수 없는 오류"})`,
+        );
+      }
+      if (driveParam) {
+        params.delete("drive");
+        params.delete("reason");
+        const query = params.toString();
+        window.history.replaceState(
+          {},
+          "",
+          window.location.pathname + (query ? `?${query}` : ""),
+        );
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filteredNotes = useMemo(() => {
@@ -113,11 +165,6 @@ export default function NotesPage() {
   const syncedCount = notes.filter((note) => note.syncStatus === "synced").length;
   const assignedCount = notes.filter((note) => note.linkedType !== "unassigned").length;
 
-  function persistNotes(nextNotes: MyNote[]) {
-    setNotes(nextNotes);
-    saveMyNotes(nextNotes);
-  }
-
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -130,10 +177,9 @@ export default function NotesPage() {
     }));
   }
 
-  function addNote() {
+  async function handleAddNote() {
     if (!newNote.title.trim()) return;
 
-    const now = new Date().toISOString();
     const course = courses.find((item) => item.id === newNote.linkedId);
     const personalStudy = personalStudies.find((item) => item.id === newNote.linkedId);
     const linkedTitle =
@@ -142,33 +188,24 @@ export default function NotesPage() {
         : newNote.linkedType === "personal"
           ? personalStudy?.title
           : undefined;
-    const note: MyNote = {
-      id: Date.now().toString(),
+
+    await addNote({
       title: newNote.title.trim(),
-      courseName: (linkedTitle ?? newNote.courseName) || "미분류",
+      courseName: newNote.courseName,
       linkedType: newNote.linkedType,
       linkedId: newNote.linkedId || undefined,
       linkedTitle,
       source: newNote.source,
-      syncStatus: newNote.source === "직접 작성" ? "manual" : "synced",
       content: newNote.content.trim(),
       fileName: newNote.fileName || undefined,
       fileSize: newNote.fileSize || undefined,
-      driveFileId:
-        newNote.source === "GoodNotes" && newNote.fileName
-          ? `manual-${newNote.fileName}`
-          : undefined,
-      driveModifiedTime: newNote.source === "GoodNotes" ? now : undefined,
-      version: 1,
       tags: newNote.tags
         .split(",")
         .map((tag) => tag.trim())
         .filter(Boolean),
-      createdAt: now,
-      updatedAt: now,
-    };
+    });
 
-    persistNotes([note, ...notes]);
+    await loadNotes();
     setOpen(false);
     setNewNote({
       title: "",
@@ -183,8 +220,28 @@ export default function NotesPage() {
     });
   }
 
-  function refreshSync() {
+  async function refreshSync() {
     const now = new Date().toISOString();
+
+    if (isSupabaseConfigured) {
+      setDriveBusy(true);
+      setDriveMessage(null);
+      try {
+        const result = await syncDriveFolder(driveFolderInput || undefined);
+        setLastSyncAt(result.syncedAt);
+        setDriveMessage(
+          `동기화 완료: PDF ${result.filesFound}개 중 ${result.upserted}개 반영`,
+        );
+        await loadNotes();
+        await loadDriveStatus();
+      } catch (error) {
+        setDriveMessage(error instanceof Error ? error.message : "동기화 실패");
+      } finally {
+        setDriveBusy(false);
+      }
+      return;
+    }
+
     const syncedNotes = upsertGoodNotesDriveFiles([
       {
         driveFileId: "drive-goodnotes-os-week7",
@@ -204,10 +261,49 @@ export default function NotesPage() {
       },
     ]);
     setLastSyncAt(now);
-    setNotes(syncedNotes);
+    if (syncedNotes) setNotes(syncedNotes);
   }
 
-  function updateNoteAssignment(noteId: string, linkedType: MyNote["linkedType"], linkedId: string) {
+  async function handleConnectDrive() {
+    setDriveBusy(true);
+    setDriveMessage(null);
+    try {
+      await startDriveConnection();
+    } catch (error) {
+      setDriveMessage(error instanceof Error ? error.message : "연결 시작에 실패했습니다.");
+      setDriveBusy(false);
+    }
+  }
+
+  async function handleDisconnectDrive() {
+    setDriveBusy(true);
+    setDriveMessage(null);
+    try {
+      await disconnectDrive();
+      await loadDriveStatus();
+      setDriveMessage("Google Drive 연결을 해제했습니다.");
+    } catch (error) {
+      setDriveMessage(error instanceof Error ? error.message : "연결 해제에 실패했습니다.");
+    } finally {
+      setDriveBusy(false);
+    }
+  }
+
+  async function handleEnableRealtime() {
+    setDriveBusy(true);
+    setDriveMessage(null);
+    try {
+      await enableRealtimeWatch();
+      await loadDriveStatus();
+      setDriveMessage("실시간 동기화를 켰습니다. 이제 Drive 변경이 자동으로 반영됩니다.");
+    } catch (error) {
+      setDriveMessage(error instanceof Error ? error.message : "실시간 동기화 활성화 실패");
+    } finally {
+      setDriveBusy(false);
+    }
+  }
+
+  async function updateNoteAssignment(noteId: string, linkedType: MyNote["linkedType"], linkedId: string) {
     const course = courses.find((item) => item.id === linkedId);
     const personalStudy = personalStudies.find((item) => item.id === linkedId);
     const linkedTitle =
@@ -217,20 +313,13 @@ export default function NotesPage() {
           ? personalStudy?.title
           : undefined;
 
-    persistNotes(
-      notes.map((note) =>
-        note.id === noteId
-          ? {
-              ...note,
-              linkedType,
-              linkedId: linkedId || undefined,
-              linkedTitle,
-              courseName: linkedTitle ?? "미분류",
-              updatedAt: new Date().toISOString(),
-            }
-          : note,
-      ),
+    const nextNotes = await updateNoteClassification(
+      noteId,
+      linkedType,
+      linkedId || undefined,
+      linkedTitle,
     );
+    setNotes(nextNotes);
   }
 
   return (
@@ -397,7 +486,7 @@ export default function NotesPage() {
                           }
                         />
                       </div>
-                      <Button onClick={addNote} className="w-full">
+                      <Button onClick={handleAddNote} className="w-full">
                         저장하기
                       </Button>
                     </div>
@@ -430,8 +519,18 @@ export default function NotesPage() {
                   <Cloud className="h-5 w-5 text-primary" />
                   필기앱 연동
                 </CardTitle>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={refreshSync}>
-                  <RefreshCw className="h-3.5 w-3.5" />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  onClick={refreshSync}
+                  disabled={driveBusy}
+                >
+                  {driveBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
                   Drive 변경 반영
                 </Button>
               </div>
@@ -441,23 +540,114 @@ export default function NotesPage() {
               </p>
             </CardHeader>
             <CardContent className="space-y-3">
-              {["GoodNotes", "iCloud Drive", "Google Drive"].map((provider) => (
-                <div
-                  key={provider}
-                  className="flex items-center justify-between rounded-lg border p-3"
-                >
-                  <div>
-                    <p className="text-sm font-medium">{provider}</p>
-                    <p className="text-xs text-muted-foreground">
-                      변경 감지 후 UniLink 노트로 자동 반영
-                    </p>
+              {!isSupabaseConfigured ? (
+                <>
+                  {["GoodNotes", "iCloud Drive", "Google Drive"].map((provider) => (
+                    <div
+                      key={provider}
+                      className="flex items-center justify-between rounded-lg border p-3"
+                    >
+                      <div>
+                        <p className="text-sm font-medium">{provider}</p>
+                        <p className="text-xs text-muted-foreground">
+                          변경 감지 후 UniLink 노트로 자동 반영
+                        </p>
+                      </div>
+                      <Badge variant="secondary" className="gap-1">
+                        <CheckCircle2 className="h-3 w-3" />
+                        준비됨
+                      </Badge>
+                    </div>
+                  ))}
+                  <p className="text-xs text-muted-foreground">
+                    (개발 모드: Supabase가 설정되지 않아 실제 연동 대신 로컬 목업으로
+                    동작합니다. .env.local.example 참고)
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between rounded-lg border p-3">
+                    <div>
+                      <p className="text-sm font-medium">Google Drive</p>
+                      <p className="text-xs text-muted-foreground">
+                        {driveStatus?.connected
+                          ? "계정이 연결되어 있습니다"
+                          : "아직 연결되지 않았습니다"}
+                      </p>
+                    </div>
+                    {driveStatus?.connected ? (
+                      <Badge variant="secondary" className="gap-1">
+                        <CheckCircle2 className="h-3 w-3" />
+                        연결됨
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline">연결 안 됨</Badge>
+                    )}
                   </div>
-                  <Badge variant="secondary" className="gap-1">
-                    <CheckCircle2 className="h-3 w-3" />
-                    준비됨
-                  </Badge>
-                </div>
-              ))}
+
+                  {driveStatus?.connected ? (
+                    <div className="space-y-2">
+                      <Label className="text-xs">GoodNotes 백업 폴더 ID / 링크</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          className="h-9"
+                          placeholder="Drive 폴더 링크 또는 ID를 붙여넣으세요"
+                          value={driveFolderInput}
+                          onChange={(event) => setDriveFolderInput(event.target.value)}
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="shrink-0 gap-1.5"
+                          onClick={refreshSync}
+                          disabled={driveBusy || !driveFolderInput}
+                        >
+                          <FolderOpen className="h-3.5 w-3.5" />
+                          지정 & 동기화
+                        </Button>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {!driveStatus.channelActive && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5"
+                            onClick={handleEnableRealtime}
+                            disabled={driveBusy || !driveStatus.folderId}
+                          >
+                            <Link2 className="h-3.5 w-3.5" />
+                            실시간 동기화 켜기
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1.5 text-destructive"
+                          onClick={handleDisconnectDrive}
+                          disabled={driveBusy}
+                        >
+                          <Unlink className="h-3.5 w-3.5" />
+                          연결 해제
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Button
+                      className="w-full gap-2"
+                      onClick={handleConnectDrive}
+                      disabled={driveBusy}
+                    >
+                      <Link2 className="h-4 w-4" />
+                      Google Drive 연결하기
+                    </Button>
+                  )}
+
+                  {driveMessage && (
+                    <p className="text-xs text-muted-foreground">{driveMessage}</p>
+                  )}
+                </>
+              )}
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Clock className="h-3.5 w-3.5" />
                 마지막 확인: {formatDate(lastSyncAt)}

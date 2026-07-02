@@ -78,17 +78,16 @@ function PersonalStudyContent() {
   const [planDueDate, setPlanDueDate] = useState("");
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => {
+    const timeout = window.setTimeout(async () => {
       setStudies(getPersonalStudies());
       setNotes(studyId ? getPersonalStudyNotes(studyId) : []);
       setPlans(studyId ? getPersonalStudyPlans(studyId) : []);
       setFiles(studyId ? getPersonalStudyFiles(studyId) : []);
+      const myNotes = studyId ? await getMyNotes() : [];
       setLinkedMyNotes(
-        studyId
-          ? getMyNotes().filter(
-              (note) => note.linkedType === "personal" && note.linkedId === studyId,
-            )
-          : [],
+        myNotes.filter(
+          (note) => note.linkedType === "personal" && note.linkedId === studyId,
+        ),
       );
       setNoteTitle("");
       setNoteContent("");
@@ -101,13 +100,12 @@ function PersonalStudyContent() {
   }, [studyId]);
 
   useEffect(() => {
-    function syncLinkedNotes() {
+    async function syncLinkedNotes() {
+      const myNotes = studyId ? await getMyNotes() : [];
       setLinkedMyNotes(
-        studyId
-          ? getMyNotes().filter(
-              (note) => note.linkedType === "personal" && note.linkedId === studyId,
-            )
-          : [],
+        myNotes.filter(
+          (note) => note.linkedType === "personal" && note.linkedId === studyId,
+        ),
       );
     }
 
