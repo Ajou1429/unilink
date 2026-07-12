@@ -4,6 +4,7 @@ import { ChangeEvent, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
+import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -287,6 +288,9 @@ function PersonalStudyContent() {
                               <p className="text-sm text-muted-foreground mt-3 whitespace-pre-wrap">
                                 {note.content || "내용이 비어 있습니다."}
                               </p>
+                              <div className="mt-3">
+                                <NoteViewerDialog note={note} />
+                              </div>
                             </div>
                           </div>
                         </CardContent>

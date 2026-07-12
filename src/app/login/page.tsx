@@ -1,10 +1,37 @@
+"use client";
+
+import { FormEvent, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GraduationCap } from "lucide-react";
+import { loginWithPassword } from "@/lib/auth-storage";
 
 export default function LoginPage() {
+  const router = useRouter();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setMessage("");
+
+    const result = await loginWithPassword(username, password);
+    setIsSubmitting(false);
+
+    if (!result.ok) {
+      setMessage(result.message);
+      return;
+    }
+
+    router.push("/dashboard");
+  }
+
   return (
     <div className="min-h-screen flex">
       <div className="hidden lg:flex lg:w-1/2 bg-primary flex-col justify-between p-12">
@@ -13,70 +40,78 @@ export default function LoginPage() {
           <span className="text-2xl font-bold">UniLink</span>
         </div>
         <div className="text-white">
-          <blockquote className="text-2xl font-medium leading-relaxed mb-4">
-            &ldquo;같은 강의, 같은 고민을 가진 친구들과 함께하니 대학생활이
-            훨씬 또렷해졌어요.&rdquo;
+          <blockquote className="mb-4 text-2xl font-medium leading-relaxed">
+            &ldquo;같은 수업을 듣는 친구들과 시간표, 노트, 학습 계획을 한 곳에서
+            관리하세요.&rdquo;
           </blockquote>
           <p className="text-primary-foreground/70">
-            UniLink 사용자, 연세대학교 컴퓨터과학과
+            UniLink는 대학생을 위한 수업 커뮤니티와 학습 관리 공간입니다.
           </p>
         </div>
         <div className="grid grid-cols-3 gap-4">
           {[
-            { value: "50+", label: "연동 대학" },
-            { value: "12만", label: "사용자" },
-            { value: "4.9점", label: "앱 평점" },
-          ].map((s) => (
-            <div key={s.label} className="text-white">
-              <div className="text-2xl font-bold">{s.value}</div>
-              <div className="text-primary-foreground/70 text-sm">{s.label}</div>
+            { value: "7일", label: "주간 시간표" },
+            { value: "PDF", label: "강의 노트" },
+            { value: "AI", label: "학습 코칭 준비" },
+          ].map((item) => (
+            <div key={item.label} className="text-white">
+              <div className="text-2xl font-bold">{item.value}</div>
+              <div className="text-sm text-primary-foreground/70">{item.label}</div>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="flex-1 flex items-center justify-center p-8">
+      <div className="flex flex-1 items-center justify-center p-8">
         <div className="w-full max-w-md">
-          <div className="lg:hidden flex items-center gap-2 text-primary mb-8">
+          <div className="mb-8 flex items-center gap-2 text-primary lg:hidden">
             <GraduationCap className="h-6 w-6" />
             <span className="text-xl font-bold">UniLink</span>
           </div>
 
-          <h1 className="text-2xl font-bold mb-2">다시 만나서 반가워요</h1>
-          <p className="text-muted-foreground mb-8">
-            계정이 없으신가요?{" "}
-            <Link href="/signup" className="text-primary font-medium hover:underline">
+          <h1 className="mb-2 text-2xl font-bold">로그인</h1>
+          <p className="mb-8 text-muted-foreground">
+            계정이 없나요?{" "}
+            <Link href="/signup" className="font-medium text-primary hover:underline">
               회원가입
             </Link>
           </p>
 
-          <form className="space-y-4">
+          <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-2">
-              <Label htmlFor="email">이메일</Label>
+              <Label htmlFor="username">아이디</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="university@school.ac.kr"
+                id="username"
+                autoComplete="username"
+                placeholder="아이디를 입력하세요"
                 className="h-11"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
               />
             </div>
             <div className="space-y-2">
               <div className="flex justify-between">
                 <Label htmlFor="password">비밀번호</Label>
-                <a href="#" className="text-sm text-primary hover:underline">
-                  비밀번호 찾기
-                </a>
+                <span className="text-sm text-muted-foreground">인증 절차는 추후 추가</span>
               </div>
               <Input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 placeholder="비밀번호를 입력하세요"
                 className="h-11"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
               />
             </div>
-            <Link href="/dashboard">
-              <Button className="w-full h-11 mt-2">로그인</Button>
-            </Link>
+            {message && (
+              <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">
+                {message}
+              </p>
+            )}
+            <Button className="mt-2 h-11 w-full" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "로그인 중..." : "로그인"}
+            </Button>
           </form>
 
           <div className="relative my-6">
@@ -89,7 +124,7 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-3">
-            <Button variant="outline" className="w-full h-11 gap-3">
+            <Button variant="outline" className="h-11 w-full gap-3">
               <svg className="h-5 w-5" viewBox="0 0 24 24">
                 <path
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -110,7 +145,7 @@ export default function LoginPage() {
               </svg>
               Google로 로그인
             </Button>
-            <Button variant="outline" className="w-full h-11 gap-3">
+            <Button variant="outline" className="h-11 w-full gap-3">
               카카오로 로그인
             </Button>
           </div>

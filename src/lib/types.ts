@@ -61,6 +61,7 @@ export interface StudyPlan {
   courseId: string;
   courseName: string;
   week: number;
+  weekStart?: string;
   title: string;
   description: string;
   dueDate: string;
