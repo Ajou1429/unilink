@@ -32,6 +32,11 @@ import {
   STUDY_PLANS_CHANGED_EVENT,
 } from "@/lib/study-storage";
 import { Course, DayOfWeek, StudyPlan } from "@/lib/types";
+import {
+  AUTH_CHANGED_EVENT,
+  getCurrentUser,
+  type CurrentUser,
+} from "@/lib/auth-storage";
 
 const recentPosts = mockPosts.slice(0, 3);
 const KOREA_TIME_ZONE = "Asia/Seoul";
@@ -83,6 +88,7 @@ export default function DashboardPage() {
   const [plans, setPlans] = useState<StudyPlan[]>(mockStudyPlans);
   const [personalStudies, setPersonalStudies] = useState<PersonalStudy[]>([]);
   const [koreanToday, setKoreanToday] = useState(getKoreanToday);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
 
   useEffect(() => {
     function loadDashboardData() {
@@ -90,16 +96,19 @@ export default function DashboardPage() {
       setPlans(getWeeklyStudyPlans(mockStudyPlans));
       setPersonalStudies(getPersonalStudies());
       setKoreanToday(getKoreanToday());
+      setCurrentUser(getCurrentUser());
     }
 
     window.setTimeout(loadDashboardData, 0);
     window.addEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
     window.addEventListener(PERSONAL_STUDIES_CHANGED_EVENT, loadDashboardData);
+    window.addEventListener(AUTH_CHANGED_EVENT, loadDashboardData);
     window.addEventListener("storage", loadDashboardData);
 
     return () => {
       window.removeEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener(PERSONAL_STUDIES_CHANGED_EVENT, loadDashboardData);
+      window.removeEventListener(AUTH_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener("storage", loadDashboardData);
     };
   }, []);
@@ -117,6 +126,11 @@ export default function DashboardPage() {
         (plan.weekStart ?? currentWeekStartKey) === currentWeekStartKey,
     )
     .slice(0, 4);
+  const displayName = currentUser?.username ?? "게스트";
+  const schoolLabel =
+    currentUser && (currentUser.university || currentUser.department)
+      ? `${currentUser.university} ${currentUser.department}`.trim()
+      : "로그인 후 회원 정보의 학과가 표시됩니다";
 
   function completePlan(planId: string) {
     const nextPlans = plans.map((plan) =>
@@ -132,9 +146,9 @@ export default function DashboardPage() {
       <div className="flex-1 p-6 space-y-6 max-w-6xl mx-auto w-full">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold">안녕하세요, 이지민님</h2>
+            <h2 className="text-2xl font-bold">안녕하세요, {displayName}님</h2>
             <p className="text-muted-foreground mt-1">
-              2024년 1학기 · 연세대학교 컴퓨터과학과
+              2024년 1학기 · {schoolLabel}
             </p>
           </div>
           <Badge

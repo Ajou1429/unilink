@@ -3,6 +3,7 @@ import { getSupabaseBrowserClient } from "./supabase-client";
 
 export const USERS_STORAGE_KEY = "unilink:users";
 export const CURRENT_USER_STORAGE_KEY = "unilink:current-user";
+export const AUTH_CHANGED_EVENT = "unilink:authChanged";
 
 export interface StoredUser {
   id: string;
@@ -102,6 +103,7 @@ async function hashPassword(password: string, salt: string) {
 function setCurrentUser(user: CurrentUser) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(user));
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }
 
 function setCurrentStoredUser(user: StoredUser) {
@@ -172,6 +174,7 @@ export function logout() {
   }
 
   window.localStorage.removeItem(CURRENT_USER_STORAGE_KEY);
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }
 
 export async function signupWithPassword(input: SignupInput) {

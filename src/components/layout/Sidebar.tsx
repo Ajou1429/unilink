@@ -28,6 +28,11 @@ import {
   PersonalStudy,
   PERSONAL_STUDIES_CHANGED_EVENT,
 } from "@/lib/personal-study-storage";
+import {
+  AUTH_CHANGED_EVENT,
+  getCurrentUser,
+  type CurrentUser,
+} from "@/lib/auth-storage";
 
 const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
@@ -68,6 +73,28 @@ export function Sidebar() {
   const activeCourseId = searchParams.get("courseId");
   const activeStudyId = searchParams.get("studyId");
   const { courses, personalStudies } = useSidebarData();
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+
+  useEffect(() => {
+    function syncUser() {
+      setCurrentUser(getCurrentUser());
+    }
+
+    syncUser();
+    window.addEventListener(AUTH_CHANGED_EVENT, syncUser);
+    window.addEventListener("storage", syncUser);
+
+    return () => {
+      window.removeEventListener(AUTH_CHANGED_EVENT, syncUser);
+      window.removeEventListener("storage", syncUser);
+    };
+  }, []);
+
+  const displayName = currentUser?.username ?? "게스트";
+  const schoolLabel =
+    currentUser && (currentUser.university || currentUser.department)
+      ? `${currentUser.university} ${currentUser.department}`.trim()
+      : "로그인 후 학과가 표시됩니다";
 
   return (
     <aside className="fixed left-0 top-0 bottom-0 w-60 bg-white border-r flex flex-col z-40">
@@ -80,14 +107,12 @@ export function Sidebar() {
         <div className="flex items-center gap-3">
           <Avatar className="h-9 w-9">
             <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
-              이지
+              {displayName.slice(0, 2).toUpperCase()}
             </AvatarFallback>
           </Avatar>
           <div className="min-w-0">
-            <p className="text-sm font-medium truncate">이지민</p>
-            <p className="text-xs text-muted-foreground truncate">
-              연세대학교 컴퓨터과학과
-            </p>
+            <p className="text-sm font-medium truncate">{displayName}</p>
+            <p className="text-xs text-muted-foreground truncate">{schoolLabel}</p>
           </div>
         </div>
         <div className="mt-3">
