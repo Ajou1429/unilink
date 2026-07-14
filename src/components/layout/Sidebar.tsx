@@ -14,6 +14,7 @@ import {
   LogOut,
   Sparkles,
   Target,
+  Award,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -40,6 +41,7 @@ const navItems = [
   { href: "/community", icon: MessageSquare, label: "커뮤니티" },
   { href: "/study", icon: BookOpen, label: "학습 플랜" },
   { href: "/notes", icon: FileText, label: "나의 노트" },
+  { href: "/records", icon: Award, label: "성적 및 스펙" },
 ];
 
 function useSidebarData() {
