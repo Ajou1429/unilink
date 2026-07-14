@@ -16,12 +16,15 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { Award, BookOpen, Briefcase, Plus, Target } from "lucide-react";
+import { Award, BookOpen, Briefcase, Plus, Target, Trash2 } from "lucide-react";
 import {
   COURSES_CHANGED_EVENT,
   getStoredCourses,
 } from "@/lib/course-storage";
-import { getCurrentAcademicTermLabel } from "@/lib/academic-term";
+import {
+  getAcademicTermOptions,
+  getCurrentAcademicTermLabel,
+} from "@/lib/academic-term";
 import {
   getGradeRecords,
   getSpecRecords,
@@ -44,6 +47,20 @@ const STATUS_LABELS: Record<SpecRecord["status"], string> = {
   "in-progress": "진행 중",
   done: "완료",
 };
+const COURSE_TYPE_LABELS: Record<NonNullable<GradeRecord["courseType"]>, string> = {
+  major: "전공",
+  "non-major": "비전공",
+};
+const SPEC_CATEGORY_LABELS: Record<SpecRecord["category"], string> = {
+  certificate: "자격증",
+  competition: "공모전",
+  experience: "기타 경험",
+};
+const AWARD_STATUS_LABELS: Record<SpecRecord["awardStatus"], string> = {
+  awarded: "수상",
+  "not-awarded": "미수상",
+  "not-applicable": "수상 활동 아님",
+};
 
 function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -65,6 +82,12 @@ function getGradePoint(grade: string) {
   return points[grade];
 }
 
+function getSpecCategoryFromText(category: string): SpecRecord["category"] {
+  if (category.includes("자격")) return "certificate";
+  if (category.includes("공모")) return "competition";
+  return "experience";
+}
+
 export default function RecordsPage() {
   const currentTerm = getCurrentAcademicTermLabel();
   const [courses, setCourses] = useState<Course[]>([]);
@@ -75,8 +98,8 @@ export default function RecordsPage() {
   const [gradeMessage, setGradeMessage] = useState("");
   const [specMessage, setSpecMessage] = useState("");
   const [newGrade, setNewGrade] = useState({
-    term: currentTerm,
     courseId: "custom",
+    courseType: "major" as NonNullable<GradeRecord["courseType"]>,
     courseName: "",
     credits: "3",
     grade: "미정",
@@ -86,15 +109,17 @@ export default function RecordsPage() {
   const [newSpec, setNewSpec] = useState({
     personalStudyId: "custom",
     title: "",
-    category: "",
+    category: "certificate" as SpecRecord["category"],
     status: "planned" as SpecRecord["status"],
+    awardStatus: "not-applicable" as SpecRecord["awardStatus"],
+    awardRank: "",
     completedAt: "",
     memo: "",
   });
 
   useEffect(() => {
     function syncData() {
-      setCourses(getStoredCourses());
+      setCourses(getStoredCourses(selectedTerm));
       setPersonalStudies(getPersonalStudies());
       setGradeRecords(getGradeRecords());
       setSpecRecords(getSpecRecords());
@@ -112,11 +137,13 @@ export default function RecordsPage() {
       window.removeEventListener(RECORDS_CHANGED_EVENT, syncData);
       window.removeEventListener("storage", syncData);
     };
-  }, []);
+  }, [selectedTerm]);
 
   const terms = useMemo(() => {
-    const values = new Set([currentTerm, ...gradeRecords.map((record) => record.term)]);
-    return Array.from(values);
+    return getAcademicTermOptions(
+      new Date(),
+      gradeRecords.map((record) => record.term),
+    );
   }, [currentTerm, gradeRecords]);
 
   const currentGrades = gradeRecords.filter((record) => record.term === selectedTerm);
@@ -129,6 +156,12 @@ export default function RecordsPage() {
   );
   const unlinkedStudies = personalStudies.filter(
     (study) => !linkedStudyIds.has(study.id),
+  );
+  const selectedNewGradeCourse = courses.find(
+    (course) => course.id === newGrade.courseId,
+  );
+  const selectedNewSpecStudy = personalStudies.find(
+    (study) => study.id === newSpec.personalStudyId,
   );
   const gradedCredits = currentGrades.reduce(
     (sum, record) => sum + Number(record.credits || 0),
@@ -160,6 +193,7 @@ export default function RecordsPage() {
       id: makeId("grade"),
       term: selectedTerm,
       courseId: course.id,
+      courseType: course.courseType ?? "major",
       courseName: course.name,
       credits: course.credits,
       grade: "미정",
@@ -181,6 +215,7 @@ export default function RecordsPage() {
       id: makeId("grade"),
       term: selectedTerm,
       courseId: course.id,
+      courseType: course.courseType ?? "major",
       courseName: course.name,
       credits: course.credits,
       grade: "미정",
@@ -207,8 +242,9 @@ export default function RecordsPage() {
     const now = new Date().toISOString();
     const record: GradeRecord = {
       id: makeId("grade"),
-      term: newGrade.term.trim() || selectedTerm,
+      term: selectedTerm,
       courseId: linkedCourse?.id,
+      courseType: linkedCourse?.courseType ?? newGrade.courseType,
       courseName,
       credits: Number(newGrade.credits) || linkedCourse?.credits || 0,
       grade: newGrade.grade,
@@ -221,8 +257,8 @@ export default function RecordsPage() {
     persistGrades([record, ...gradeRecords]);
     setSelectedTerm(record.term);
     setNewGrade({
-      term: record.term,
       courseId: "custom",
+      courseType: "major",
       courseName: "",
       credits: "3",
       grade: "미정",
@@ -242,14 +278,26 @@ export default function RecordsPage() {
     );
   }
 
+  function removeGrade(id: string) {
+    const target = gradeRecords.find((record) => record.id === id);
+    persistGrades(gradeRecords.filter((record) => record.id !== id));
+    setGradeMessage(
+      target
+        ? `${target.courseName} 성적 항목이 삭제되었습니다.`
+        : "성적 항목이 삭제되었습니다.",
+    );
+  }
+
   function addStudySpec(study: PersonalStudy) {
     const now = new Date().toISOString();
     const record: SpecRecord = {
       id: makeId("spec"),
       personalStudyId: study.id,
       title: study.title,
-      category: study.category,
+      category: getSpecCategoryFromText(study.category),
       status: "in-progress",
+      awardStatus: "not-applicable",
+      awardRank: "",
       completedAt: "",
       memo: study.goal,
       createdAt: now,
@@ -268,8 +316,10 @@ export default function RecordsPage() {
       id: makeId("spec"),
       personalStudyId: study.id,
       title: study.title,
-      category: study.category,
+      category: getSpecCategoryFromText(study.category),
       status: "in-progress",
+      awardStatus: "not-applicable",
+      awardRank: "",
       completedAt: "",
       memo: study.goal,
       createdAt: now,
@@ -297,8 +347,13 @@ export default function RecordsPage() {
       id: makeId("spec"),
       personalStudyId: linkedStudy?.id,
       title,
-      category: linkedStudy?.category ?? newSpec.category.trim(),
+      category: linkedStudy
+        ? getSpecCategoryFromText(linkedStudy.category)
+        : newSpec.category,
       status: newSpec.status,
+      awardStatus: newSpec.awardStatus,
+      awardRank:
+        newSpec.awardStatus === "awarded" ? newSpec.awardRank.trim() : "",
       completedAt: newSpec.completedAt,
       memo: linkedStudy?.goal || newSpec.memo.trim(),
       createdAt: now,
@@ -309,8 +364,10 @@ export default function RecordsPage() {
     setNewSpec({
       personalStudyId: "custom",
       title: "",
-      category: "",
+      category: "certificate",
       status: "planned",
+      awardStatus: "not-applicable",
+      awardRank: "",
       completedAt: "",
       memo: "",
     });
@@ -324,6 +381,16 @@ export default function RecordsPage() {
           ? { ...record, ...patch, updatedAt: new Date().toISOString() }
           : record,
       ),
+    );
+  }
+
+  function removeSpec(id: string) {
+    const target = specRecords.find((record) => record.id === id);
+    persistSpecs(specRecords.filter((record) => record.id !== id));
+    setSpecMessage(
+      target
+        ? `${target.title} 스펙 항목이 삭제되었습니다.`
+        : "스펙 항목이 삭제되었습니다.",
     );
   }
 
@@ -432,6 +499,7 @@ export default function RecordsPage() {
                           <div className="min-w-0">
                             <p className="truncate font-medium">{course.name}</p>
                             <p className="text-xs text-muted-foreground">
+                              {COURSE_TYPE_LABELS[course.courseType ?? "major"]} ·{" "}
                               {course.credits}학점 · {course.days.join(", ")}
                             </p>
                           </div>
@@ -456,12 +524,21 @@ export default function RecordsPage() {
                   <div className="grid gap-3 md:grid-cols-3">
                     <div className="space-y-2">
                       <Label>학기</Label>
-                      <Input
-                        value={newGrade.term}
-                        onChange={(event) =>
-                          setNewGrade((prev) => ({ ...prev, term: event.target.value }))
-                        }
-                      />
+                      <Select
+                        value={selectedTerm}
+                        onValueChange={(value) => value && setSelectedTerm(value)}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {terms.map((term) => (
+                            <SelectItem key={term} value={term}>
+                              {term}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <Label>시간표 과목 연결</Label>
@@ -474,12 +551,19 @@ export default function RecordsPage() {
                             ...prev,
                             courseId: value,
                             courseName: course?.name ?? "",
+                            courseType: course?.courseType ?? prev.courseType,
                             credits: course ? String(course.credits) : prev.credits,
                           }));
                         }}
                       >
                         <SelectTrigger className="w-full">
-                          <SelectValue />
+                          {selectedNewGradeCourse ? (
+                            <span className="truncate text-left">
+                              {selectedNewGradeCourse.name}
+                            </span>
+                          ) : (
+                            <SelectValue />
+                          )}
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="custom">직접 입력</SelectItem>
@@ -503,6 +587,31 @@ export default function RecordsPage() {
                           }))
                         }
                       />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>구분</Label>
+                      <Select
+                        value={newGrade.courseType}
+                        disabled={newGrade.courseId !== "custom"}
+                        onValueChange={(value) => {
+                          if (!value) return;
+                          setNewGrade((prev) => ({
+                            ...prev,
+                            courseType: value as NonNullable<GradeRecord["courseType"]>,
+                          }));
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(COURSE_TYPE_LABELS).map(([value, label]) => (
+                            <SelectItem key={value} value={value}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <Label>학점</Label>
@@ -572,11 +681,56 @@ export default function RecordsPage() {
                         <CardContent className="p-4">
                           <div className="grid gap-3 lg:grid-cols-[1fr_120px_120px_120px]">
                             <div>
-                              <div className="mb-2 flex flex-wrap items-center gap-2">
-                                <p className="font-semibold">{record.courseName}</p>
-                                {record.courseId && (
-                                  <Badge variant="secondary">시간표 연동</Badge>
-                                )}
+                              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="font-semibold">{record.courseName}</p>
+                                  <Badge variant="secondary">
+                                    {COURSE_TYPE_LABELS[record.courseType ?? "major"]}
+                                  </Badge>
+                                  {record.courseId && (
+                                    <Badge variant="secondary">시간표 연동</Badge>
+                                  )}
+                                </div>
+                                <Button
+                                  size="icon-sm"
+                                  variant="ghost"
+                                  onClick={() => removeGrade(record.id)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                </Button>
+                              </div>
+                              <div className="mb-2 grid gap-2 sm:grid-cols-[1fr_120px]">
+                                <Input
+                                  value={record.courseName}
+                                  onChange={(event) =>
+                                    updateGrade(record.id, {
+                                      courseName: event.target.value,
+                                    })
+                                  }
+                                />
+                                <Select
+                                  value={record.courseType ?? "major"}
+                                  onValueChange={(value) => {
+                                    if (!value) return;
+                                    updateGrade(record.id, {
+                                      courseType:
+                                        value as NonNullable<GradeRecord["courseType"]>,
+                                    });
+                                  }}
+                                >
+                                  <SelectTrigger className="w-full">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {Object.entries(COURSE_TYPE_LABELS).map(
+                                      ([value, label]) => (
+                                        <SelectItem key={value} value={value}>
+                                          {label}
+                                        </SelectItem>
+                                      ),
+                                    )}
+                                  </SelectContent>
+                                </Select>
                               </div>
                               <Textarea
                                 value={record.memo}
@@ -711,13 +865,21 @@ export default function RecordsPage() {
                             ...prev,
                             personalStudyId: value,
                             title: study?.title ?? "",
-                            category: study?.category ?? prev.category,
+                            category: study
+                              ? getSpecCategoryFromText(study.category)
+                              : prev.category,
                             memo: study?.goal ?? prev.memo,
                           }));
                         }}
                       >
                         <SelectTrigger className="w-full">
-                          <SelectValue />
+                          {selectedNewSpecStudy ? (
+                            <span className="truncate text-left">
+                              {selectedNewSpecStudy.title}
+                            </span>
+                          ) : (
+                            <SelectValue />
+                          )}
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="custom">직접 입력</SelectItem>
@@ -741,16 +903,27 @@ export default function RecordsPage() {
                     </div>
                     <div className="space-y-2">
                       <Label>분류</Label>
-                      <Input
-                        placeholder="예: 자격증, 공모전, 포트폴리오"
+                      <Select
                         value={newSpec.category}
-                        onChange={(event) =>
+                        onValueChange={(value) => {
+                          if (!value) return;
                           setNewSpec((prev) => ({
                             ...prev,
-                            category: event.target.value,
-                          }))
-                        }
-                      />
+                            category: value as SpecRecord["category"],
+                          }));
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(SPEC_CATEGORY_LABELS).map(([value, label]) => (
+                            <SelectItem key={value} value={value}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <Label>상태</Label>
@@ -789,6 +962,47 @@ export default function RecordsPage() {
                         }
                       />
                     </div>
+                    <div className="space-y-2">
+                      <Label>수상 여부</Label>
+                      <Select
+                        value={newSpec.awardStatus}
+                        onValueChange={(value) => {
+                          if (!value) return;
+                          setNewSpec((prev) => ({
+                            ...prev,
+                            awardStatus: value as SpecRecord["awardStatus"],
+                            awardRank:
+                              value === "awarded" ? prev.awardRank : "",
+                          }));
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(AWARD_STATUS_LABELS).map(([value, label]) => (
+                            <SelectItem key={value} value={value}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {newSpec.awardStatus === "awarded" && (
+                      <div className="space-y-2">
+                        <Label>수상 등수</Label>
+                        <Input
+                          placeholder="예: 대상, 최우수상, 1등"
+                          value={newSpec.awardRank}
+                          onChange={(event) =>
+                            setNewSpec((prev) => ({
+                              ...prev,
+                              awardRank: event.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    )}
                   </div>
                   <div className="mt-3 space-y-2">
                     <Label>메모</Label>
@@ -814,14 +1028,57 @@ export default function RecordsPage() {
                             <div className="min-w-0">
                               <p className="truncate font-semibold">{record.title}</p>
                               <p className="text-sm text-muted-foreground">
-                                {record.category || "분류 없음"}
+                                {SPEC_CATEGORY_LABELS[record.category] ?? "기타 경험"}
                               </p>
                             </div>
-                            {record.personalStudyId && (
-                              <Badge variant="secondary">개인 과제 연동</Badge>
-                            )}
+                            <div className="flex shrink-0 items-center gap-1">
+                              {record.personalStudyId && (
+                                <Badge variant="secondary">개인 과제 연동</Badge>
+                              )}
+                              <Button
+                                size="icon-sm"
+                                variant="ghost"
+                                onClick={() => removeSpec(record.id)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>스펙 이름</Label>
+                            <Input
+                              value={record.title}
+                              onChange={(event) =>
+                                updateSpec(record.id, { title: event.target.value })
+                              }
+                            />
                           </div>
                           <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label>분류</Label>
+                              <Select
+                                value={record.category ?? "experience"}
+                                onValueChange={(value) => {
+                                  if (!value) return;
+                                  updateSpec(record.id, {
+                                    category: value as SpecRecord["category"],
+                                  });
+                                }}
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {Object.entries(SPEC_CATEGORY_LABELS).map(
+                                    ([value, label]) => (
+                                      <SelectItem key={value} value={value}>
+                                        {label}
+                                      </SelectItem>
+                                    ),
+                                  )}
+                                </SelectContent>
+                              </Select>
+                            </div>
                             <div className="space-y-2">
                               <Label>상태</Label>
                               <Select
@@ -857,6 +1114,47 @@ export default function RecordsPage() {
                                 }
                               />
                             </div>
+                            <div className="space-y-2">
+                              <Label>수상 여부</Label>
+                              <Select
+                                value={record.awardStatus ?? "not-applicable"}
+                                onValueChange={(value) => {
+                                  if (!value) return;
+                                  updateSpec(record.id, {
+                                    awardStatus: value as SpecRecord["awardStatus"],
+                                    awardRank:
+                                      value === "awarded" ? record.awardRank : "",
+                                  });
+                                }}
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {Object.entries(AWARD_STATUS_LABELS).map(
+                                    ([value, label]) => (
+                                      <SelectItem key={value} value={value}>
+                                        {label}
+                                      </SelectItem>
+                                    ),
+                                  )}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            {(record.awardStatus ?? "not-applicable") === "awarded" && (
+                              <div className="space-y-2">
+                                <Label>수상 등수</Label>
+                                <Input
+                                  placeholder="예: 대상, 1등"
+                                  value={record.awardRank ?? ""}
+                                  onChange={(event) =>
+                                    updateSpec(record.id, {
+                                      awardRank: event.target.value,
+                                    })
+                                  }
+                                />
+                              </div>
+                            )}
                           </div>
                           <Textarea
                             value={record.memo}

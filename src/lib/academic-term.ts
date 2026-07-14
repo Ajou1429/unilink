@@ -30,3 +30,15 @@ export function getCurrentAcademicTermLabel(date = new Date()) {
 
   return `${year}년 2학기`;
 }
+
+export function getAcademicTermOptions(date = new Date(), extraTerms: string[] = []) {
+  const { year } = getKoreanYearMonth(date);
+  const baseTerms = [
+    `${year}년 겨울학기`,
+    `${year}년 1학기`,
+    `${year}년 여름학기`,
+    `${year}년 2학기`,
+  ];
+
+  return Array.from(new Set([...baseTerms, ...extraTerms]));
+}

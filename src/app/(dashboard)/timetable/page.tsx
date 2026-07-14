@@ -38,10 +38,16 @@ import {
   X,
   Target,
   Award,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { COURSE_COLORS } from "@/lib/mock-data";
 import { Course, DayOfWeek } from "@/lib/types";
-import { getStoredCourses, saveStoredCourses } from "@/lib/course-storage";
+import {
+  getAllStoredCourses,
+  getStoredCourses,
+  saveStoredCourses,
+} from "@/lib/course-storage";
 import {
   getPersonalStudies,
   PersonalStudy,
@@ -59,9 +65,16 @@ import {
   saveMonthlyEvents,
 } from "@/lib/timetable-storage";
 import { getMyNotes, MyNote } from "@/lib/my-notes-storage";
-import { getCurrentAcademicTermLabel } from "@/lib/academic-term";
+import {
+  getAcademicTermOptions,
+  getCurrentAcademicTermLabel,
+} from "@/lib/academic-term";
 
 const DAYS: DayOfWeek[] = ["월", "화", "수", "목", "금"];
+const COURSE_TYPE_LABELS = {
+  major: "전공",
+  "non-major": "비전공",
+} as const;
 const PERSONAL_COLORS = ["#2563EB", "#7C3AED", "#059669", "#D97706", "#DB2777"];
 const EVENT_COLORS = ["#0F766E", "#2563EB", "#9333EA", "#EA580C", "#BE123C"];
 const LEVELS: PaceLevel[] = ["상", "중", "하"];
@@ -146,7 +159,15 @@ function getNoteDisplayName(note?: MyNote) {
 }
 
 export default function TimetablePage() {
+  const currentTerm = getCurrentAcademicTermLabel();
   const [courses, setCourses] = useState<Course[]>([]);
+  const [termOptions, setTermOptions] = useState<string[]>(() =>
+    getAcademicTermOptions(),
+  );
+  const [selectedTerm, setSelectedTerm] = useState(currentTerm);
+  const [courseFilter, setCourseFilter] = useState<"all" | "major" | "non-major">(
+    "all",
+  );
   const [personalStudies, setPersonalStudies] = useState<PersonalStudy[]>([]);
   const [monthlyEvents, setMonthlyEvents] = useState<MonthlyEvent[]>([]);
   const [courseSessions, setCourseSessions] = useState<CourseSessionProgress[]>([]);
@@ -155,12 +176,14 @@ export default function TimetablePage() {
   const [selectedOccurrence, setSelectedOccurrence] =
     useState<CourseOccurrence | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<MonthlyEvent | null>(null);
+  const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()));
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const today = new Date();
     return today.getFullYear() === 2026 ? today.getMonth() + 1 : 1;
   });
   const [sessionFeedback, setSessionFeedback] = useState("");
+  const [actionFeedback, setActionFeedback] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [personalOpen, setPersonalOpen] = useState(false);
   const [eventOpen, setEventOpen] = useState(false);
@@ -172,6 +195,7 @@ export default function TimetablePage() {
     startTime: "09:00",
     endTime: "10:30",
     credits: 3,
+    courseType: "major" as Course["courseType"],
     color: COURSE_COLORS[0],
   });
   const [newPersonalStudy, setNewPersonalStudy] = useState({
@@ -200,30 +224,52 @@ export default function TimetablePage() {
   });
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      setCourses(getStoredCourses());
+    function syncData() {
+      const allCourses = getAllStoredCourses();
+      setTermOptions(
+        getAcademicTermOptions(
+          new Date(),
+          allCourses.map((course) => course.term).filter(Boolean) as string[],
+        ),
+      );
+      setCourses(getStoredCourses(selectedTerm));
       setPersonalStudies(getPersonalStudies());
       setMonthlyEvents(getMonthlyEvents());
       setCourseSessions(getCourseSessions());
       setMyNotes(getMyNotes());
-    }, 0);
+    }
 
-    return () => window.clearTimeout(timeout);
-  }, []);
+    const timeout = window.setTimeout(syncData, 0);
+    window.addEventListener("storage", syncData);
+
+    return () => {
+      window.clearTimeout(timeout);
+      window.removeEventListener("storage", syncData);
+    };
+  }, [selectedTerm]);
 
   useEffect(() => {
-    if (!sessionFeedback) return;
+    if (!sessionFeedback && !actionFeedback) return;
 
-    const timeout = window.setTimeout(() => setSessionFeedback(""), 2200);
+    const timeout = window.setTimeout(() => {
+      setSessionFeedback("");
+      setActionFeedback("");
+    }, 2400);
     return () => window.clearTimeout(timeout);
-  }, [sessionFeedback]);
+  }, [sessionFeedback, actionFeedback]);
 
+  const filteredCourses = courses.filter((course) =>
+    courseFilter === "all" ? true : (course.courseType ?? "major") === courseFilter,
+  );
   const totalCredits = courses.reduce((sum, c) => sum + c.credits, 0);
-  const academicTermLabel = getCurrentAcademicTermLabel();
+  const majorCredits = courses
+    .filter((course) => (course.courseType ?? "major") === "major")
+    .reduce((sum, c) => sum + c.credits, 0);
+  const nonMajorCredits = totalCredits - majorCredits;
 
   function persistCourses(nextCourses: Course[]) {
     setCourses(nextCourses);
-    saveStoredCourses(nextCourses);
+    saveStoredCourses(nextCourses, selectedTerm);
   }
 
   function persistPersonalStudies(nextStudies: PersonalStudy[]) {
@@ -236,6 +282,16 @@ export default function TimetablePage() {
     saveMonthlyEvents(nextEvents);
   }
 
+  function changeSelectedTerm(term: string) {
+    setSelectedTerm(term);
+    setSelectedCourse(null);
+    setSelectedOccurrence(null);
+    setSelectedEvent(null);
+    setEditingCourse(null);
+    setCourseFilter("all");
+    setNewCourse((prev) => ({ ...prev, color: COURSE_COLORS[0] }));
+  }
+
   function toggleDay(day: DayOfWeek) {
     setNewCourse((prev) => ({
       ...prev,
@@ -245,11 +301,26 @@ export default function TimetablePage() {
     }));
   }
 
+  function toggleEditingDay(day: DayOfWeek) {
+    setEditingCourse((prev) => {
+      if (!prev) return prev;
+
+      return {
+        ...prev,
+        days: prev.days.includes(day)
+          ? prev.days.filter((item) => item !== day)
+          : [...prev.days, day],
+      };
+    });
+  }
+
   function addCourse() {
     if (!newCourse.name || newCourse.days.length === 0) return;
     const course: Course = {
       ...newCourse,
       id: Date.now().toString(),
+      term: selectedTerm,
+      courseType: newCourse.courseType ?? "major",
     };
     persistCourses([...courses, course]);
     setAddOpen(false);
@@ -261,8 +332,10 @@ export default function TimetablePage() {
       startTime: "09:00",
       endTime: "10:30",
       credits: 3,
+      courseType: "major",
       color: COURSE_COLORS[courses.length % COURSE_COLORS.length],
     });
+    setActionFeedback(`${course.name} 수업이 ${selectedTerm} 시간표에 등록되었습니다.`);
   }
 
   function addPersonalStudy() {
@@ -283,6 +356,7 @@ export default function TimetablePage() {
       goal: "",
       color: PERSONAL_COLORS[personalStudies.length % PERSONAL_COLORS.length],
     });
+    setActionFeedback(`${study.title} 개인 과제가 등록되었습니다.`);
   }
 
   function addMonthlyEvent() {
@@ -311,6 +385,7 @@ export default function TimetablePage() {
       memo: "",
       color: EVENT_COLORS[monthlyEvents.length % EVENT_COLORS.length],
     });
+    setActionFeedback(`${event.title} 일정이 등록되었습니다.`);
   }
 
   function selectOccurrence(occurrence: CourseOccurrence) {
@@ -379,10 +454,48 @@ export default function TimetablePage() {
     setSessionFeedback("세션 진도가 저장되었습니다.");
   }
 
+  function saveEditedCourse() {
+    if (!editingCourse || !editingCourse.name.trim() || editingCourse.days.length === 0) {
+      return;
+    }
+
+    const updatedCourse: Course = {
+      ...editingCourse,
+      name: editingCourse.name.trim(),
+      professor: editingCourse.professor.trim(),
+      location: editingCourse.location.trim(),
+      term: selectedTerm,
+      courseType: editingCourse.courseType ?? "major",
+    };
+    const nextCourses = courses.map((course) =>
+      course.id === updatedCourse.id ? updatedCourse : course,
+    );
+
+    persistCourses(nextCourses);
+    setSelectedCourse(updatedCourse);
+    setSelectedOccurrence((prev) =>
+      prev && prev.course.id === updatedCourse.id
+        ? {
+            ...prev,
+            course: updatedCourse,
+            startTime: updatedCourse.startTime,
+            endTime: updatedCourse.endTime,
+          }
+        : prev,
+    );
+    setEditingCourse(null);
+    setActionFeedback(`${updatedCourse.name} 수업 정보가 수정되었습니다.`);
+  }
+
   function removeCourse(id: string) {
+    const target = courses.find((course) => course.id === id);
     persistCourses(courses.filter((c) => c.id !== id));
     setSelectedCourse(null);
     setSelectedOccurrence(null);
+    setEditingCourse(null);
+    setActionFeedback(
+      target ? `${target.name} 수업이 삭제되었습니다.` : "수업이 삭제되었습니다.",
+    );
   }
 
   const courseNotes = selectedCourse
@@ -410,10 +523,44 @@ export default function TimetablePage() {
       <Header title="시간표" />
       <div className="flex-1 p-6 max-w-[1600px] mx-auto w-full">
         <div className="flex items-center justify-between mb-6">
-          <div>
+          <div className="space-y-2">
             <p className="text-muted-foreground text-sm">
-              {academicTermLabel} · 총 {totalCredits}학점
+              {selectedTerm} · 총 {totalCredits}학점 · 전공 {majorCredits}학점 · 비전공{" "}
+              {nonMajorCredits}학점
             </p>
+            <div className="flex flex-wrap gap-2">
+              <Select
+                value={selectedTerm}
+                onValueChange={(value) => value && changeSelectedTerm(value)}
+              >
+                <SelectTrigger className="w-44 bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {termOptions.map((term) => (
+                    <SelectItem key={term} value={term}>
+                      {term}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={courseFilter}
+                onValueChange={(value) =>
+                  value &&
+                  setCourseFilter(value as "all" | "major" | "non-major")
+                }
+              >
+                <SelectTrigger className="w-36 bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">전체 과목</SelectItem>
+                  <SelectItem value="major">전공</SelectItem>
+                  <SelectItem value="non-major">비전공</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <div className="flex gap-2">
             <Dialog open={eventOpen} onOpenChange={setEventOpen}>
@@ -588,6 +735,30 @@ export default function TimetablePage() {
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label>구분</Label>
+                  <Select
+                    value={newCourse.courseType ?? "major"}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      setNewCourse((prev) => ({
+                        ...prev,
+                        courseType: value as Course["courseType"],
+                      }));
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(COURSE_TYPE_LABELS).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
                   <Label>요일</Label>
                   <div className="flex gap-2">
                     {DAYS.map((day) => (
@@ -656,6 +827,13 @@ export default function TimetablePage() {
           </div>
         </div>
 
+        {actionFeedback && (
+          <div className="mb-4 flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+            <CheckCircle2 className="h-4 w-4" />
+            {actionFeedback}
+          </div>
+        )}
+
         <div className="grid 2xl:grid-cols-[minmax(0,1fr)_320px] gap-6">
           <div className="min-w-0">
             <Tabs defaultValue="weekly">
@@ -689,7 +867,7 @@ export default function TimetablePage() {
                 <Card className="border-0 shadow-sm">
                   <CardContent className="p-4">
                     <TimetableGrid
-                      courses={courses}
+                      courses={filteredCourses}
                       monthlyEvents={monthlyEvents}
                       courseSessions={courseSessions}
                       weekStart={weekStart}
@@ -854,15 +1032,25 @@ export default function TimetablePage() {
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-sm">수업 상세</CardTitle>
-                    <button
-                      onClick={() => {
-                        setSelectedCourse(null);
-                        setSelectedOccurrence(null);
-                      }}
-                      className="text-muted-foreground hover:text-foreground"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        onClick={() => setEditingCourse(selectedCourse)}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <button
+                        onClick={() => {
+                          setSelectedCourse(null);
+                          setSelectedOccurrence(null);
+                          setEditingCourse(null);
+                        }}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -872,6 +1060,9 @@ export default function TimetablePage() {
                       style={{ backgroundColor: selectedCourse.color }}
                     />
                     <span className="font-semibold">{selectedCourse.name}</span>
+                    <Badge variant="secondary">
+                      {COURSE_TYPE_LABELS[selectedCourse.courseType ?? "major"]}
+                    </Badge>
                   </div>
                   <div className="space-y-2 text-sm text-muted-foreground">
                     <div className="flex items-center gap-2">
@@ -894,6 +1085,177 @@ export default function TimetablePage() {
                       <span>같은 수업 49명</span>
                     </div>
                   </div>
+                  {editingCourse?.id === selectedCourse.id && (
+                    <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="col-span-2 space-y-2">
+                          <Label>수업명</Label>
+                          <Input
+                            value={editingCourse.name}
+                            onChange={(event) =>
+                              setEditingCourse((prev) =>
+                                prev ? { ...prev, name: event.target.value } : prev,
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>교수명</Label>
+                          <Input
+                            value={editingCourse.professor}
+                            onChange={(event) =>
+                              setEditingCourse((prev) =>
+                                prev ? { ...prev, professor: event.target.value } : prev,
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>강의실</Label>
+                          <Input
+                            value={editingCourse.location}
+                            onChange={(event) =>
+                              setEditingCourse((prev) =>
+                                prev ? { ...prev, location: event.target.value } : prev,
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>학점</Label>
+                          <Select
+                            value={String(editingCourse.credits)}
+                            onValueChange={(value) =>
+                              value &&
+                              setEditingCourse((prev) =>
+                                prev ? { ...prev, credits: Number(value) } : prev,
+                              )
+                            }
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {[1, 2, 3, 4].map((credit) => (
+                                <SelectItem key={credit} value={String(credit)}>
+                                  {credit}학점
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>구분</Label>
+                          <Select
+                            value={editingCourse.courseType ?? "major"}
+                            onValueChange={(value) =>
+                              value &&
+                              setEditingCourse((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      courseType: value as Course["courseType"],
+                                    }
+                                  : prev,
+                              )
+                            }
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(COURSE_TYPE_LABELS).map(([value, label]) => (
+                                <SelectItem key={value} value={value}>
+                                  {label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>요일</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {DAYS.map((day) => (
+                            <button
+                              key={day}
+                              type="button"
+                              onClick={() => toggleEditingDay(day)}
+                              className={`h-8 w-8 rounded-full text-xs font-medium transition-colors ${
+                                editingCourse.days.includes(day)
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-background text-muted-foreground hover:bg-accent"
+                              }`}
+                            >
+                              {day}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-2">
+                          <Label>시작 시간</Label>
+                          <Input
+                            type="time"
+                            value={editingCourse.startTime}
+                            onChange={(event) =>
+                              setEditingCourse((prev) =>
+                                prev ? { ...prev, startTime: event.target.value } : prev,
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>종료 시간</Label>
+                          <Input
+                            type="time"
+                            value={editingCourse.endTime}
+                            onChange={(event) =>
+                              setEditingCourse((prev) =>
+                                prev ? { ...prev, endTime: event.target.value } : prev,
+                              )
+                            }
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>색상</Label>
+                        <div className="flex gap-2">
+                          {COURSE_COLORS.map((color) => (
+                            <button
+                              key={color}
+                              type="button"
+                              aria-label={`${color} 수업 색상 선택`}
+                              onClick={() =>
+                                setEditingCourse((prev) =>
+                                  prev ? { ...prev, color } : prev,
+                                )
+                              }
+                              className={`h-7 w-7 rounded-full transition-transform ${
+                                editingCourse.color === color
+                                  ? "scale-125 ring-2 ring-offset-1 ring-gray-400"
+                                  : "hover:scale-110"
+                              }`}
+                              style={{ backgroundColor: color }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button size="sm" className="text-xs" onClick={saveEditedCourse}>
+                          수정 저장
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-xs"
+                          onClick={() => setEditingCourse(null)}
+                        >
+                          취소
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   <div className="pt-2 space-y-2">
                     <Link
                       href={`/course?courseId=${encodeURIComponent(selectedCourse.id)}`}
@@ -1133,6 +1495,7 @@ export default function TimetablePage() {
                       persistMonthlyEvents(
                         monthlyEvents.filter((event) => event.id !== selectedEvent.id),
                       );
+                      setActionFeedback(`${selectedEvent.title} 일정이 삭제되었습니다.`);
                       setSelectedEvent(null);
                     }}
                   >
@@ -1146,28 +1509,36 @@ export default function TimetablePage() {
                   <CardTitle className="text-sm">수강 목록</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {courses.map((course) => (
-                    <button
-                      key={course.id}
-                      onClick={() => {
-                        setSelectedCourse(course);
-                        setSelectedOccurrence(null);
-                        setSelectedEvent(null);
-                      }}
-                      className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-accent transition-colors text-left"
-                    >
-                      <div
-                        className="h-3 w-3 rounded-full shrink-0"
-                        style={{ backgroundColor: course.color }}
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{course.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {course.days.join("")} · {course.credits}학점
-                        </p>
-                      </div>
-                    </button>
-                  ))}
+                  {filteredCourses.length > 0 ? (
+                    filteredCourses.map((course) => (
+                      <button
+                        key={course.id}
+                        onClick={() => {
+                          setSelectedCourse(course);
+                          setSelectedOccurrence(null);
+                          setSelectedEvent(null);
+                          setEditingCourse(null);
+                        }}
+                        className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-accent transition-colors text-left"
+                      >
+                        <div
+                          className="h-3 w-3 rounded-full shrink-0"
+                          style={{ backgroundColor: course.color }}
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{course.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {COURSE_TYPE_LABELS[course.courseType ?? "major"]} ·{" "}
+                            {course.days.join("")} · {course.credits}학점
+                          </p>
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+                      현재 조건에 해당하는 수업이 없습니다.
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             )}

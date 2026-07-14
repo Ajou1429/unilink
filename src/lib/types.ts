@@ -12,6 +12,8 @@ export type DayOfWeek = "월" | "화" | "수" | "목" | "금";
 
 export interface Course {
   id: string;
+  term?: string;
+  courseType?: "major" | "non-major";
   name: string;
   professor: string;
   location: string;

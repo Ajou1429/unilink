@@ -6,6 +6,7 @@ export interface GradeRecord {
   id: string;
   term: string;
   courseId?: string;
+  courseType?: "major" | "non-major";
   courseName: string;
   credits: number;
   grade: string;
@@ -19,8 +20,10 @@ export interface SpecRecord {
   id: string;
   personalStudyId?: string;
   title: string;
-  category: string;
+  category: "certificate" | "competition" | "experience";
   status: "planned" | "in-progress" | "done";
+  awardStatus: "awarded" | "not-awarded" | "not-applicable";
+  awardRank: string;
   completedAt: string;
   memo: string;
   createdAt: string;
@@ -43,8 +46,47 @@ function writeJson<T>(key: string, value: T) {
   window.localStorage.setItem(key, JSON.stringify(value));
 }
 
+function normalizeCourseType(value: unknown): GradeRecord["courseType"] {
+  return value === "non-major" ? "non-major" : "major";
+}
+
+function normalizeSpecCategory(value: unknown): SpecRecord["category"] {
+  if (value === "certificate" || String(value).includes("자격")) {
+    return "certificate";
+  }
+  if (value === "competition" || String(value).includes("공모")) {
+    return "competition";
+  }
+  return "experience";
+}
+
+function normalizeAwardStatus(value: unknown): SpecRecord["awardStatus"] {
+  if (value === "awarded" || value === "not-awarded") {
+    return value;
+  }
+  return "not-applicable";
+}
+
+function normalizeGradeRecord(record: GradeRecord): GradeRecord {
+  return {
+    ...record,
+    courseType: normalizeCourseType(record.courseType),
+  };
+}
+
+function normalizeSpecRecord(record: SpecRecord): SpecRecord {
+  return {
+    ...record,
+    category: normalizeSpecCategory(record.category),
+    awardStatus: normalizeAwardStatus(record.awardStatus),
+    awardRank: record.awardStatus === "awarded" ? record.awardRank ?? "" : "",
+  };
+}
+
 export function getGradeRecords(): GradeRecord[] {
-  return readJson<GradeRecord[]>(GRADE_RECORDS_STORAGE_KEY, []);
+  return readJson<GradeRecord[]>(GRADE_RECORDS_STORAGE_KEY, []).map(
+    normalizeGradeRecord,
+  );
 }
 
 export function saveGradeRecords(records: GradeRecord[]) {
@@ -53,7 +95,9 @@ export function saveGradeRecords(records: GradeRecord[]) {
 }
 
 export function getSpecRecords(): SpecRecord[] {
-  return readJson<SpecRecord[]>(SPEC_RECORDS_STORAGE_KEY, []);
+  return readJson<SpecRecord[]>(SPEC_RECORDS_STORAGE_KEY, []).map(
+    normalizeSpecRecord,
+  );
 }
 
 export function saveSpecRecords(records: SpecRecord[]) {
