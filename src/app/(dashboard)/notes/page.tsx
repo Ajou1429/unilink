@@ -2,6 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
+import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -90,6 +91,7 @@ export default function NotesPage() {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState(new Date().toISOString());
+  const [feedbackMessage, setFeedbackMessage] = useState("");
   const [newNote, setNewNote] = useState({
     title: "",
     courseName: "",
@@ -147,6 +149,13 @@ export default function NotesPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!feedbackMessage) return;
+
+    const timeout = window.setTimeout(() => setFeedbackMessage(""), 2200);
+    return () => window.clearTimeout(timeout);
+  }, [feedbackMessage]);
 
   const filteredNotes = useMemo(() => {
     const keyword = search.trim();
@@ -207,6 +216,7 @@ export default function NotesPage() {
 
     await loadNotes();
     setOpen(false);
+    setFeedbackMessage("노트가 저장되었습니다.");
     setNewNote({
       title: "",
       courseName: "",
@@ -320,12 +330,23 @@ export default function NotesPage() {
       linkedTitle,
     );
     setNotes(nextNotes);
+    setFeedbackMessage(
+      linkedType === "unassigned"
+        ? "강의 노트 분류가 해제되었습니다."
+        : "강의 노트가 분류되었습니다.",
+    );
   }
 
   return (
     <div className="flex min-h-screen flex-col">
       <Header title="나의 노트" />
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 p-6">
+        {feedbackMessage && (
+          <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 shadow-sm">
+            <CheckCircle2 className="h-4 w-4" />
+            {feedbackMessage}
+          </div>
+        )}
         <section className="grid gap-4 lg:grid-cols-[1.3fr_0.9fr]">
           <Card className="border-0 shadow-sm">
             <CardHeader className="pb-4">
@@ -717,6 +738,9 @@ export default function NotesPage() {
                             Drive 수정 시각 {formatDate(note.driveModifiedTime)}
                           </p>
                         )}
+                        <div className="mt-3">
+                          <NoteViewerDialog note={note} />
+                        </div>
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                           <Select
                             value={note.linkedType}

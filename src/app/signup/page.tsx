@@ -6,92 +6,41 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { GraduationCap, Loader2 } from "lucide-react";
-import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
-
-const universities = [
-  "서울대학교",
-  "연세대학교",
-  "고려대학교",
-  "성균관대학교",
-  "한양대학교",
-  "중앙대학교",
-  "경희대학교",
-  "서강대학교",
-  "이화여자대학교",
-  "숙명여자대학교",
-  "KAIST",
-  "POSTECH",
-  "UNIST",
-  "GIST",
-];
+import { GraduationCap } from "lucide-react";
+import { signupWithPassword } from "@/lib/auth-storage";
 
 export default function SignupPage() {
   const router = useRouter();
   const [form, setForm] = useState({
-    name: "",
-    studentId: "",
-    university: "",
-    email: "",
+    username: "",
+    displayName: "",
     password: "",
     passwordConfirm: "",
+    university: "",
+    department: "",
+    birthday: "",
   });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function update<K extends keyof typeof form>(key: K, value: string) {
-    setForm((prev) => ({ ...prev, [key]: value }));
+  function updateField(field: keyof typeof form, value: string) {
+    setForm((prev) => ({ ...prev, [field]: value }));
   }
 
-  async function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
-    setMessage(null);
+    setIsSubmitting(true);
+    setMessage("");
 
-    if (!isSupabaseConfigured) {
-      router.push("/dashboard");
+    const result = await signupWithPassword(form);
+    setIsSubmitting(false);
+
+    if (!result.ok) {
+      setMessage(result.message);
       return;
     }
 
-    if (form.password !== form.passwordConfirm) {
-      setError("비밀번호가 일치하지 않습니다.");
-      return;
-    }
-
-    setLoading(true);
-    const supabase = getSupabaseClient()!;
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-      options: {
-        data: {
-          name: form.name,
-          student_id: form.studentId,
-          university: form.university,
-        },
-      },
-    });
-    setLoading(false);
-
-    if (signUpError) {
-      setError(signUpError.message);
-      return;
-    }
-
-    if (data.session) {
-      router.push("/dashboard");
-      return;
-    }
-
-    setMessage("가입 확인 이메일을 보냈어요. 메일함을 확인한 뒤 로그인해주세요.");
+    router.push("/dashboard");
   }
 
   return (
@@ -101,153 +50,145 @@ export default function SignupPage() {
           <GraduationCap className="h-8 w-8" />
           <span className="text-2xl font-bold">UniLink</span>
         </div>
-        <div className="text-white space-y-6">
+        <div className="space-y-6 text-white">
           <h2 className="text-3xl font-bold leading-snug">
-            대학생활을
-            <br />더 스마트하게
+            수업과 필기,
+            <br />
+            학습 계획을 한 번에
           </h2>
           {[
-            "시간표 공유로 같은 수업 친구 찾기",
-            "익명 게시판으로 자유로운 소통",
-            "AI 학습 플랜으로 성적 관리",
-            "학교 공식 데이터 연동 준비",
-          ].map((t) => (
-            <div key={t} className="flex items-center gap-3 text-primary-foreground/90">
+            "대학교와 학과 기반으로 수업 커뮤니티 준비",
+            "강의 노트와 주간 진도 관리",
+            "추후 학교 인증과 소셜 로그인 연동 예정",
+          ].map((text) => (
+            <div key={text} className="flex items-center gap-3 text-primary-foreground/90">
               <div className="h-2 w-2 rounded-full bg-white" />
-              {t}
+              {text}
             </div>
           ))}
         </div>
-        <p className="text-primary-foreground/60 text-sm">
-          학교 이메일로 가입하면 재학생 인증을 진행할 수 있습니다.
+        <p className="text-sm text-primary-foreground/60">
+          지금은 기본 회원가입만 받고, 학교 인증 절차는 나중에 추가할 수 있습니다.
         </p>
       </div>
 
-      <div className="flex-1 flex items-center justify-center p-8 overflow-y-auto">
+      <div className="flex flex-1 items-center justify-center overflow-y-auto p-8">
         <div className="w-full max-w-md py-8">
-          <div className="lg:hidden flex items-center gap-2 text-primary mb-8">
+          <div className="mb-8 flex items-center gap-2 text-primary lg:hidden">
             <GraduationCap className="h-6 w-6" />
             <span className="text-xl font-bold">UniLink</span>
           </div>
 
-          <h1 className="text-2xl font-bold mb-2">회원가입</h1>
-          <p className="text-muted-foreground mb-8">
-            이미 계정이 있으신가요?{" "}
-            <Link href="/login" className="text-primary font-medium hover:underline">
+          <h1 className="mb-2 text-2xl font-bold">회원가입</h1>
+          <p className="mb-8 text-muted-foreground">
+            이미 계정이 있나요?{" "}
+            <Link href="/login" className="font-medium text-primary hover:underline">
               로그인
             </Link>
           </p>
 
-          {!isSupabaseConfigured && (
-            <p className="mb-4 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
-              Supabase가 설정되지 않아 가입 없이 대시보드로 이동합니다. (개발 모드)
-            </p>
-          )}
-
           <form className="space-y-4" onSubmit={handleSubmit}>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="username">아이디</Label>
+              <Input
+                id="username"
+                autoComplete="username"
+                placeholder="로그인에 사용할 아이디"
+                className="h-11"
+                value={form.username}
+                onChange={(event) => updateField("username", event.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="displayName">사용자 이름</Label>
+              <Input
+                id="displayName"
+                autoComplete="name"
+                placeholder="화면에 표시될 이름"
+                className="h-11"
+                value={form.displayName}
+                onChange={(event) =>
+                  updateField("displayName", event.target.value)
+                }
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label htmlFor="name">이름</Label>
+                <Label htmlFor="password">비밀번호</Label>
                 <Input
-                  id="name"
-                  placeholder="홍길동"
+                  id="password"
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder="6자 이상"
                   className="h-11"
-                  value={form.name}
-                  onChange={(event) => update("name", event.target.value)}
+                  value={form.password}
+                  onChange={(event) => updateField("password", event.target.value)}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="studentId">학번</Label>
+                <Label htmlFor="passwordConfirm">비밀번호 확인</Label>
                 <Input
-                  id="studentId"
-                  placeholder="20240001"
+                  id="passwordConfirm"
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder="다시 입력"
                   className="h-11"
-                  value={form.studentId}
-                  onChange={(event) => update("studentId", event.target.value)}
+                  value={form.passwordConfirm}
+                  onChange={(event) =>
+                    updateField("passwordConfirm", event.target.value)
+                  }
                 />
               </div>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="university">대학교</Label>
-              <Select
+              <Input
+                id="university"
+                placeholder="예: 아주대학교"
+                className="h-11"
                 value={form.university}
-                onValueChange={(value) => update("university", value ?? "")}
-              >
-                <SelectTrigger className="h-11 w-full">
-                  <SelectValue placeholder="학교를 선택하세요" />
-                </SelectTrigger>
-                <SelectContent>
-                  {universities.map((u) => (
-                    <SelectItem key={u} value={u}>
-                      {u}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                onChange={(event) => updateField("university", event.target.value)}
+              />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="email">학교 이메일</Label>
+              <Label htmlFor="department">학과</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="student@university.ac.kr"
+                id="department"
+                placeholder="예: 소프트웨어학과"
                 className="h-11"
-                value={form.email}
-                onChange={(event) => update("email", event.target.value)}
-                required={isSupabaseConfigured}
+                value={form.department}
+                onChange={(event) => updateField("department", event.target.value)}
               />
-              <p className="text-xs text-muted-foreground">
-                학교 이메일로 가입하면 재학생 인증이 가능합니다.
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="birthday">생일</Label>
+              <Input
+                id="birthday"
+                type="date"
+                className="h-11"
+                value={form.birthday}
+                onChange={(event) => updateField("birthday", event.target.value)}
+              />
+            </div>
+
+            {message && (
+              <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">
+                {message}
               </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password">비밀번호</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="8자 이상 입력하세요"
-                className="h-11"
-                value={form.password}
-                onChange={(event) => update("password", event.target.value)}
-                required={isSupabaseConfigured}
-                minLength={isSupabaseConfigured ? 8 : undefined}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="passwordConfirm">비밀번호 확인</Label>
-              <Input
-                id="passwordConfirm"
-                type="password"
-                placeholder="비밀번호를 다시 입력하세요"
-                className="h-11"
-                value={form.passwordConfirm}
-                onChange={(event) => update("passwordConfirm", event.target.value)}
-                required={isSupabaseConfigured}
-              />
-            </div>
-
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            {message && <p className="text-sm text-primary">{message}</p>}
+            )}
 
             <div className="pt-2">
-              <p className="text-xs text-muted-foreground mb-3">
-                가입하면{" "}
-                <a href="#" className="text-primary hover:underline">
-                  이용약관
-                </a>
-                {" 및 "}
-                <a href="#" className="text-primary hover:underline">
-                  개인정보처리방침
-                </a>
-                에 동의하는 것으로 간주합니다.
+              <p className="mb-3 text-xs text-muted-foreground">
+                현재는 학교 이메일 인증 없이 기본 정보만 저장합니다. 실제 인증과
+                약관 동의는 추후 추가 예정입니다.
               </p>
-              <Button type="submit" className="w-full h-11 gap-2" disabled={loading}>
-                {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-                이메일 인증 후 가입하기
+              <Button className="h-11 w-full" type="submit" disabled={isSubmitting}>
+                {isSubmitting ? "가입 중..." : "회원가입"}
               </Button>
             </div>
           </form>
@@ -263,28 +204,14 @@ export default function SignupPage() {
             </div>
           </div>
 
-          <Button
-            variant="outline"
-            className="w-full h-11 gap-3"
-            type="button"
-            onClick={async () => {
-              if (!isSupabaseConfigured) {
-                router.push("/dashboard");
-                return;
-              }
-              const supabase = getSupabaseClient()!;
-              const basePath =
-                process.env.NODE_ENV === "production" ? "/unilink" : "";
-              await supabase.auth.signInWithOAuth({
-                provider: "google",
-                options: {
-                  redirectTo: `${window.location.origin}${basePath}/dashboard`,
-                },
-              });
-            }}
-          >
-            Google로 가입
-          </Button>
+          <div className="space-y-3">
+            <Button variant="outline" className="h-11 w-full gap-3">
+              Google로 가입
+            </Button>
+            <Button variant="outline" className="h-11 w-full gap-3">
+              카카오로 가입
+            </Button>
+          </div>
         </div>
       </div>
     </div>

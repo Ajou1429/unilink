@@ -1,5 +1,5 @@
 import { Course, LectureNote, StudyPlan } from "./types";
-import { mockCourses } from "./mock-data";
+import { getCurrentAcademicTermLabel } from "./academic-term";
 
 export const COURSES_STORAGE_KEY = "unilink:courses";
 export const COURSE_NOTES_STORAGE_KEY = "unilink:course-notes";
@@ -14,6 +14,14 @@ export interface CourseFile {
   type: string;
   size: number;
   createdAt: string;
+}
+
+function normalizeCourse(course: Course, fallbackTerm = getCurrentAcademicTermLabel()): Course {
+  return {
+    ...course,
+    term: course.term ?? fallbackTerm,
+    courseType: course.courseType ?? "major",
+  };
 }
 
 function readJson<T>(key: string, fallback: T): T {
@@ -32,12 +40,31 @@ function writeJson<T>(key: string, value: T) {
   window.localStorage.setItem(key, JSON.stringify(value));
 }
 
-export function getStoredCourses(): Course[] {
-  return readJson<Course[]>(COURSES_STORAGE_KEY, mockCourses);
+export function getAllStoredCourses(): Course[] {
+  return readJson<Course[]>(COURSES_STORAGE_KEY, []).map((course) =>
+    normalizeCourse(course),
+  );
 }
 
-export function saveStoredCourses(courses: Course[]) {
-  writeJson(COURSES_STORAGE_KEY, courses);
+export function getStoredCourses(term = getCurrentAcademicTermLabel()): Course[] {
+  return getAllStoredCourses().filter((course) => course.term === term);
+}
+
+export function saveStoredCourses(courses: Course[], term?: string) {
+  if (term) {
+    const otherTermCourses = getAllStoredCourses().filter(
+      (course) => course.term !== term,
+    );
+    writeJson(COURSES_STORAGE_KEY, [
+      ...otherTermCourses,
+      ...courses.map((course) => normalizeCourse(course, term)),
+    ]);
+  } else {
+    writeJson(
+      COURSES_STORAGE_KEY,
+      courses.map((course) => normalizeCourse(course)),
+    );
+  }
   window.dispatchEvent(new Event(COURSES_CHANGED_EVENT));
 }
 

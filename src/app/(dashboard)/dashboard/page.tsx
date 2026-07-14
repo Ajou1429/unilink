@@ -32,9 +32,17 @@ import {
   STUDY_PLANS_CHANGED_EVENT,
 } from "@/lib/study-storage";
 import { Course, DayOfWeek, StudyPlan } from "@/lib/types";
+import {
+  AUTH_CHANGED_EVENT,
+  getCurrentUser,
+  type CurrentUser,
+} from "@/lib/auth-storage";
+import {
+  getCurrentAcademicTermLabel,
+  KOREA_TIME_ZONE,
+} from "@/lib/academic-term";
 
 const recentPosts = mockPosts.slice(0, 3);
-const KOREA_TIME_ZONE = "Asia/Seoul";
 const COURSE_WEEKDAYS: DayOfWeek[] = ["월", "화", "수", "목", "금"];
 
 function getKoreanToday() {
@@ -59,11 +67,31 @@ function getKoreanToday() {
   };
 }
 
+function addDays(date: Date, amount: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+function formatDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getSundayWeekStart(date: Date) {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return addDays(next, -next.getDay());
+}
+
 export default function DashboardPage() {
   const [courses, setCourses] = useState<Course[]>(mockCourses);
   const [plans, setPlans] = useState<StudyPlan[]>(mockStudyPlans);
   const [personalStudies, setPersonalStudies] = useState<PersonalStudy[]>([]);
   const [koreanToday, setKoreanToday] = useState(getKoreanToday);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
 
   useEffect(() => {
     function loadDashboardData() {
@@ -71,16 +99,19 @@ export default function DashboardPage() {
       setPlans(getWeeklyStudyPlans(mockStudyPlans));
       setPersonalStudies(getPersonalStudies());
       setKoreanToday(getKoreanToday());
+      setCurrentUser(getCurrentUser());
     }
 
     window.setTimeout(loadDashboardData, 0);
     window.addEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
     window.addEventListener(PERSONAL_STUDIES_CHANGED_EVENT, loadDashboardData);
+    window.addEventListener(AUTH_CHANGED_EVENT, loadDashboardData);
     window.addEventListener("storage", loadDashboardData);
 
     return () => {
       window.removeEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener(PERSONAL_STUDIES_CHANGED_EVENT, loadDashboardData);
+      window.removeEventListener(AUTH_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener("storage", loadDashboardData);
     };
   }, []);
@@ -90,7 +121,21 @@ export default function DashboardPage() {
       ? course.days.includes(koreanToday.courseDayOfWeek)
       : false,
   );
-  const upcomingPlans = plans.filter((plan) => !plan.isCompleted).slice(0, 4);
+  const currentWeekStartKey = formatDateKey(getSundayWeekStart(new Date()));
+  const upcomingPlans = plans
+    .filter(
+      (plan) =>
+        !plan.isCompleted &&
+        (plan.weekStart ?? currentWeekStartKey) === currentWeekStartKey,
+    )
+    .slice(0, 4);
+  const displayName =
+    currentUser?.displayName || currentUser?.username || "게스트";
+  const schoolLabel =
+    currentUser && (currentUser.university || currentUser.department)
+      ? `${currentUser.university} ${currentUser.department}`.trim()
+      : "로그인 후 회원 정보의 학과가 표시됩니다";
+  const academicTermLabel = getCurrentAcademicTermLabel();
 
   function completePlan(planId: string) {
     const nextPlans = plans.map((plan) =>
@@ -106,9 +151,9 @@ export default function DashboardPage() {
       <div className="flex-1 p-6 space-y-6 max-w-6xl mx-auto w-full">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold">안녕하세요, 이지민님</h2>
+            <h2 className="text-2xl font-bold">안녕하세요, {displayName}님</h2>
             <p className="text-muted-foreground mt-1">
-              2024년 1학기 · 연세대학교 컴퓨터과학과
+              {academicTermLabel} · {schoolLabel}
             </p>
           </div>
           <Badge
