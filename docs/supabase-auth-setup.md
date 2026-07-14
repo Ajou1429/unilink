@@ -29,6 +29,7 @@ GitHub 저장소의 `Settings > Secrets and variables > Actions > New repository
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   username text unique not null,
+  display_name text not null,
   university text not null,
   department text not null,
   birthday date not null,
@@ -37,6 +38,10 @@ create table if not exists public.profiles (
 );
 
 alter table public.profiles enable row level security;
+
+-- 이미 profiles 테이블을 만든 뒤 사용자 이름을 추가하는 경우
+alter table public.profiles
+add column if not exists display_name text;
 
 create policy "profiles_select_own"
 on public.profiles

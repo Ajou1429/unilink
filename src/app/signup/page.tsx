@@ -13,6 +13,7 @@ export default function SignupPage() {
   const router = useRouter();
   const [form, setForm] = useState({
     username: "",
+    displayName: "",
     password: "",
     passwordConfirm: "",
     university: "",
@@ -96,6 +97,20 @@ export default function SignupPage() {
                 className="h-11"
                 value={form.username}
                 onChange={(event) => updateField("username", event.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="displayName">사용자 이름</Label>
+              <Input
+                id="displayName"
+                autoComplete="name"
+                placeholder="화면에 표시될 이름"
+                className="h-11"
+                value={form.displayName}
+                onChange={(event) =>
+                  updateField("displayName", event.target.value)
+                }
               />
             </div>
 

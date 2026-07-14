@@ -126,7 +126,8 @@ export default function DashboardPage() {
         (plan.weekStart ?? currentWeekStartKey) === currentWeekStartKey,
     )
     .slice(0, 4);
-  const displayName = currentUser?.username ?? "게스트";
+  const displayName =
+    currentUser?.displayName || currentUser?.username || "게스트";
   const schoolLabel =
     currentUser && (currentUser.university || currentUser.department)
       ? `${currentUser.university} ${currentUser.department}`.trim()

@@ -8,6 +8,7 @@ export const AUTH_CHANGED_EVENT = "unilink:authChanged";
 export interface StoredUser {
   id: string;
   username: string;
+  displayName: string;
   passwordHash: string;
   salt: string;
   university: string;
@@ -19,12 +20,14 @@ export interface StoredUser {
 export interface CurrentUser {
   id: string;
   username: string;
+  displayName: string;
   university: string;
   department: string;
 }
 
 export interface SignupInput {
   username: string;
+  displayName: string;
   password: string;
   passwordConfirm: string;
   university: string;
@@ -54,11 +57,12 @@ function normalizeUsername(username: string) {
 
 function validateInput(input: SignupInput) {
   const username = normalizeUsername(input.username);
+  const displayName = input.displayName.trim();
   const university = input.university.trim();
   const department = input.department.trim();
 
-  if (!username || !input.password || !input.passwordConfirm) {
-    return "아이디와 비밀번호를 입력해주세요.";
+  if (!username || !displayName || !input.password || !input.passwordConfirm) {
+    return "아이디, 사용자 이름, 비밀번호를 입력해주세요.";
   }
 
   if (!/^[a-z0-9._-]{3,32}$/.test(username)) {
@@ -110,18 +114,29 @@ function setCurrentStoredUser(user: StoredUser) {
   setCurrentUser({
     id: user.id,
     username: user.username,
+    displayName: user.displayName || user.username,
     university: user.university,
     department: user.department,
   });
 }
 
 function setCurrentSupabaseUser(user: User) {
+  const fallbackUsername = user.email?.split("@")[0] ?? "user";
+  const username =
+    typeof user.user_metadata.username === "string"
+      ? user.user_metadata.username
+      : fallbackUsername;
+  const displayName =
+    typeof user.user_metadata.displayName === "string"
+      ? user.user_metadata.displayName
+      : typeof user.user_metadata.full_name === "string"
+        ? user.user_metadata.full_name
+        : username;
+
   setCurrentUser({
     id: user.id,
-    username:
-      typeof user.user_metadata.username === "string"
-        ? user.user_metadata.username
-        : user.email?.split("@")[0] ?? "user",
+    username,
+    displayName,
     university:
       typeof user.user_metadata.university === "string"
         ? user.user_metadata.university
@@ -145,6 +160,7 @@ async function saveSupabaseProfile(input: SignupInput, userId: string) {
     {
       id: userId,
       username: normalizeUsername(input.username),
+      display_name: input.displayName.trim(),
       university: input.university.trim(),
       department: input.department.trim(),
       birthday: input.birthday,
@@ -184,6 +200,7 @@ export async function signupWithPassword(input: SignupInput) {
   }
 
   const username = normalizeUsername(input.username);
+  const displayName = input.displayName.trim();
   const university = input.university.trim();
   const department = input.department.trim();
   const supabase = getSupabaseBrowserClient();
@@ -195,6 +212,8 @@ export async function signupWithPassword(input: SignupInput) {
       options: {
         data: {
           username,
+          displayName,
+          full_name: displayName,
           university,
           department,
           birthday: input.birthday,
@@ -227,6 +246,7 @@ export async function signupWithPassword(input: SignupInput) {
   const user: StoredUser = {
     id: `user-${Date.now()}`,
     username,
+    displayName,
     passwordHash: await hashPassword(input.password, salt),
     salt,
     university,

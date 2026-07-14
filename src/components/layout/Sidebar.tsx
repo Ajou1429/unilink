@@ -90,7 +90,8 @@ export function Sidebar() {
     };
   }, []);
 
-  const displayName = currentUser?.username ?? "게스트";
+  const displayName =
+    currentUser?.displayName || currentUser?.username || "게스트";
   const schoolLabel =
     currentUser && (currentUser.university || currentUser.department)
       ? `${currentUser.university} ${currentUser.department}`.trim()
