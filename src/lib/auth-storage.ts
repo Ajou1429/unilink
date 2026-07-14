@@ -193,6 +193,63 @@ export function logout() {
   window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }
 
+export async function updateDisplayName(displayNameInput: string) {
+  const displayName = displayNameInput.trim();
+  const currentUser = getCurrentUser();
+
+  if (!currentUser) {
+    return { ok: false, message: "로그인 후 사용자 이름을 변경할 수 있습니다." };
+  }
+
+  if (!displayName) {
+    return { ok: false, message: "사용자 이름을 입력해주세요." };
+  }
+
+  if (displayName.length > 30) {
+    return { ok: false, message: "사용자 이름은 30자 이하로 입력해주세요." };
+  }
+
+  const supabase = getSupabaseBrowserClient();
+
+  if (supabase) {
+    const { data, error } = await supabase.auth.updateUser({
+      data: {
+        displayName,
+        full_name: displayName,
+      },
+    });
+
+    if (error) {
+      return { ok: false, message: error.message };
+    }
+
+    if (data.user) {
+      setCurrentSupabaseUser(data.user);
+      await supabase
+        .from("profiles")
+        .update({
+          display_name: displayName,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", data.user.id);
+    } else {
+      setCurrentUser({ ...currentUser, displayName });
+    }
+
+    return { ok: true, message: "사용자 이름이 변경되었습니다." };
+  }
+
+  const users = readUsers().map((user) =>
+    user.id === currentUser.id || user.username === currentUser.username
+      ? { ...user, displayName }
+      : user,
+  );
+
+  writeUsers(users);
+  setCurrentUser({ ...currentUser, displayName });
+  return { ok: true, message: "사용자 이름이 변경되었습니다." };
+}
+
 export async function signupWithPassword(input: SignupInput) {
   const validationMessage = validateInput(input);
   if (validationMessage) {
