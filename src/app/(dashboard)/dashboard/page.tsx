@@ -37,9 +37,12 @@ import {
   getCurrentUser,
   type CurrentUser,
 } from "@/lib/auth-storage";
+import {
+  getCurrentAcademicTermLabel,
+  KOREA_TIME_ZONE,
+} from "@/lib/academic-term";
 
 const recentPosts = mockPosts.slice(0, 3);
-const KOREA_TIME_ZONE = "Asia/Seoul";
 const COURSE_WEEKDAYS: DayOfWeek[] = ["월", "화", "수", "목", "금"];
 
 function getKoreanToday() {
@@ -132,6 +135,7 @@ export default function DashboardPage() {
     currentUser && (currentUser.university || currentUser.department)
       ? `${currentUser.university} ${currentUser.department}`.trim()
       : "로그인 후 회원 정보의 학과가 표시됩니다";
+  const academicTermLabel = getCurrentAcademicTermLabel();
 
   function completePlan(planId: string) {
     const nextPlans = plans.map((plan) =>
@@ -149,7 +153,7 @@ export default function DashboardPage() {
           <div>
             <h2 className="text-2xl font-bold">안녕하세요, {displayName}님</h2>
             <p className="text-muted-foreground mt-1">
-              2024년 1학기 · {schoolLabel}
+              {academicTermLabel} · {schoolLabel}
             </p>
           </div>
           <Badge

@@ -59,6 +59,7 @@ import {
   saveMonthlyEvents,
 } from "@/lib/timetable-storage";
 import { getMyNotes, MyNote } from "@/lib/my-notes-storage";
+import { getCurrentAcademicTermLabel } from "@/lib/academic-term";
 
 const DAYS: DayOfWeek[] = ["월", "화", "수", "목", "금"];
 const PERSONAL_COLORS = ["#2563EB", "#7C3AED", "#059669", "#D97706", "#DB2777"];
@@ -218,6 +219,7 @@ export default function TimetablePage() {
   }, [sessionFeedback]);
 
   const totalCredits = courses.reduce((sum, c) => sum + c.credits, 0);
+  const academicTermLabel = getCurrentAcademicTermLabel();
 
   function persistCourses(nextCourses: Course[]) {
     setCourses(nextCourses);
@@ -410,7 +412,7 @@ export default function TimetablePage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <p className="text-muted-foreground text-sm">
-              2024년 1학기 · 총 {totalCredits}학점
+              {academicTermLabel} · 총 {totalCredits}학점
             </p>
           </div>
           <div className="flex gap-2">
