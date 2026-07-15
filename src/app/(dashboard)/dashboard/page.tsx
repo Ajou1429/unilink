@@ -16,8 +16,6 @@ import {
   Circle,
   Clock,
   Target,
-  Users,
-  TrendingUp,
 } from "lucide-react";
 import { mockCourses, mockPosts, mockStudyPlans } from "@/lib/mock-data";
 import { getStoredCourses } from "@/lib/course-storage";
@@ -32,6 +30,11 @@ import {
   STUDY_PLANS_CHANGED_EVENT,
 } from "@/lib/study-storage";
 import { Course, DayOfWeek, StudyPlan } from "@/lib/types";
+import {
+  CourseSessionProgress,
+  getCourseSessions,
+  TIMETABLE_CHANGED_EVENT,
+} from "@/lib/timetable-storage";
 import {
   AUTH_CHANGED_EVENT,
   getCurrentUser,
@@ -90,6 +93,7 @@ export default function DashboardPage() {
   const [courses, setCourses] = useState<Course[]>(mockCourses);
   const [plans, setPlans] = useState<StudyPlan[]>(mockStudyPlans);
   const [personalStudies, setPersonalStudies] = useState<PersonalStudy[]>([]);
+  const [courseSessions, setCourseSessions] = useState<CourseSessionProgress[]>([]);
   const [koreanToday, setKoreanToday] = useState(getKoreanToday);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
 
@@ -98,6 +102,7 @@ export default function DashboardPage() {
       setCourses(getStoredCourses());
       setPlans(getWeeklyStudyPlans(mockStudyPlans));
       setPersonalStudies(getPersonalStudies());
+      setCourseSessions(getCourseSessions());
       setKoreanToday(getKoreanToday());
       setCurrentUser(getCurrentUser());
     }
@@ -105,12 +110,14 @@ export default function DashboardPage() {
     window.setTimeout(loadDashboardData, 0);
     window.addEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
     window.addEventListener(PERSONAL_STUDIES_CHANGED_EVENT, loadDashboardData);
+    window.addEventListener(TIMETABLE_CHANGED_EVENT, loadDashboardData);
     window.addEventListener(AUTH_CHANGED_EVENT, loadDashboardData);
     window.addEventListener("storage", loadDashboardData);
 
     return () => {
       window.removeEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener(PERSONAL_STUDIES_CHANGED_EVENT, loadDashboardData);
+      window.removeEventListener(TIMETABLE_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener(AUTH_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener("storage", loadDashboardData);
     };
@@ -165,7 +172,7 @@ export default function DashboardPage() {
           </Badge>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid gap-4 md:grid-cols-3">
           {[
             {
               label: "수강 중인 수업",
@@ -174,22 +181,16 @@ export default function DashboardPage() {
               color: "text-blue-600 bg-blue-50",
             },
             {
-              label: "같은 수업 친구",
-              value: "247명",
-              icon: Users,
-              color: "text-violet-600 bg-violet-50",
-            },
-            {
-              label: "개인 공부",
+              label: "진행중인 개인 학습",
               value: String(personalStudies.length),
               icon: Target,
               color: "text-green-600 bg-green-50",
             },
             {
-              label: "커뮤니티 활동",
-              value: "12",
-              icon: TrendingUp,
-              color: "text-amber-600 bg-amber-50",
+              label: "반영된 강의 진도",
+              value: String(courseSessions.length),
+              icon: Clock,
+              color: "text-violet-600 bg-violet-50",
             },
           ].map((stat) => (
             <Card key={stat.label} className="border-0 shadow-sm">
