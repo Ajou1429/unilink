@@ -142,6 +142,7 @@ export default function StudyPage() {
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [editingMonthlyPlanId, setEditingMonthlyPlanId] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(() => getMonthFromDate(new Date()));
+  const [focusedPlanId, setFocusedPlanId] = useState("");
 
   const [newPlan, setNewPlan] = useState({
     courseId: "",
@@ -176,6 +177,20 @@ export default function StudyPage() {
       setMonthlyPlans(getMonthlyStudyPlans());
     }, 0);
   }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const planId = new URLSearchParams(window.location.search).get("planId");
+      if (!planId) return;
+
+      setFocusedPlanId(planId);
+      document
+        .getElementById(`study-plan-${planId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+
+    return () => window.clearTimeout(timeout);
+  }, [plans]);
 
   const currentWeekStartDate = getSundayWeekStart(new Date());
   const currentWeekStartKey = formatDateKey(currentWeekStartDate);
@@ -685,9 +700,10 @@ export default function StudyPage() {
                 {currentWeekPlans.map((plan) => (
                   <Card
                     key={plan.id}
+                    id={`study-plan-${plan.id}`}
                     className={`border-0 shadow-sm transition-opacity ${
                       plan.isCompleted ? "opacity-65" : ""
-                    }`}
+                    } ${focusedPlanId === plan.id ? "ring-2 ring-primary" : ""}`}
                   >
                     <CardContent className="p-4">
                       <div className="flex items-start gap-3">

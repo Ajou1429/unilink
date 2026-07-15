@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Bell, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,34 +12,50 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-const notifications = [
-  {
-    id: 1,
-    text: "운영체제 커뮤니티에 새 글이 올라왔어요.",
-    time: "방금 전",
-    unread: true,
-  },
-  {
-    id: 2,
-    text: "이번 주 학습 계획 3개가 완료되었어요.",
-    time: "1시간 전",
-    unread: true,
-  },
-  {
-    id: 3,
-    text: "'알고리즘' 수업을 듣는 53명이 있어요.",
-    time: "어제",
-    unread: false,
-  },
-];
+import {
+  APP_NOTIFICATIONS_CHANGED_EVENT,
+  AppNotification,
+  getAppNotifications,
+  markAppNotificationRead,
+} from "@/lib/notification-storage";
 
 interface HeaderProps {
   title: string;
 }
 
 export function Header({ title }: HeaderProps) {
-  const unreadCount = notifications.filter((n) => n.unread).length;
+  const router = useRouter();
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const unreadCount = notifications.filter((notification) => !notification.read).length;
+
+  useEffect(() => {
+    function syncNotifications() {
+      setNotifications(getAppNotifications());
+    }
+
+    syncNotifications();
+    window.addEventListener(APP_NOTIFICATIONS_CHANGED_EVENT, syncNotifications);
+    window.addEventListener("storage", syncNotifications);
+
+    return () => {
+      window.removeEventListener(APP_NOTIFICATIONS_CHANGED_EVENT, syncNotifications);
+      window.removeEventListener("storage", syncNotifications);
+    };
+  }, []);
+
+  function formatNotificationTime(createdAt: string) {
+    const diff = Date.now() - new Date(createdAt).getTime();
+    if (diff < 60 * 1000) return "방금 전";
+    if (diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)}분 전`;
+    if (diff < 24 * 60 * 60 * 1000) return `${Math.floor(diff / 3600000)}시간 전`;
+    return `${Math.floor(diff / 86400000)}일 전`;
+  }
+
+  function openNotification(notification: AppNotification) {
+    markAppNotificationRead(notification.id);
+    setNotifications(getAppNotifications());
+    router.push(notification.href);
+  }
 
   return (
     <header className="h-16 border-b bg-white flex items-center gap-4 px-6">
@@ -67,20 +85,34 @@ export function Header({ title }: HeaderProps) {
           <div className="px-3 py-2 border-b">
             <p className="font-semibold text-sm">알림</p>
           </div>
-          {notifications.map((n) => (
-            <DropdownMenuItem
-              key={n.id}
-              className="px-3 py-3 flex gap-3 cursor-pointer"
-            >
-              {n.unread && (
-                <div className="h-2 w-2 rounded-full bg-primary mt-1.5 shrink-0" />
-              )}
-              <div className={n.unread ? "" : "ml-4"}>
-                <p className="text-sm leading-snug">{n.text}</p>
-                <p className="text-xs text-muted-foreground mt-1">{n.time}</p>
-              </div>
-            </DropdownMenuItem>
-          ))}
+          {notifications.length > 0 ? (
+            notifications.slice(0, 8).map((notification) => (
+              <DropdownMenuItem
+                key={notification.id}
+                className="px-3 py-3 flex gap-3 cursor-pointer"
+                onClick={() => openNotification(notification)}
+              >
+                {!notification.read && (
+                  <div className="h-2 w-2 rounded-full bg-primary mt-1.5 shrink-0" />
+                )}
+                <div className={notification.read ? "ml-4 min-w-0" : "min-w-0"}>
+                  <p className="text-sm font-medium leading-snug">
+                    {notification.title}
+                  </p>
+                  <p className="text-xs leading-snug text-muted-foreground">
+                    {notification.body}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {formatNotificationTime(notification.createdAt)}
+                  </p>
+                </div>
+              </DropdownMenuItem>
+            ))
+          ) : (
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+              아직 받은 알림이 없습니다.
+            </div>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </header>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   COMMUNITY_POSTS_CHANGED_EVENT,
   getCommunityPosts,
@@ -13,6 +14,11 @@ import {
   getWeeklyStudyPlans,
   STUDY_PLANS_CHANGED_EVENT,
 } from "@/lib/study-storage";
+import {
+  AppNotification,
+  markAppNotificationRead,
+  upsertAppNotification,
+} from "@/lib/notification-storage";
 
 const NOTIFICATION_HISTORY_STORAGE_KEY = "unilink:notification-history";
 
@@ -20,6 +26,7 @@ interface NotificationToast {
   id: string;
   title: string;
   body: string;
+  notification: AppNotification;
 }
 
 function addDays(date: Date, amount: number) {
@@ -52,16 +59,42 @@ function saveNotificationHistory(history: string[]) {
 }
 
 export function NotificationBridge() {
+  const router = useRouter();
   const [toasts, setToasts] = useState<NotificationToast[]>([]);
   const seenPostIdsRef = useRef<Set<string> | null>(null);
 
-  function showNotification(title: string, body: string, tag: string) {
+  function openNotification(notification: AppNotification) {
+    markAppNotificationRead(notification.id);
+    router.push(notification.href);
+  }
+
+  function showNotification(notification: AppNotification) {
+    upsertAppNotification(notification);
+
     if ("Notification" in window && Notification.permission === "granted") {
-      new Notification(title, { body, tag });
+      const browserNotification = new Notification(notification.title, {
+        body: notification.body,
+        tag: notification.id,
+      });
+      browserNotification.onclick = () => {
+        window.focus();
+        openNotification(notification);
+        browserNotification.close();
+      };
     }
 
-    const id = `${tag}-${Date.now()}`;
-    setToasts((prev) => [{ id, title, body }, ...prev].slice(0, 3));
+    const id = `${notification.id}-${Date.now()}`;
+    setToasts((prev) =>
+      [
+        {
+          id,
+          title: notification.title,
+          body: notification.body,
+          notification,
+        },
+        ...prev,
+      ].slice(0, 3),
+    );
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((toast) => toast.id !== id));
     }, 5200);
@@ -86,11 +119,15 @@ export function NotificationBridge() {
 
     if (!latestPost) return;
 
-    showNotification(
-      "새 커뮤니티 글",
-      `${latestPost.category} · ${latestPost.title}`,
-      `community-${latestPost.id}`,
-    );
+    showNotification({
+      id: `community-${latestPost.id}`,
+      type: "community",
+      title: "새 커뮤니티 글",
+      body: `${latestPost.category} · ${latestPost.title}`,
+      href: `/community?postId=${encodeURIComponent(latestPost.id)}`,
+      read: false,
+      createdAt: new Date().toISOString(),
+    });
   }
 
   function checkDeadlineNotifications() {
@@ -111,11 +148,15 @@ export function NotificationBridge() {
       const historyKey = `${todayKey}:deadline:${plan.id}`;
       if (history.has(historyKey)) return;
 
-      showNotification(
-        "마감 하루 전",
-        `${plan.courseName} · ${plan.title}`,
-        `deadline-${plan.id}-${todayKey}`,
-      );
+      showNotification({
+        id: `deadline-${plan.id}-${todayKey}`,
+        type: "deadline",
+        title: "마감 하루 전",
+        body: `${plan.courseName} · ${plan.title}`,
+        href: `/study?planId=${encodeURIComponent(plan.id)}`,
+        read: false,
+        createdAt: new Date().toISOString(),
+      });
       history.add(historyKey);
       changed = true;
     });
@@ -164,13 +205,15 @@ export function NotificationBridge() {
   return (
     <div className="fixed right-4 top-4 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
       {toasts.map((toast) => (
-        <div
+        <button
+          type="button"
           key={toast.id}
-          className="rounded-lg border border-slate-200 bg-white p-3 shadow-lg"
+          className="rounded-lg border border-slate-200 bg-white p-3 text-left shadow-lg transition-colors hover:bg-accent"
+          onClick={() => openNotification(toast.notification)}
         >
           <p className="text-sm font-semibold">{toast.title}</p>
           <p className="mt-1 text-xs text-muted-foreground">{toast.body}</p>
-        </div>
+        </button>
       ))}
     </div>
   );
