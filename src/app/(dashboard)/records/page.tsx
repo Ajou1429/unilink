@@ -305,7 +305,7 @@ export default function RecordsPage() {
     };
 
     persistSpecs([record, ...specRecords]);
-    setSpecMessage(`${study.title} 개인 과제를 스펙 항목에 추가했습니다.`);
+    setSpecMessage(`${study.title} 개인 학습을 스펙 항목에 추가했습니다.`);
   }
 
   function addAllStudySpecs() {
@@ -327,7 +327,7 @@ export default function RecordsPage() {
     }));
 
     persistSpecs([...records, ...specRecords]);
-    setSpecMessage(`${unlinkedStudies.length}개 개인 과제를 스펙 항목에 추가했습니다.`);
+    setSpecMessage(`${unlinkedStudies.length}개 개인 학습을 스펙 항목에 추가했습니다.`);
   }
 
   function addCustomSpec(event: FormEvent<HTMLFormElement>) {
@@ -338,7 +338,7 @@ export default function RecordsPage() {
     const title = linkedStudy?.title ?? newSpec.title.trim();
 
     if (!title) {
-      setSpecMessage("스펙 이름을 입력하거나 개인 과제를 선택해주세요.");
+      setSpecMessage("스펙 이름을 입력하거나 개인 학습을 선택해주세요.");
       return;
     }
 
@@ -808,9 +808,9 @@ export default function RecordsPage() {
                 <div className="rounded-lg border p-4">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <p className="font-medium">개인 과제 연동</p>
+                      <p className="font-medium">개인 학습 연동</p>
                       <p className="text-sm text-muted-foreground">
-                        시간표 하단의 개인 과제를 스펙 항목으로 가져옵니다.
+                        시간표 하단의 개인 학습을 스펙 항목으로 가져옵니다.
                       </p>
                     </div>
                     <Button
@@ -842,7 +842,7 @@ export default function RecordsPage() {
                       ))
                     ) : (
                       <p className="text-sm text-muted-foreground">
-                        스펙으로 추가할 새 개인 과제가 없습니다.
+                        스펙으로 추가할 새 개인 학습이 없습니다.
                       </p>
                     )}
                   </div>
@@ -855,7 +855,7 @@ export default function RecordsPage() {
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label>개인 과제 연결</Label>
+                      <Label>개인 학습 연결</Label>
                       <Select
                         value={newSpec.personalStudyId}
                         onValueChange={(value) => {
@@ -1033,7 +1033,7 @@ export default function RecordsPage() {
                             </div>
                             <div className="flex shrink-0 items-center gap-1">
                               {record.personalStudyId && (
-                                <Badge variant="secondary">개인 과제 연동</Badge>
+                                <Badge variant="secondary">개인 학습 연동</Badge>
                               )}
                               <Button
                                 size="icon-sm"

@@ -39,7 +39,7 @@ const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
   { href: "/timetable", icon: CalendarDays, label: "시간표" },
   { href: "/community", icon: MessageSquare, label: "커뮤니티" },
-  { href: "/study", icon: BookOpen, label: "학습 플랜" },
+  { href: "/study", icon: BookOpen, label: "학습 계획" },
   { href: "/notes", icon: FileText, label: "나의 노트" },
   { href: "/records", icon: Award, label: "성적 및 스펙" },
 ];
@@ -182,7 +182,7 @@ export function Sidebar() {
 
         <div className="pt-4 pb-1">
           <p className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-            개인 과제
+            개인 학습
           </p>
           {personalStudies.length > 0 ? (
             personalStudies.map((study) => {
@@ -207,7 +207,7 @@ export function Sidebar() {
             })
           ) : (
             <p className="px-3 py-2 text-xs text-muted-foreground">
-              시간표에서 개인 과제를 추가하세요.
+              시간표에서 개인 학습을 추가하세요.
             </p>
           )}
         </div>

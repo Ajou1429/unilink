@@ -210,7 +210,7 @@ export default function NotesPage() {
         modifiedTime: now,
         size: 1800000,
         contentSummary:
-          "Google Drive에서 새로 발견된 GoodNotes PDF입니다. 아직 수업이나 개인 과제에 분류되지 않았습니다.",
+          "Google Drive에서 새로 발견된 GoodNotes PDF입니다. 아직 수업이나 개인 학습에 분류되지 않았습니다.",
       },
     ]);
     setLastSyncAt(now);
@@ -312,7 +312,7 @@ export default function NotesPage() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="course">내 수업</SelectItem>
-                              <SelectItem value="personal">개인 과제</SelectItem>
+                              <SelectItem value="personal">개인 학습</SelectItem>
                               <SelectItem value="unassigned">미분류</SelectItem>
                             </SelectContent>
                           </Select>
@@ -324,7 +324,7 @@ export default function NotesPage() {
                           <Label>
                             {newNote.linkedType === "course"
                               ? "연결할 수업"
-                              : "연결할 개인 과제"}
+                              : "연결할 개인 학습"}
                           </Label>
                           <Select
                             value={newNote.linkedId}
@@ -567,7 +567,7 @@ export default function NotesPage() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="course">내 수업</SelectItem>
-                              <SelectItem value="personal">개인 과제</SelectItem>
+                              <SelectItem value="personal">개인 학습</SelectItem>
                               <SelectItem value="unassigned">미분류</SelectItem>
                             </SelectContent>
                           </Select>

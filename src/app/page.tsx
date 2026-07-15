@@ -36,7 +36,7 @@ const features = [
   },
   {
     icon: Sparkles,
-    title: "AI 학습 플랜",
+    title: "AI 학습 계획",
     description:
       "과목, 시험 일정, 현재 진도를 바탕으로 학습 계획을 추천합니다.",
     color: "bg-amber-50 text-amber-600",
@@ -197,7 +197,7 @@ export default function LandingPage() {
               {
                 step: "03",
                 title: "함께 공부 시작",
-                desc: "커뮤니티에 참여하고 AI 학습 플랜으로 성적을 관리하세요.",
+                desc: "커뮤니티에 참여하고 AI 학습 계획으로 성적을 관리하세요.",
               },
             ].map((item) => (
               <div key={item.step} className="text-center">

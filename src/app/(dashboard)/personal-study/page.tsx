@@ -45,14 +45,14 @@ function formatBytes(size: number) {
 function EmptyPersonalStudyState() {
   return (
     <div className="flex flex-col min-h-screen">
-      <Header title="개인 과제" />
+      <Header title="개인 학습" />
       <div className="flex-1 p-6 max-w-3xl mx-auto w-full">
         <Card className="border-0 shadow-sm">
           <CardContent className="py-12 text-center">
             <Target className="h-10 w-10 mx-auto mb-4 text-muted-foreground opacity-40" />
-            <h2 className="text-lg font-semibold mb-2">개인 과제를 찾을 수 없어요</h2>
+            <h2 className="text-lg font-semibold mb-2">개인 학습을 찾을 수 없어요</h2>
             <p className="text-sm text-muted-foreground mb-6">
-              시간표 오른쪽 아래 개인 과제 카드에서 새 항목을 추가하세요.
+              시간표 오른쪽 아래 개인 학습 카드에서 새 항목을 추가하세요.
             </p>
             <Link href="/timetable">
               <Button>시간표로 이동</Button>
@@ -254,7 +254,7 @@ function PersonalStudyContent() {
                     <Label>내용</Label>
                     <Textarea
                       rows={8}
-                      placeholder="개인 과제 내용을 정리하세요"
+                      placeholder="개인 학습 내용을 정리하세요"
                       value={noteContent}
                       onChange={(event) => setNoteContent(event.target.value)}
                     />

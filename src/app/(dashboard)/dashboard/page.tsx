@@ -328,7 +328,7 @@ export default function DashboardPage() {
                   추천합니다.
                 </p>
                 <Button size="sm" className="mt-3 h-7 text-xs w-full gap-1">
-                  학습 플랜 생성 <Sparkles className="h-3 w-3" />
+                  학습 계획 생성 <Sparkles className="h-3 w-3" />
                 </Button>
               </div>
               <div className="bg-white rounded-lg p-3 shadow-sm">
