@@ -236,7 +236,7 @@ export default function TimetablePage() {
       setPersonalStudies(getPersonalStudies());
       setMonthlyEvents(getMonthlyEvents());
       setCourseSessions(getCourseSessions());
-      setMyNotes(getMyNotes());
+      getMyNotes().then(setMyNotes);
     }
 
     const timeout = window.setTimeout(syncData, 0);
