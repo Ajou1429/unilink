@@ -35,6 +35,41 @@ import {
   saveCoursePlan,
 } from "@/lib/course-storage";
 import { getMyNotes, MY_NOTES_CHANGED_EVENT, MyNote } from "@/lib/my-notes-storage";
+import {
+  getMonthlyStudyPlans,
+  getWeeklyStudyPlans,
+  MonthlyStudyPlan,
+  saveMonthlyStudyPlans,
+  saveWeeklyStudyPlans,
+} from "@/lib/study-storage";
+import {
+  getMonthlyEvents,
+  MonthlyEvent,
+  saveMonthlyEvents,
+} from "@/lib/timetable-storage";
+
+function formatDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date: Date, amount: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+function getSundayWeekStart(date: Date) {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return addDays(next, -next.getDay());
+}
+
+function getMonthFromDate(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
 
 function formatBytes(size: number) {
   if (size < 1024) return `${size} B`;
@@ -77,6 +112,7 @@ function CourseContent() {
   const [planTitle, setPlanTitle] = useState("");
   const [planDescription, setPlanDescription] = useState("");
   const [planDueDate, setPlanDueDate] = useState("");
+  const [planFeedback, setPlanFeedback] = useState("");
 
   useEffect(() => {
     const timeout = window.setTimeout(async () => {
@@ -95,6 +131,7 @@ function CourseContent() {
       setPlanTitle("");
       setPlanDescription("");
       setPlanDueDate("");
+      setPlanFeedback("");
     }, 0);
 
     return () => window.clearTimeout(timeout);
@@ -148,11 +185,68 @@ function CourseContent() {
     setNoteContent("");
   }
 
+  function syncCoursePlan(plan: StudyPlan, linkedCourse: Course) {
+    const anchorDate = plan.dueDate
+      ? new Date(`${plan.dueDate}T00:00:00`)
+      : new Date();
+    const weekStart = formatDateKey(getSundayWeekStart(anchorDate));
+    const weeklyPlan: StudyPlan = {
+      ...plan,
+      weekStart,
+    };
+    const weeklyPlans = getWeeklyStudyPlans();
+    const nextWeeklyPlans = weeklyPlans.some((item) => item.id === weeklyPlan.id)
+      ? weeklyPlans.map((item) => (item.id === weeklyPlan.id ? weeklyPlan : item))
+      : [weeklyPlan, ...weeklyPlans];
+    const monthlyPlan: MonthlyStudyPlan = {
+      id: `weekly-${weeklyPlan.id}`,
+      month: getMonthFromDate(new Date(`${weekStart}T00:00:00`)),
+      weekStart,
+      courseId: weeklyPlan.courseId,
+      courseName: weeklyPlan.courseName,
+      title: weeklyPlan.title,
+      description: weeklyPlan.description,
+      isCompleted: weeklyPlan.isCompleted,
+      createdAt: weeklyPlan.createdAt,
+    };
+    const monthlyPlans = getMonthlyStudyPlans();
+    const nextMonthlyPlans = monthlyPlans.some((item) => item.id === monthlyPlan.id)
+      ? monthlyPlans.map((item) => (item.id === monthlyPlan.id ? monthlyPlan : item))
+      : [monthlyPlan, ...monthlyPlans];
+
+    saveWeeklyStudyPlans(nextWeeklyPlans);
+    saveMonthlyStudyPlans(nextMonthlyPlans);
+
+    if (!weeklyPlan.dueDate) return;
+
+    const monthlyEvent: MonthlyEvent = {
+      id: `course-plan-event-${weeklyPlan.id}`,
+      title: `학습 계획: ${weeklyPlan.title}`,
+      date: weeklyPlan.dueDate,
+      startTime: linkedCourse.startTime || "09:00",
+      endTime: linkedCourse.endTime || "10:00",
+      location: linkedCourse.name,
+      memo: weeklyPlan.description
+        ? `${linkedCourse.name} 학습 계획\n${weeklyPlan.description}`
+        : `${linkedCourse.name} 학습 계획 마감일`,
+      color: linkedCourse.color,
+      createdAt: weeklyPlan.createdAt,
+    };
+    const monthlyEvents = getMonthlyEvents();
+    const nextMonthlyEvents = monthlyEvents.some((event) => event.id === monthlyEvent.id)
+      ? monthlyEvents.map((event) =>
+          event.id === monthlyEvent.id ? monthlyEvent : event,
+        )
+      : [monthlyEvent, ...monthlyEvents];
+
+    saveMonthlyEvents(nextMonthlyEvents);
+  }
+
   function addPlan() {
     if (!course || !planTitle.trim()) return;
 
     const plan: StudyPlan = {
-      id: Date.now().toString(),
+      id: `course-plan-${Date.now()}`,
       userId: "me",
       courseId: course.id,
       courseName: course.name,
@@ -165,10 +259,16 @@ function CourseContent() {
     };
 
     saveCoursePlan(plan);
+    syncCoursePlan(plan, course);
     setPlans((prev) => [plan, ...prev]);
     setPlanTitle("");
     setPlanDescription("");
     setPlanDueDate("");
+    setPlanFeedback(
+      plan.dueDate
+        ? "수업 계획이 학습 계획, 월별 계획, 시간표 월간 일정에 등록되었습니다."
+        : "수업 계획이 학습 계획과 월별 계획에 등록되었습니다.",
+    );
   }
 
   function uploadFiles(event: ChangeEvent<HTMLInputElement>) {
@@ -388,6 +488,12 @@ function CourseContent() {
                   <Button onClick={addPlan} className="w-full">
                     계획 저장
                   </Button>
+                  {planFeedback && (
+                    <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">
+                      <CalendarCheck className="h-3.5 w-3.5" />
+                      {planFeedback}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 

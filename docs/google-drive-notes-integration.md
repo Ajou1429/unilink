@@ -11,7 +11,7 @@ UniLink의 `나의 노트`는 GoodNotes 자동 백업 PDF가 Google Drive에서 
 5. 변경된 PDF를 다운로드하고, 이전 버전과 비교해 변경 내용을 요약한다.
 6. 서버가 `GoodNotesDriveFile` 형태로 노트 upsert를 수행한다.
 7. 같은 `driveFileId`는 기존 노트를 덮어쓰고, 새 `driveFileId`는 새 노트로 추가한다.
-8. 사용자가 지정한 `내 수업` 또는 `개인 과제` 분류는 유지된다.
+8. 사용자가 지정한 `내 수업` 또는 `개인 학습` 분류는 유지된다.
 
 ## Client Upsert Contract
 

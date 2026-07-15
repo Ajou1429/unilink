@@ -142,6 +142,7 @@ export default function StudyPage() {
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [editingMonthlyPlanId, setEditingMonthlyPlanId] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(() => getMonthFromDate(new Date()));
+  const [focusedPlanId, setFocusedPlanId] = useState("");
 
   const [newPlan, setNewPlan] = useState({
     courseId: "",
@@ -176,6 +177,20 @@ export default function StudyPage() {
       setMonthlyPlans(getMonthlyStudyPlans());
     }, 0);
   }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const planId = new URLSearchParams(window.location.search).get("planId");
+      if (!planId) return;
+
+      setFocusedPlanId(planId);
+      document
+        .getElementById(`study-plan-${planId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+
+    return () => window.clearTimeout(timeout);
+  }, [plans]);
 
   const currentWeekStartDate = getSundayWeekStart(new Date());
   const currentWeekStartKey = formatDateKey(currentWeekStartDate);
@@ -285,7 +300,7 @@ export default function StudyPage() {
 
     const course = courses.find((item) => item.id === newPlan.courseId);
     const courseId = newPlan.courseId || "self";
-    const courseName = course?.name ?? "개인 과제";
+    const courseName = course?.name ?? "개인 학습";
 
     if (editingPlanId) {
       const updatedPlan =
@@ -365,7 +380,7 @@ export default function StudyPage() {
 
     const course = courses.find((item) => item.id === newMonthlyPlan.courseId);
     const courseId = newMonthlyPlan.courseId || "self";
-    const courseName = course?.name ?? "개인 공부";
+    const courseName = course?.name ?? "개인 학습";
     const planMonth = getMonthFromDate(new Date(newMonthlyPlan.weekStart));
 
     if (editingMonthlyPlanId) {
@@ -445,7 +460,7 @@ export default function StudyPage() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <Header title="학습 플랜" />
+      <Header title="학습 계획" />
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 p-6">
         <section className="grid gap-4 lg:grid-cols-[1.4fr_0.9fr]">
           <Card className="border-0 shadow-sm">
@@ -626,7 +641,7 @@ export default function StudyPage() {
                               {selectedWeeklyCourse.name}
                             </span>
                           ) : (
-                            <SelectValue placeholder="선택하지 않으면 개인 과제로 저장" />
+                            <SelectValue placeholder="선택하지 않으면 개인 학습으로 저장" />
                           )}
                         </SelectTrigger>
                         <SelectContent>
@@ -685,9 +700,10 @@ export default function StudyPage() {
                 {currentWeekPlans.map((plan) => (
                   <Card
                     key={plan.id}
+                    id={`study-plan-${plan.id}`}
                     className={`border-0 shadow-sm transition-opacity ${
                       plan.isCompleted ? "opacity-65" : ""
-                    }`}
+                    } ${focusedPlanId === plan.id ? "ring-2 ring-primary" : ""}`}
                   >
                     <CardContent className="p-4">
                       <div className="flex items-start gap-3">
@@ -865,7 +881,7 @@ export default function StudyPage() {
                                     {selectedMonthlyCourse.name}
                                   </span>
                                 ) : (
-                                  <SelectValue placeholder="선택하지 않으면 개인 공부" />
+                                  <SelectValue placeholder="선택하지 않으면 개인 학습" />
                                 )}
                               </SelectTrigger>
                               <SelectContent>

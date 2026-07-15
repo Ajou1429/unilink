@@ -16,8 +16,6 @@ import {
   Circle,
   Clock,
   Target,
-  Users,
-  TrendingUp,
 } from "lucide-react";
 import { mockCourses, mockPosts, mockStudyPlans } from "@/lib/mock-data";
 import { getStoredCourses } from "@/lib/course-storage";
@@ -32,6 +30,11 @@ import {
   STUDY_PLANS_CHANGED_EVENT,
 } from "@/lib/study-storage";
 import { Course, DayOfWeek, StudyPlan } from "@/lib/types";
+import {
+  CourseSessionProgress,
+  getCourseSessions,
+  TIMETABLE_CHANGED_EVENT,
+} from "@/lib/timetable-storage";
 import {
   AUTH_CHANGED_EVENT,
   getCurrentUser,
@@ -90,6 +93,7 @@ export default function DashboardPage() {
   const [courses, setCourses] = useState<Course[]>(mockCourses);
   const [plans, setPlans] = useState<StudyPlan[]>(mockStudyPlans);
   const [personalStudies, setPersonalStudies] = useState<PersonalStudy[]>([]);
+  const [courseSessions, setCourseSessions] = useState<CourseSessionProgress[]>([]);
   const [koreanToday, setKoreanToday] = useState(getKoreanToday);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
 
@@ -98,6 +102,7 @@ export default function DashboardPage() {
       setCourses(getStoredCourses());
       setPlans(getWeeklyStudyPlans(mockStudyPlans));
       setPersonalStudies(getPersonalStudies());
+      setCourseSessions(getCourseSessions());
       setKoreanToday(getKoreanToday());
       setCurrentUser(getCurrentUser());
     }
@@ -105,12 +110,14 @@ export default function DashboardPage() {
     window.setTimeout(loadDashboardData, 0);
     window.addEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
     window.addEventListener(PERSONAL_STUDIES_CHANGED_EVENT, loadDashboardData);
+    window.addEventListener(TIMETABLE_CHANGED_EVENT, loadDashboardData);
     window.addEventListener(AUTH_CHANGED_EVENT, loadDashboardData);
     window.addEventListener("storage", loadDashboardData);
 
     return () => {
       window.removeEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener(PERSONAL_STUDIES_CHANGED_EVENT, loadDashboardData);
+      window.removeEventListener(TIMETABLE_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener(AUTH_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener("storage", loadDashboardData);
     };
@@ -136,6 +143,14 @@ export default function DashboardPage() {
       ? `${currentUser.university} ${currentUser.department}`.trim()
       : "로그인 후 회원 정보의 학과가 표시됩니다";
   const academicTermLabel = getCurrentAcademicTermLabel();
+  const recentProgressCourseCount = new Set(
+    courseSessions
+      .filter((session) => {
+        const updatedAt = new Date(session.updatedAt || session.createdAt).getTime();
+        return Number.isFinite(updatedAt) && Date.now() - updatedAt <= 604800000;
+      })
+      .map((session) => session.courseId),
+  ).size;
 
   function completePlan(planId: string) {
     const nextPlans = plans.map((plan) =>
@@ -165,7 +180,7 @@ export default function DashboardPage() {
           </Badge>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           {[
             {
               label: "수강 중인 수업",
@@ -174,21 +189,21 @@ export default function DashboardPage() {
               color: "text-blue-600 bg-blue-50",
             },
             {
-              label: "같은 수업 친구",
-              value: "247명",
-              icon: Users,
-              color: "text-violet-600 bg-violet-50",
-            },
-            {
-              label: "개인 공부",
+              label: "진행중인 개인 학습",
               value: String(personalStudies.length),
               icon: Target,
               color: "text-green-600 bg-green-50",
             },
             {
-              label: "커뮤니티 활동",
-              value: "12",
-              icon: TrendingUp,
+              label: "반영된 강의 진도",
+              value: String(courseSessions.length),
+              icon: Clock,
+              color: "text-violet-600 bg-violet-50",
+            },
+            {
+              label: "새로 반영된 진도 강의",
+              value: String(recentProgressCourseCount),
+              icon: Sparkles,
               color: "text-amber-600 bg-amber-50",
             },
           ].map((stat) => (
@@ -302,7 +317,7 @@ export default function DashboardPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-primary" />
-                AI 오늘의 추천
+                AI 진도 코칭
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -313,7 +328,7 @@ export default function DashboardPage() {
                   추천합니다.
                 </p>
                 <Button size="sm" className="mt-3 h-7 text-xs w-full gap-1">
-                  학습 플랜 생성 <Sparkles className="h-3 w-3" />
+                  학습 계획 생성 <Sparkles className="h-3 w-3" />
                 </Button>
               </div>
               <div className="bg-white rounded-lg p-3 shadow-sm">

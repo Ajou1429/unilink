@@ -59,10 +59,12 @@ function PostCard({
   post,
   course,
   onCommentAdded,
+  isFocused,
 }: {
   post: Post;
   course?: Course;
   onCommentAdded: (postId: string) => void;
+  isFocused?: boolean;
 }) {
   const [liked, setLiked] = useState(false);
   const [likes, setLikes] = useState(post.likes);
@@ -104,7 +106,12 @@ function PostCard({
   }
 
   return (
-    <Card className="border-0 shadow-sm hover:shadow-md transition-shadow">
+    <Card
+      id={`community-post-${post.id}`}
+      className={`border-0 shadow-sm transition-shadow hover:shadow-md ${
+        isFocused ? "ring-2 ring-primary" : ""
+      }`}
+    >
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           <Avatar className="h-8 w-8 shrink-0">
@@ -231,6 +238,7 @@ export default function CommunityPage() {
   const [courses, setCourses] = useState<Course[]>(mockCourses);
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [focusedPostId, setFocusedPostId] = useState("");
   const [newPost, setNewPost] = useState({
     title: "",
     content: "",
@@ -244,6 +252,23 @@ export default function CommunityPage() {
       setPosts(getCommunityPosts());
     }, 0);
   }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const postId = new URLSearchParams(window.location.search).get("postId");
+      if (!postId) return;
+
+      setActiveTab("all");
+      setActiveCourseId("all");
+      setSearch("");
+      setFocusedPostId(postId);
+      document
+        .getElementById(`community-post-${postId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+
+    return () => window.clearTimeout(timeout);
+  }, [posts]);
 
   const courseById = useMemo(() => {
     return new Map(courses.map((course) => [course.id, course]));
@@ -444,6 +469,7 @@ export default function CommunityPage() {
                     post={post}
                     course={post.courseId ? courseById.get(post.courseId) : undefined}
                     onCommentAdded={increaseCommentCount}
+                    isFocused={focusedPostId === post.id}
                   />
                 ))
               ) : (
