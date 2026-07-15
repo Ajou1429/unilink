@@ -143,6 +143,14 @@ export default function DashboardPage() {
       ? `${currentUser.university} ${currentUser.department}`.trim()
       : "로그인 후 회원 정보의 학과가 표시됩니다";
   const academicTermLabel = getCurrentAcademicTermLabel();
+  const recentProgressCourseCount = new Set(
+    courseSessions
+      .filter((session) => {
+        const updatedAt = new Date(session.updatedAt || session.createdAt).getTime();
+        return Number.isFinite(updatedAt) && Date.now() - updatedAt <= 604800000;
+      })
+      .map((session) => session.courseId),
+  ).size;
 
   function completePlan(planId: string) {
     const nextPlans = plans.map((plan) =>
@@ -172,7 +180,7 @@ export default function DashboardPage() {
           </Badge>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           {[
             {
               label: "수강 중인 수업",
@@ -191,6 +199,12 @@ export default function DashboardPage() {
               value: String(courseSessions.length),
               icon: Clock,
               color: "text-violet-600 bg-violet-50",
+            },
+            {
+              label: "새로 반영된 진도 강의",
+              value: String(recentProgressCourseCount),
+              icon: Sparkles,
+              color: "text-amber-600 bg-amber-50",
             },
           ].map((stat) => (
             <Card key={stat.label} className="border-0 shadow-sm">
