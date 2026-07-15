@@ -3,6 +3,7 @@ import { Comment, Post } from "./types";
 
 const COMMENTS_STORAGE_KEY = "unilink:comments";
 const POSTS_STORAGE_KEY = "unilink:posts";
+export const COMMUNITY_POSTS_CHANGED_EVENT = "unilink:communityPostsChanged";
 
 const defaultComments: Comment[] = [
   {
@@ -80,6 +81,9 @@ export function getCommunityPosts(): Post[] {
 
 export function saveCommunityPosts(posts: Post[]) {
   writePosts(posts);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(COMMUNITY_POSTS_CHANGED_EVENT));
+  }
 }
 
 export function getPostComments(postId: string): Comment[] {

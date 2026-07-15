@@ -7,17 +7,30 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { BellRing, CalendarClock, MessageSquare } from "lucide-react";
 import {
   AUTH_CHANGED_EVENT,
   getCurrentUser,
   type CurrentUser,
   updateDisplayName,
 } from "@/lib/auth-storage";
+import {
+  getNotificationSettings,
+  NotificationSettings,
+  NOTIFICATION_SETTINGS_CHANGED_EVENT,
+  saveNotificationSettings,
+} from "@/lib/notification-settings";
 
 export default function SettingsPage() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [message, setMessage] = useState("");
+  const [notificationSettings, setNotificationSettings] =
+    useState<NotificationSettings>({
+      community: false,
+      deadline: false,
+    });
+  const [notificationMessage, setNotificationMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -37,6 +50,27 @@ export default function SettingsPage() {
     };
   }, []);
 
+  useEffect(() => {
+    function syncNotificationSettings() {
+      setNotificationSettings(getNotificationSettings());
+    }
+
+    syncNotificationSettings();
+    window.addEventListener(
+      NOTIFICATION_SETTINGS_CHANGED_EVENT,
+      syncNotificationSettings,
+    );
+    window.addEventListener("storage", syncNotificationSettings);
+
+    return () => {
+      window.removeEventListener(
+        NOTIFICATION_SETTINGS_CHANGED_EVENT,
+        syncNotificationSettings,
+      );
+      window.removeEventListener("storage", syncNotificationSettings);
+    };
+  }, []);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
@@ -51,6 +85,56 @@ export default function SettingsPage() {
       setCurrentUser(user);
       setDisplayName(user?.displayName || "");
     }
+  }
+
+  async function requestBrowserNotificationPermission() {
+    if (!("Notification" in window)) {
+      setNotificationMessage("이 브라우저는 알림 기능을 지원하지 않습니다.");
+      return false;
+    }
+
+    if (Notification.permission === "granted") {
+      return true;
+    }
+
+    if (Notification.permission === "denied") {
+      setNotificationMessage(
+        "브라우저에서 알림이 차단되어 있습니다. 사이트 권한에서 알림을 허용해주세요.",
+      );
+      return false;
+    }
+
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      setNotificationMessage(
+        "알림 권한이 허용되지 않아 앱 안 알림만 표시될 수 있습니다.",
+      );
+      return false;
+    }
+
+    setNotificationMessage("브라우저 알림 권한이 허용되었습니다.");
+    return true;
+  }
+
+  async function updateNotificationSetting(
+    key: keyof NotificationSettings,
+    enabled: boolean,
+  ) {
+    setNotificationMessage("");
+
+    if (enabled) {
+      await requestBrowserNotificationPermission();
+    }
+
+    const nextSettings = {
+      ...notificationSettings,
+      [key]: enabled,
+    };
+    setNotificationSettings(nextSettings);
+    saveNotificationSettings(nextSettings);
+    setNotificationMessage(
+      enabled ? "알림 설정이 저장되었습니다." : "알림 설정이 꺼졌습니다.",
+    );
   }
 
   const schoolLabel =
@@ -121,6 +205,62 @@ export default function SettingsPage() {
                 </p>
                 <Button render={<Link href="/login" />}>로그인</Button>
               </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-0 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2">
+              <BellRing className="h-5 w-5 text-primary" />
+              알림
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border bg-background p-4">
+              <div className="flex gap-3">
+                <MessageSquare className="mt-0.5 h-4 w-4 text-primary" />
+                <div>
+                  <p className="font-medium">커뮤니티 알림</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    새 커뮤니티 글이 올라오면 알림을 받습니다.
+                  </p>
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                className="mt-1 h-5 w-5 accent-primary"
+                checked={notificationSettings.community}
+                onChange={(event) =>
+                  updateNotificationSetting("community", event.target.checked)
+                }
+              />
+            </label>
+
+            <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border bg-background p-4">
+              <div className="flex gap-3">
+                <CalendarClock className="mt-0.5 h-4 w-4 text-primary" />
+                <div>
+                  <p className="font-medium">마감 하루 전 알림</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    학습 계획 마감일이 하루 남았을 때 알림을 받습니다.
+                  </p>
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                className="mt-1 h-5 w-5 accent-primary"
+                checked={notificationSettings.deadline}
+                onChange={(event) =>
+                  updateNotificationSetting("deadline", event.target.checked)
+                }
+              />
+            </label>
+
+            {notificationMessage && (
+              <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+                {notificationMessage}
+              </p>
             )}
           </CardContent>
         </Card>
