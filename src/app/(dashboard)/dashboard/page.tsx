@@ -317,7 +317,7 @@ export default function DashboardPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-primary" />
-                AI 오늘의 추천
+                AI 진도 코칭
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">

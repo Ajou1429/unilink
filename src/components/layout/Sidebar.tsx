@@ -40,6 +40,7 @@ const navItems = [
   { href: "/timetable", icon: CalendarDays, label: "시간표" },
   { href: "/community", icon: MessageSquare, label: "커뮤니티" },
   { href: "/study", icon: BookOpen, label: "학습 계획" },
+  { href: "/ai-coaching", icon: Sparkles, label: "AI 진도 코칭" },
   { href: "/notes", icon: FileText, label: "나의 노트" },
   { href: "/records", icon: Award, label: "성적 및 스펙" },
 ];
