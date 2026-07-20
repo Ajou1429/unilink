@@ -12,6 +12,9 @@ verify_jwt = true
 [functions.drive-disconnect]
 verify_jwt = true
 
+[functions.drive-profile]
+verify_jwt = true
+
 [functions.drive-webhook]
 verify_jwt = false
 

@@ -102,6 +102,29 @@ export async function driveFetch(
   return res;
 }
 
+export interface DriveAccountProfile {
+  email: string | null;
+  name: string | null;
+  photoUrl: string | null;
+}
+
+export async function getDriveAccountProfile(
+  accessToken: string,
+): Promise<DriveAccountProfile> {
+  const params = new URLSearchParams({
+    fields: "user(displayName,emailAddress,photoLink)",
+  });
+  const res = await driveFetch(accessToken, `/about?${params.toString()}`);
+  const data = await res.json();
+  const user = data.user ?? {};
+
+  return {
+    email: user.emailAddress ?? null,
+    name: user.displayName ?? null,
+    photoUrl: user.photoLink ?? null,
+  };
+}
+
 export async function getStartPageToken(accessToken: string): Promise<string> {
   const res = await driveFetch(accessToken, "/changes/startPageToken");
   const data = await res.json();

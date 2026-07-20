@@ -173,6 +173,8 @@ export default function NotesPage() {
 
   const syncedCount = notes.filter((note) => note.syncStatus === "synced").length;
   const assignedCount = notes.filter((note) => note.linkedType !== "unassigned").length;
+  const connectedDriveAccount =
+    driveStatus?.accountEmail || driveStatus?.accountName || null;
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -587,14 +589,29 @@ export default function NotesPage() {
                 </>
               ) : (
                 <>
-                  <div className="flex items-center justify-between rounded-lg border p-3">
-                    <div>
+                  <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                    <div className="min-w-0">
                       <p className="text-sm font-medium">Google Drive</p>
                       <p className="text-xs text-muted-foreground">
                         {driveStatus?.connected
                           ? "계정이 연결되어 있습니다"
                           : "아직 연결되지 않았습니다"}
                       </p>
+                      {driveStatus?.connected && (
+                        <div className="mt-2 flex min-w-0 items-center gap-2">
+                          {driveStatus.accountPhotoUrl && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={driveStatus.accountPhotoUrl}
+                              alt=""
+                              className="h-5 w-5 rounded-full"
+                            />
+                          )}
+                          <p className="truncate text-xs font-medium text-foreground">
+                            {connectedDriveAccount ?? "계정 정보 확인 필요"}
+                          </p>
+                        </div>
+                      )}
                     </div>
                     {driveStatus?.connected ? (
                       <Badge variant="secondary" className="gap-1">

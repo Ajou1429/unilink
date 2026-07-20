@@ -8,6 +8,7 @@
 import {
   buildConsentUrl,
   exchangeCodeForTokens,
+  getDriveAccountProfile,
 } from "../_shared/google.ts";
 import { encryptSecret } from "../_shared/crypto.ts";
 import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.ts";
@@ -94,11 +95,26 @@ async function handleCallback(url: URL): Promise<Response> {
   }
 
   const { ciphertext, iv } = await encryptSecret(tokens.refresh_token);
+  let accountEmail: string | null = null;
+  let accountName: string | null = null;
+  let accountPhotoUrl: string | null = null;
+
+  try {
+    const profile = await getDriveAccountProfile(tokens.access_token);
+    accountEmail = profile.email;
+    accountName = profile.name;
+    accountPhotoUrl = profile.photoUrl;
+  } catch (error) {
+    console.error("google-auth profile lookup error", error);
+  }
 
   const { error: upsertError } = await admin.from("drive_connections").upsert({
     user_id: stateRow.user_id,
     refresh_token_encrypted: ciphertext,
     refresh_token_iv: iv,
+    account_email: accountEmail,
+    account_name: accountName,
+    account_photo_url: accountPhotoUrl,
   });
   if (upsertError) return redirectTo("error", "db_upsert_failed");
 

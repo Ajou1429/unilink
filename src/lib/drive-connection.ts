@@ -22,6 +22,9 @@ async function describeFunctionError(error: unknown, fallback: string): Promise<
 export interface DriveConnectionStatus {
   connected: boolean;
   folderId: string | null;
+  accountEmail: string | null;
+  accountName: string | null;
+  accountPhotoUrl: string | null;
   channelActive: boolean;
   channelExpiration: string | null;
 }
@@ -29,9 +32,18 @@ export interface DriveConnectionStatus {
 const disconnectedStatus: DriveConnectionStatus = {
   connected: false,
   folderId: null,
+  accountEmail: null,
+  accountName: null,
+  accountPhotoUrl: null,
   channelActive: false,
   channelExpiration: null,
 };
+
+interface DriveProfileResult {
+  accountEmail: string | null;
+  accountName: string | null;
+  accountPhotoUrl: string | null;
+}
 
 export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus> {
   if (!isSupabaseConfigured) return disconnectedStatus;
@@ -42,7 +54,9 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
 
   const { data, error } = await supabase
     .from("drive_connections")
-    .select("folder_id, channel_id, channel_expiration")
+    .select(
+      "folder_id, account_email, account_name, account_photo_url, channel_id, channel_expiration",
+    )
     .eq("user_id", userData.user.id)
     .maybeSingle();
 
@@ -52,10 +66,28 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
     Boolean(data.channel_id) &&
     Boolean(data.channel_expiration) &&
     new Date(data.channel_expiration as string).getTime() > Date.now();
+  let accountEmail = data.account_email ?? null;
+  let accountName = data.account_name ?? null;
+  let accountPhotoUrl = data.account_photo_url ?? null;
+
+  if (!accountEmail && !accountName) {
+    try {
+      const { data: profile } =
+        await supabase.functions.invoke<DriveProfileResult>("drive-profile");
+      accountEmail = profile?.accountEmail ?? null;
+      accountName = profile?.accountName ?? null;
+      accountPhotoUrl = profile?.accountPhotoUrl ?? null;
+    } catch {
+      // Keep the connection usable even when the profile backfill function is not deployed yet.
+    }
+  }
 
   return {
     connected: true,
     folderId: data.folder_id ?? null,
+    accountEmail,
+    accountName,
+    accountPhotoUrl,
     channelActive,
     channelExpiration: data.channel_expiration ?? null,
   };
