@@ -61,6 +61,7 @@ import {
   enableRealtimeWatch,
   getDriveConnectionStatus,
   listDriveFolders,
+  rememberDriveConnectionSucceeded,
   startDriveConnection,
   syncDriveFolder,
 } from "@/lib/drive-connection";
@@ -142,6 +143,10 @@ export default function NotesPage() {
       const driveParam = params.get("drive");
       if (driveParam === "connected") {
         setDriveMessage("Google Drive 연결에 성공했습니다.");
+        rememberDriveConnectionSucceeded().then((status) => {
+          setDriveStatus(status);
+          if (status.folderId) setDriveFolderInput(status.folderId);
+        });
       } else if (driveParam === "error") {
         setDriveMessage(
           `Google Drive 연결에 실패했습니다. (${params.get("reason") ?? "알 수 없는 오류"})`,
@@ -357,6 +362,8 @@ export default function NotesPage() {
     try {
       await disconnectDrive();
       await loadDriveStatus();
+      setDriveStatus(null);
+      setDriveFolderInput("");
       setDriveMessage("Google Drive 연결을 해제했습니다.");
     } catch (error) {
       setDriveMessage(error instanceof Error ? error.message : "연결 해제에 실패했습니다.");

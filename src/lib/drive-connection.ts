@@ -45,20 +45,78 @@ interface DriveProfileResult {
   accountPhotoUrl: string | null;
 }
 
+const DRIVE_CONNECTION_CACHE_KEY = "unilink:drive-connection-cache";
+
+interface CachedDriveConnection {
+  userId: string | null;
+  status: DriveConnectionStatus;
+  updatedAt: string;
+}
+
+function readCachedDriveStatus(userId: string | null): DriveConnectionStatus | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(DRIVE_CONNECTION_CACHE_KEY);
+    if (!raw) return null;
+
+    const cached = JSON.parse(raw) as CachedDriveConnection;
+    if (cached.userId && userId && cached.userId !== userId) return null;
+    if (!cached.status?.connected) return null;
+    return cached.status;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedDriveStatus(
+  status: DriveConnectionStatus,
+  userId: string | null,
+) {
+  if (typeof window === "undefined" || !status.connected) return;
+
+  const cached: CachedDriveConnection = {
+    userId,
+    status,
+    updatedAt: new Date().toISOString(),
+  };
+  window.localStorage.setItem(DRIVE_CONNECTION_CACHE_KEY, JSON.stringify(cached));
+}
+
+function clearCachedDriveStatus() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(DRIVE_CONNECTION_CACHE_KEY);
+}
+
+function makeConnectedStatus(
+  partial: Partial<DriveConnectionStatus> = {},
+): DriveConnectionStatus {
+  return {
+    connected: true,
+    folderId: partial.folderId ?? null,
+    accountEmail: partial.accountEmail ?? null,
+    accountName: partial.accountName ?? null,
+    accountPhotoUrl: partial.accountPhotoUrl ?? null,
+    channelActive: partial.channelActive ?? false,
+    channelExpiration: partial.channelExpiration ?? null,
+  };
+}
+
 export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus> {
   if (!isSupabaseConfigured) return disconnectedStatus;
   const supabase = getSupabaseClient()!;
 
   const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) return disconnectedStatus;
+  const userId = userData.user?.id ?? null;
+  if (!userId) return readCachedDriveStatus(null) ?? disconnectedStatus;
 
   const { data, error } = await supabase
     .from("drive_connections")
     .select("folder_id, channel_id, channel_expiration")
-    .eq("user_id", userData.user.id)
+    .eq("user_id", userId)
     .maybeSingle();
 
-  if (error || !data) return disconnectedStatus;
+  if (error || !data) return readCachedDriveStatus(userId) ?? disconnectedStatus;
 
   const channelActive =
     Boolean(data.channel_id) &&
@@ -72,7 +130,7 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
     const { data: accountData } = await supabase
       .from("drive_connections")
       .select("account_email, account_name, account_photo_url")
-      .eq("user_id", userData.user.id)
+      .eq("user_id", userId)
       .maybeSingle();
     accountEmail = accountData?.account_email ?? null;
     accountName = accountData?.account_name ?? null;
@@ -94,15 +152,44 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
     }
   }
 
-  return {
-    connected: true,
+  const status = makeConnectedStatus({
     folderId: data.folder_id ?? null,
     accountEmail,
     accountName,
     accountPhotoUrl,
     channelActive,
     channelExpiration: data.channel_expiration ?? null,
-  };
+  });
+  writeCachedDriveStatus(status, userId);
+  return status;
+}
+
+export async function rememberDriveConnectionSucceeded(): Promise<DriveConnectionStatus> {
+  if (!isSupabaseConfigured) return disconnectedStatus;
+
+  const supabase = getSupabaseClient();
+  const { data: userData } = supabase
+    ? await supabase.auth.getUser()
+    : { data: { user: null } };
+  const userId = userData.user?.id ?? null;
+  const previousStatus = readCachedDriveStatus(userId);
+  const cachedStatus = makeConnectedStatus({
+    folderId: previousStatus?.folderId ?? null,
+    channelActive: previousStatus?.channelActive ?? false,
+    channelExpiration: previousStatus?.channelExpiration ?? null,
+  });
+  writeCachedDriveStatus(cachedStatus, userId);
+
+  for (const delay of [0, 500, 1500]) {
+    if (delay > 0) {
+      await new Promise((resolve) => window.setTimeout(resolve, delay));
+    }
+
+    const status = await getDriveConnectionStatus();
+    if (status.connected) return status;
+  }
+
+  return cachedStatus;
 }
 
 /** Google 동의 화면 URL을 받아와 그 자리에서 이동시킨다. */
@@ -124,6 +211,7 @@ export async function disconnectDrive(): Promise<void> {
   if (!supabase) return;
   const { error } = await supabase.functions.invoke("drive-disconnect");
   if (error) throw new Error(await describeFunctionError(error, "연결 해제에 실패했습니다."));
+  clearCachedDriveStatus();
 }
 
 export interface DriveSyncResult {
