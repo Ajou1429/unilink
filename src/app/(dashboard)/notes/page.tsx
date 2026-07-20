@@ -25,9 +25,11 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import {
   CheckCircle2,
+  ChevronLeft,
   Cloud,
   Clock,
   FileText,
+  Folder,
   FolderOpen,
   Link2,
   Loader2,
@@ -53,10 +55,12 @@ import {
 import { Course } from "@/lib/types";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
+  DriveFolder,
   DriveConnectionStatus,
   disconnectDrive,
   enableRealtimeWatch,
   getDriveConnectionStatus,
+  listDriveFolders,
   startDriveConnection,
   syncDriveFolder,
 } from "@/lib/drive-connection";
@@ -108,6 +112,13 @@ export default function NotesPage() {
   const [driveFolderInput, setDriveFolderInput] = useState("");
   const [driveBusy, setDriveBusy] = useState(false);
   const [driveMessage, setDriveMessage] = useState<string | null>(null);
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
+  const [folderPickerBusy, setFolderPickerBusy] = useState(false);
+  const [folderPickerError, setFolderPickerError] = useState<string | null>(null);
+  const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([]);
+  const [folderPath, setFolderPath] = useState<{ id: string | null; name: string }[]>([
+    { id: null, name: "내 드라이브" },
+  ]);
 
   async function loadNotes() {
     setNotes(await getMyNotes());
@@ -175,6 +186,7 @@ export default function NotesPage() {
   const assignedCount = notes.filter((note) => note.linkedType !== "unassigned").length;
   const connectedDriveAccount =
     driveStatus?.accountEmail || driveStatus?.accountName || null;
+  const currentPickerFolder = folderPath[folderPath.length - 1];
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -274,6 +286,58 @@ export default function NotesPage() {
     ]);
     setLastSyncAt(now);
     if (syncedNotes) setNotes(syncedNotes);
+  }
+
+  async function loadDriveFolders(parentId?: string | null) {
+    setFolderPickerBusy(true);
+    setFolderPickerError(null);
+    try {
+      setDriveFolders(await listDriveFolders(parentId));
+    } catch (error) {
+      setFolderPickerError(
+        error instanceof Error ? error.message : "Drive 폴더를 불러오지 못했습니다.",
+      );
+    } finally {
+      setFolderPickerBusy(false);
+    }
+  }
+
+  function openFolderPicker() {
+    setFolderPickerOpen(true);
+    setFolderPath([{ id: null, name: "내 드라이브" }]);
+    loadDriveFolders(null);
+  }
+
+  function enterDriveFolder(folder: DriveFolder) {
+    setFolderPath((prev) => [...prev, { id: folder.id, name: folder.name }]);
+    loadDriveFolders(folder.id);
+  }
+
+  function goBackDriveFolder() {
+    if (folderPath.length <= 1) return;
+    const nextPath = folderPath.slice(0, -1);
+    setFolderPath(nextPath);
+    loadDriveFolders(nextPath[nextPath.length - 1]?.id ?? null);
+  }
+
+  async function selectDriveFolder(folder: DriveFolder) {
+    setDriveBusy(true);
+    setDriveMessage(null);
+    try {
+      setDriveFolderInput(folder.id);
+      const result = await syncDriveFolder(folder.id);
+      setLastSyncAt(result.syncedAt);
+      setFolderPickerOpen(false);
+      setDriveMessage(
+        `${folder.name} 폴더를 지정했습니다. PDF ${result.filesFound}개 중 ${result.upserted}개를 반영했습니다.`,
+      );
+      await loadNotes();
+      await loadDriveStatus();
+    } catch (error) {
+      setDriveMessage(error instanceof Error ? error.message : "폴더 지정에 실패했습니다.");
+    } finally {
+      setDriveBusy(false);
+    }
   }
 
   async function handleConnectDrive() {
@@ -625,25 +689,130 @@ export default function NotesPage() {
 
                   {driveStatus?.connected ? (
                     <div className="space-y-2">
-                      <Label className="text-xs">GoodNotes 백업 폴더 ID / 링크</Label>
-                      <div className="flex gap-2">
-                        <Input
-                          className="h-9"
-                          placeholder="Drive 폴더 링크 또는 ID를 붙여넣으세요"
-                          value={driveFolderInput}
-                          onChange={(event) => setDriveFolderInput(event.target.value)}
-                        />
+                      <Label className="text-xs">GoodNotes 백업 폴더</Label>
+                      <div className="rounded-lg border bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">
+                          {driveFolderInput
+                            ? `선택된 폴더 ID: ${driveFolderInput}`
+                            : "아직 선택된 백업 폴더가 없습니다."}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
                         <Button
                           size="sm"
                           variant="outline"
-                          className="shrink-0 gap-1.5"
-                          onClick={refreshSync}
-                          disabled={driveBusy || !driveFolderInput}
+                          className="gap-1.5"
+                          onClick={openFolderPicker}
+                          disabled={driveBusy}
                         >
                           <FolderOpen className="h-3.5 w-3.5" />
-                          지정 & 동기화
+                          Drive에서 폴더 선택
                         </Button>
+                        {driveFolderInput && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5"
+                            onClick={refreshSync}
+                            disabled={driveBusy}
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" />
+                            선택 폴더 동기화
+                          </Button>
+                        )}
                       </div>
+                      <Dialog open={folderPickerOpen} onOpenChange={setFolderPickerOpen}>
+                        <DialogContent className="max-h-[82vh] max-w-xl overflow-y-auto">
+                          <DialogHeader>
+                            <DialogTitle>Drive 폴더 선택</DialogTitle>
+                          </DialogHeader>
+                          <div className="space-y-4 pt-1">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold">
+                                  {currentPickerFolder.name}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  GoodNotes 자동 백업 PDF가 들어있는 폴더를 선택하세요.
+                                </p>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-1.5"
+                                onClick={goBackDriveFolder}
+                                disabled={folderPath.length <= 1 || folderPickerBusy}
+                              >
+                                <ChevronLeft className="h-3.5 w-3.5" />
+                                뒤로
+                              </Button>
+                            </div>
+
+                            {currentPickerFolder.id && (
+                              <Button
+                                size="sm"
+                                className="w-full gap-1.5"
+                                onClick={() =>
+                                  selectDriveFolder({
+                                    id: currentPickerFolder.id!,
+                                    name: currentPickerFolder.name,
+                                    mimeType: "application/vnd.google-apps.folder",
+                                  })
+                                }
+                                disabled={driveBusy}
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                현재 폴더 선택하고 동기화
+                              </Button>
+                            )}
+
+                            {folderPickerError && (
+                              <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
+                                {folderPickerError}
+                              </div>
+                            )}
+
+                            {folderPickerBusy ? (
+                              <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed py-8 text-sm text-muted-foreground">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Drive 폴더를 불러오는 중
+                              </div>
+                            ) : driveFolders.length > 0 ? (
+                              <div className="space-y-2">
+                                {driveFolders.map((folder) => (
+                                  <div
+                                    key={folder.id}
+                                    className="flex items-center justify-between gap-3 rounded-lg border p-3"
+                                  >
+                                    <button
+                                      type="button"
+                                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                                      onClick={() => enterDriveFolder(folder)}
+                                    >
+                                      <Folder className="h-4 w-4 shrink-0 text-primary" />
+                                      <span className="truncate text-sm font-medium">
+                                        {folder.name}
+                                      </span>
+                                    </button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => selectDriveFolder(folder)}
+                                      disabled={driveBusy}
+                                    >
+                                      선택
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                                이 위치에는 하위 폴더가 없습니다.
+                              </div>
+                            )}
+                          </div>
+                        </DialogContent>
+                      </Dialog>
 
                       <div className="flex flex-wrap gap-2 pt-1">
                         {!driveStatus.channelActive && (

@@ -141,6 +141,34 @@ export interface DriveChangeFile {
   trashed?: boolean;
 }
 
+export interface DriveFolder {
+  id: string;
+  name: string;
+  mimeType: string;
+  modifiedTime?: string;
+  parents?: string[];
+}
+
+export async function listDriveFolders(
+  accessToken: string,
+  parentId?: string | null,
+): Promise<DriveFolder[]> {
+  const qParts = [
+    "mimeType = 'application/vnd.google-apps.folder'",
+    "trashed = false",
+    `'${parentId || "root"}' in parents`,
+  ];
+  const params = new URLSearchParams({
+    q: qParts.join(" and "),
+    fields: "files(id,name,mimeType,modifiedTime,parents)",
+    orderBy: "name",
+    pageSize: "100",
+  });
+  const res = await driveFetch(accessToken, `/files?${params.toString()}`);
+  const data = await res.json();
+  return (data.files ?? []) as DriveFolder[];
+}
+
 export async function listChanges(
   accessToken: string,
   pageToken: string,

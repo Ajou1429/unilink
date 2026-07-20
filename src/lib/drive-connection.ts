@@ -120,6 +120,30 @@ export interface DriveSyncResult {
   upserted: number;
 }
 
+export interface DriveFolder {
+  id: string;
+  name: string;
+  mimeType: string;
+  modifiedTime?: string;
+  parents?: string[];
+}
+
+export async function listDriveFolders(parentId?: string | null): Promise<DriveFolder[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error("Supabase가 설정되지 않았습니다.");
+
+  const { data, error } = await supabase.functions.invoke<{ folders: DriveFolder[] }>(
+    "drive-folders",
+    {
+      body: parentId ? { parentId } : {},
+    },
+  );
+  if (error || !data) {
+    throw new Error(await describeFunctionError(error, "Drive 폴더 목록을 불러오지 못했습니다."));
+  }
+  return data.folders ?? [];
+}
+
 export async function syncDriveFolder(folderId?: string): Promise<DriveSyncResult> {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error("Supabase가 설정되지 않았습니다.");
