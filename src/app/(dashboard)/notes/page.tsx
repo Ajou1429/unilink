@@ -253,6 +253,16 @@ export default function NotesPage() {
     const now = new Date().toISOString();
 
     if (isSupabaseConfigured) {
+      if (!driveStatus?.connected) {
+        setDriveMessage("Google Drive를 먼저 연결해주세요.");
+        return;
+      }
+
+      if (!driveFolderInput) {
+        setDriveMessage("GoodNotes 백업 폴더를 먼저 선택해주세요.");
+        return;
+      }
+
       setDriveBusy(true);
       setDriveMessage(null);
       try {
@@ -618,7 +628,11 @@ export default function NotesPage() {
                   variant="outline"
                   className="gap-1.5"
                   onClick={refreshSync}
-                  disabled={driveBusy}
+                  disabled={
+                    driveBusy ||
+                    (isSupabaseConfigured &&
+                      (!driveStatus?.connected || !driveFolderInput))
+                  }
                 >
                   {driveBusy ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -679,7 +693,7 @@ export default function NotesPage() {
                             />
                           )}
                           <p className="truncate text-xs font-medium text-foreground">
-                            {connectedDriveAccount ?? "계정 정보 확인 필요"}
+                            {connectedDriveAccount ?? "계정 정보 동기화 대기"}
                           </p>
                         </div>
                       )}
