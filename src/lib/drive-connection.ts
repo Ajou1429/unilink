@@ -54,9 +54,7 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
 
   const { data, error } = await supabase
     .from("drive_connections")
-    .select(
-      "folder_id, account_email, account_name, account_photo_url, channel_id, channel_expiration",
-    )
+    .select("folder_id, channel_id, channel_expiration")
     .eq("user_id", userData.user.id)
     .maybeSingle();
 
@@ -66,9 +64,23 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
     Boolean(data.channel_id) &&
     Boolean(data.channel_expiration) &&
     new Date(data.channel_expiration as string).getTime() > Date.now();
-  let accountEmail = data.account_email ?? null;
-  let accountName = data.account_name ?? null;
-  let accountPhotoUrl = data.account_photo_url ?? null;
+  let accountEmail: string | null = null;
+  let accountName: string | null = null;
+  let accountPhotoUrl: string | null = null;
+
+  try {
+    const { data: accountData } = await supabase
+      .from("drive_connections")
+      .select("account_email, account_name, account_photo_url")
+      .eq("user_id", userData.user.id)
+      .maybeSingle();
+    accountEmail = accountData?.account_email ?? null;
+    accountName = accountData?.account_name ?? null;
+    accountPhotoUrl = accountData?.account_photo_url ?? null;
+  } catch {
+    // Older Supabase schemas do not have account profile columns yet.
+    // Keep the connection badge correct and show account info after migration.
+  }
 
   if (!accountEmail && !accountName) {
     try {
