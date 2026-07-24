@@ -8,7 +8,7 @@ import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.
 import { decryptSecret } from "../_shared/crypto.ts";
 import {
   buildMetadataSummary,
-  listPdfFilesInFolder,
+  listPdfFilesInFolderTree,
   refreshAccessToken,
 } from "../_shared/google.ts";
 
@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
   );
   const { access_token } = await refreshAccessToken(refreshToken);
 
-  const files = await listPdfFilesInFolder(access_token, folderId);
+  const files = await listPdfFilesInFolderTree(access_token, folderId);
 
   const { data: existingNotes } = await admin
     .from("notes")

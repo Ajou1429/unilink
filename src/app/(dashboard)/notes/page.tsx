@@ -74,6 +74,41 @@ const NOTE_SOURCES: NoteSource[] = [
   "직접 작성",
 ];
 
+const NOTE_LINKED_TYPE_LABELS: Record<MyNote["linkedType"], string> = {
+  course: "내 수업",
+  personal: "개인 학습",
+  unassigned: "미분류",
+};
+
+function getLinkedTypeLabel(linkedType: MyNote["linkedType"]) {
+  return NOTE_LINKED_TYPE_LABELS[linkedType] ?? "미분류";
+}
+
+function getLinkedTargetLabel(
+  linkedType: MyNote["linkedType"],
+  linkedId: string | undefined,
+  courses: Course[],
+  personalStudies: PersonalStudy[],
+  fallback?: string,
+) {
+  if (linkedType === "unassigned") return "미분류";
+  if (!linkedId) return "항목 선택";
+
+  if (linkedType === "course") {
+    return (
+      courses.find((course) => course.id === linkedId)?.name ??
+      fallback ??
+      "수업을 다시 선택해주세요"
+    );
+  }
+
+  return (
+    personalStudies.find((study) => study.id === linkedId)?.title ??
+    fallback ??
+    "개인 학습을 다시 선택해주세요"
+  );
+}
+
 function formatBytes(size?: number) {
   if (!size) return "";
   if (size < 1024 * 1024) return `${Math.round(size / 1024)}KB`;
@@ -480,7 +515,7 @@ export default function NotesPage() {
                             }
                           >
                             <SelectTrigger className="w-full">
-                              <SelectValue />
+                              {getLinkedTypeLabel(newNote.linkedType)}
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="course">내 수업</SelectItem>
@@ -508,7 +543,12 @@ export default function NotesPage() {
                             }
                           >
                             <SelectTrigger className="w-full">
-                              <SelectValue placeholder="항목 선택" />
+                              {getLinkedTargetLabel(
+                                newNote.linkedType,
+                                newNote.linkedId,
+                                courses,
+                                personalStudies,
+                              )}
                             </SelectTrigger>
                             <SelectContent>
                               {newNote.linkedType === "course"
@@ -915,7 +955,13 @@ export default function NotesPage() {
                           <div className="min-w-0">
                             <h3 className="truncate font-semibold">{note.title}</h3>
                             <p className="mt-0.5 text-xs text-muted-foreground">
-                              {note.linkedTitle ?? note.courseName} · {note.source}
+                              {getLinkedTargetLabel(
+                                note.linkedType,
+                                note.linkedId,
+                                courses,
+                                personalStudies,
+                                note.linkedTitle ?? note.courseName,
+                              )} · {note.source}
                               {note.version > 1 ? ` · v${note.version}` : ""}
                             </p>
                           </div>
@@ -960,7 +1006,7 @@ export default function NotesPage() {
                             }
                           >
                             <SelectTrigger className="h-8 w-full">
-                              <SelectValue />
+                              {getLinkedTypeLabel(note.linkedType)}
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="course">내 수업</SelectItem>
@@ -976,7 +1022,13 @@ export default function NotesPage() {
                               }
                             >
                               <SelectTrigger className="h-8 w-full">
-                                <SelectValue placeholder="분류 항목 선택" />
+                                {getLinkedTargetLabel(
+                                  note.linkedType,
+                                  note.linkedId,
+                                  courses,
+                                  personalStudies,
+                                  note.linkedTitle ?? note.courseName,
+                                )}
                               </SelectTrigger>
                               <SelectContent>
                                 {note.linkedType === "course"

@@ -3,6 +3,8 @@
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const REVOKE_URL = "https://oauth2.googleapis.com/revoke";
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
+const DRIVE_PAGE_SIZE = "100";
+const MAX_DRIVE_FOLDER_SCAN = 500;
 
 interface GoogleEnv {
   clientId: string;
@@ -158,15 +160,25 @@ export async function listDriveFolders(
     "trashed = false",
     `'${parentId || "root"}' in parents`,
   ];
-  const params = new URLSearchParams({
-    q: qParts.join(" and "),
-    fields: "files(id,name,mimeType,modifiedTime,parents)",
-    orderBy: "name",
-    pageSize: "100",
-  });
-  const res = await driveFetch(accessToken, `/files?${params.toString()}`);
-  const data = await res.json();
-  return (data.files ?? []) as DriveFolder[];
+  const folders: DriveFolder[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({
+      q: qParts.join(" and "),
+      fields: "nextPageToken,files(id,name,mimeType,modifiedTime,parents)",
+      orderBy: "name",
+      pageSize: DRIVE_PAGE_SIZE,
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const res = await driveFetch(accessToken, `/files?${params.toString()}`);
+    const data = await res.json();
+    folders.push(...((data.files ?? []) as DriveFolder[]));
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return folders;
 }
 
 export async function listChanges(
@@ -213,15 +225,68 @@ export async function listPdfFilesInFolder(
   if (modifiedAfter) {
     qParts.push(`modifiedTime > '${modifiedAfter}'`);
   }
-  const params = new URLSearchParams({
-    q: qParts.join(" and "),
-    fields: "files(id,name,mimeType,modifiedTime,size,parents,trashed)",
-    orderBy: "modifiedTime desc",
-    pageSize: "100",
-  });
-  const res = await driveFetch(accessToken, `/files?${params.toString()}`);
-  const data = await res.json();
-  return (data.files ?? []) as DriveChangeFile[];
+  const files: DriveChangeFile[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({
+      q: qParts.join(" and "),
+      fields: "nextPageToken,files(id,name,mimeType,modifiedTime,size,parents,trashed)",
+      orderBy: "modifiedTime desc",
+      pageSize: DRIVE_PAGE_SIZE,
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const res = await driveFetch(accessToken, `/files?${params.toString()}`);
+    const data = await res.json();
+    files.push(...((data.files ?? []) as DriveChangeFile[]));
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return files;
+}
+
+export async function listDriveFolderIdsInTree(
+  accessToken: string,
+  rootFolderId: string,
+): Promise<Set<string>> {
+  const folderIds = new Set<string>([rootFolderId]);
+  const queue = [rootFolderId];
+
+  for (let index = 0; index < queue.length; index += 1) {
+    if (folderIds.size > MAX_DRIVE_FOLDER_SCAN) {
+      throw new Error("선택한 Drive 폴더의 하위 폴더가 너무 많습니다.");
+    }
+
+    const childFolders = await listDriveFolders(accessToken, queue[index]);
+    for (const folder of childFolders) {
+      if (folderIds.has(folder.id)) continue;
+      folderIds.add(folder.id);
+      queue.push(folder.id);
+    }
+  }
+
+  return folderIds;
+}
+
+export async function listPdfFilesInFolderTree(
+  accessToken: string,
+  rootFolderId: string,
+  modifiedAfter?: string,
+): Promise<DriveChangeFile[]> {
+  const folderIds = await listDriveFolderIdsInTree(accessToken, rootFolderId);
+  const filesById = new Map<string, DriveChangeFile>();
+
+  for (const folderId of folderIds) {
+    const files = await listPdfFilesInFolder(accessToken, folderId, modifiedAfter);
+    for (const file of files) {
+      filesById.set(file.id, file);
+    }
+  }
+
+  return [...filesById.values()].sort((a, b) =>
+    (b.modifiedTime ?? "").localeCompare(a.modifiedTime ?? ""),
+  );
 }
 
 export async function watchChanges(

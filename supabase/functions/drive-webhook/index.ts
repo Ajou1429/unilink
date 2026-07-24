@@ -10,6 +10,7 @@ import { decryptSecret } from "../_shared/crypto.ts";
 import {
   buildMetadataSummary,
   listChanges,
+  listDriveFolderIdsInTree,
   refreshAccessToken,
 } from "../_shared/google.ts";
 
@@ -81,11 +82,12 @@ async function processChanges(
     connection.page_token,
   );
 
+  const folderIds = await listDriveFolderIdsInTree(access_token, connection.folder_id);
   const pdfFiles = files.filter(
     (file) =>
       !file.trashed &&
       file.mimeType === "application/pdf" &&
-      file.parents?.includes(connection.folder_id!),
+      file.parents?.some((parentId) => folderIds.has(parentId)),
   );
 
   const { data: existingNotes } = await admin
