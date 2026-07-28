@@ -15,6 +15,7 @@ import {
   Sparkles,
   Target,
   Award,
+  BookMarked,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -42,6 +43,7 @@ const navItems = [
   { href: "/study", icon: BookOpen, label: "학습 계획" },
   { href: "/ai-coaching", icon: Sparkles, label: "AI 진도 코칭" },
   { href: "/notes", icon: FileText, label: "나의 노트" },
+  { href: "/problem-bank", icon: BookMarked, label: "문제은행" },
   { href: "/records", icon: Award, label: "성적 및 스펙" },
 ];
 

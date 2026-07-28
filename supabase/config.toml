@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.drive-renew-channels]
 verify_jwt = false
+
+[functions.problem-bank-upload]
+verify_jwt = true
