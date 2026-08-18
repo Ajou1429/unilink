@@ -255,6 +255,8 @@ export default function NotesPage() {
   const [search, setSearch] = useState("");
   const [activeNoteFolderPath, setActiveNoteFolderPath] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteSaveError, setNoteSaveError] = useState("");
   const [lastSyncAt, setLastSyncAt] = useState(new Date().toISOString());
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [newNote, setNewNote] = useState({
@@ -418,7 +420,16 @@ export default function NotesPage() {
   }
 
   async function handleAddNote() {
-    if (!newNote.title.trim()) return;
+    setNoteSaveError("");
+    if (!newNote.title.trim()) {
+      setNoteSaveError("노트 제목을 입력해주세요.");
+      return;
+    }
+
+    if (newNote.source === MANUAL_NOTE_SOURCE && !newNote.customSource.trim()) {
+      setNoteSaveError("출처를 직접 입력해주세요.");
+      return;
+    }
 
     const course = courses.find((item) => item.id === newNote.linkedId);
     const personalStudy = personalStudies.find((item) => item.id === newNote.linkedId);
@@ -429,42 +440,60 @@ export default function NotesPage() {
           ? personalStudy?.title
           : undefined;
 
-    await addNote({
-      title: newNote.title.trim(),
-      courseName: newNote.courseName,
-      linkedType: newNote.linkedType,
-      linkedId: newNote.linkedId || undefined,
-      linkedTitle,
-      source:
-        newNote.source === MANUAL_NOTE_SOURCE
-          ? (newNote.customSource.trim() || MANUAL_NOTE_SOURCE) as unknown as NoteSource
-          : newNote.source,
-      content: newNote.content.trim(),
-      file: newNote.file,
-      fileName: newNote.fileName || undefined,
-      fileSize: newNote.fileSize || undefined,
-      tags: newNote.tags
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean),
-    });
+    setNoteSaving(true);
+    try {
+      await addNote({
+        title: newNote.title.trim(),
+        courseName: newNote.courseName,
+        linkedType: newNote.linkedType,
+        linkedId: newNote.linkedId || undefined,
+        linkedTitle,
+        source:
+          newNote.source === MANUAL_NOTE_SOURCE
+            ? (newNote.customSource.trim() || MANUAL_NOTE_SOURCE) as unknown as NoteSource
+            : newNote.source,
+        content: newNote.content.trim(),
+        file: newNote.file,
+        fileName: newNote.fileName || undefined,
+        fileSize: newNote.fileSize || undefined,
+        tags: newNote.tags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      });
 
-    await loadNotes();
-    setOpen(false);
-    setFeedbackMessage("노트가 저장되었습니다.");
-    setNewNote({
-      title: "",
-      courseName: "",
-      linkedType: "unassigned",
-      linkedId: "",
-      source: "GoodNotes",
-      customSource: "",
-      content: "",
-      tags: "",
-      file: undefined,
-      fileName: "",
-      fileSize: 0,
-    });
+      await loadNotes();
+      setOpen(false);
+      setNoteSaveError("");
+      setFeedbackMessage("노트가 저장되었습니다.");
+      setNewNote({
+        title: "",
+        courseName: "",
+        linkedType: "unassigned",
+        linkedId: "",
+        source: "GoodNotes",
+        customSource: "",
+        content: "",
+        tags: "",
+        file: undefined,
+        fileName: "",
+        fileSize: 0,
+      });
+    } catch (error) {
+      console.error("노트 저장 실패", error);
+      const message = error instanceof Error ? error.message : "알 수 없는 오류";
+      const isStorageError = /storage|bucket|upload/i.test(message);
+      const isAuthError = /auth|jwt|로그인|permission|권한|row-level security/i.test(message);
+      setNoteSaveError(
+        isStorageError
+          ? "파일 저장에 실패했습니다. Supabase note-files 저장소 설정을 확인해주세요."
+          : isAuthError
+            ? "로그인 세션이 만료되었습니다. 다시 로그인한 뒤 저장해주세요."
+            : `노트 저장에 실패했습니다: ${message}`,
+      );
+    } finally {
+      setNoteSaving(false);
+    }
   }
 
   async function refreshSync() {
@@ -775,7 +804,13 @@ export default function NotesPage() {
                     수업 필기, PDF, 이미지 파일을 한곳에서 관리합니다.
                   </p>
                 </div>
-                <Dialog open={open} onOpenChange={setOpen}>
+                <Dialog
+                  open={open}
+                  onOpenChange={(nextOpen) => {
+                    setOpen(nextOpen);
+                    if (nextOpen) setNoteSaveError("");
+                  }}
+                >
                   <DialogTrigger render={<Button className="gap-2" />}>
                     <Plus className="h-4 w-4" />
                     노트 추가
@@ -936,8 +971,16 @@ export default function NotesPage() {
                           }
                         />
                       </div>
-                      <Button onClick={handleAddNote} className="w-full">
-                        저장하기
+                      {noteSaveError && (
+                        <p
+                          role="alert"
+                          className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                        >
+                          {noteSaveError}
+                        </p>
+                      )}
+                      <Button onClick={handleAddNote} className="w-full" disabled={noteSaving}>
+                        {noteSaving ? "저장 중..." : "저장하기"}
                       </Button>
                     </div>
                   </DialogContent>
