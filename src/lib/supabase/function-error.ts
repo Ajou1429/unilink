@@ -1,5 +1,19 @@
 import { FunctionsHttpError } from "@supabase/supabase-js";
 
+const GOOGLE_DRIVE_RECONNECT_MESSAGE =
+  "Google Drive 연결 인증이 만료되었습니다. 연결 해제 후 다시 Google Drive를 연결해주세요.";
+
+function normalizeFunctionErrorMessage(message: string): string {
+  if (
+    message.includes("invalid_grant") ||
+    (message.includes("Bad Request") && message.includes("Google access token"))
+  ) {
+    return GOOGLE_DRIVE_RECONNECT_MESSAGE;
+  }
+
+  return message;
+}
+
 /**
  * supabase-js는 Edge Function이 non-2xx를 반환하면 항상 같은 문구
  * ("Edge Function returned a non-2xx status code")만 던진다. 실제 원인은
@@ -9,11 +23,15 @@ export async function describeFunctionError(error: unknown, fallback: string): P
   if (error instanceof FunctionsHttpError) {
     try {
       const body = await error.context.clone().json();
-      if (body?.error) return `${body.error} (HTTP ${error.context.status})`;
+      if (body?.error) {
+        return `${normalizeFunctionErrorMessage(String(body.error))} (HTTP ${
+          error.context.status
+        })`;
+      }
     } catch {
       // 본문이 JSON이 아니면 그냥 아래 fallback으로 진행
     }
     return `${fallback} (HTTP ${error.context.status})`;
   }
-  return error instanceof Error ? error.message : fallback;
+  return error instanceof Error ? normalizeFunctionErrorMessage(error.message) : fallback;
 }

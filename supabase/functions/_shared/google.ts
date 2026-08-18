@@ -73,7 +73,13 @@ export async function refreshAccessToken(refreshToken: string) {
     }),
   });
   if (!res.ok) {
-    throw new Error(`Google access token 갱신 실패: ${res.status} ${await res.text()}`);
+    const errorText = await res.text();
+    if (errorText.includes("invalid_grant")) {
+      throw new Error(
+        "Google Drive 연결 인증이 만료되었습니다. 연결 해제 후 다시 Google Drive를 연결해주세요.",
+      );
+    }
+    throw new Error(`Google access token 갱신 실패: ${res.status} ${errorText}`);
   }
   return (await res.json()) as { access_token: string; expires_in: number };
 }
