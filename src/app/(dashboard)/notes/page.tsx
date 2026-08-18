@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
 import { Badge } from "@/components/ui/badge";
@@ -77,6 +77,8 @@ const NOTE_SOURCES: NoteSource[] = [
   "Google Drive",
   "직접 작성",
 ];
+
+const MANUAL_NOTE_SOURCE = NOTE_SOURCES[NOTE_SOURCES.length - 1];
 
 const NOTE_LINKED_TYPE_LABELS: Record<MyNote["linkedType"], string> = {
   course: "내 수업",
@@ -255,6 +257,7 @@ export default function NotesPage() {
   const [open, setOpen] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState(new Date().toISOString());
   const [feedbackMessage, setFeedbackMessage] = useState("");
+  const manualContentRef = useRef<HTMLTextAreaElement>(null);
   const [newNote, setNewNote] = useState({
     title: "",
     courseName: "",
@@ -401,6 +404,21 @@ export default function NotesPage() {
       fileSize: file.size,
       title: prev.title || file.name.replace(/\.[^.]+$/, ""),
     }));
+  }
+
+  function handleNoteSourceChange(value: string | null) {
+    if (!value) return;
+    const source = value as NoteSource;
+    const isManual = source === MANUAL_NOTE_SOURCE;
+    setNewNote((prev) => ({
+      ...prev,
+      source,
+      ...(isManual ? { file: undefined, fileName: "", fileSize: 0 } : {}),
+    }));
+
+    if (isManual) {
+      window.setTimeout(() => manualContentRef.current?.focus(), 0);
+    }
   }
 
   async function handleAddNote() {
@@ -851,12 +869,7 @@ export default function NotesPage() {
                           <Label>출처</Label>
                           <Select
                             value={newNote.source}
-                            onValueChange={(value) =>
-                              setNewNote((prev) => ({
-                                ...prev,
-                                source: (value as NoteSource) ?? prev.source,
-                              }))
-                            }
+                            onValueChange={handleNoteSourceChange}
                           >
                             <SelectTrigger className="w-full">
                               <SelectValue />
@@ -876,6 +889,7 @@ export default function NotesPage() {
                             type="file"
                             accept=".pdf,.png,.jpg,.jpeg,.heic,.webp"
                             onChange={handleFileChange}
+                            disabled={newNote.source === MANUAL_NOTE_SOURCE}
                           />
                           {newNote.fileName && (
                             <p className="text-xs text-muted-foreground">
@@ -887,7 +901,13 @@ export default function NotesPage() {
 
                       <div className="space-y-2">
                         <Label>내용 메모</Label>
+                        {newNote.source === MANUAL_NOTE_SOURCE && (
+                          <p className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
+                            직접 작성 모드입니다. 아래 입력란에 내용을 바로 입력하세요.
+                          </p>
+                        )}
                         <Textarea
+                          ref={manualContentRef}
                           rows={5}
                           placeholder="필기 핵심 내용이나 추후 자동 동기화 메모를 적어주세요."
                           value={newNote.content}
