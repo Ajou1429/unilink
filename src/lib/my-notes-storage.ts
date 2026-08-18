@@ -415,8 +415,8 @@ async function addSupabaseNote(input: NewNoteInput): Promise<MyNote> {
       file_path: filePath ?? null,
       drive_folder_id: input.driveFolderId ?? null,
       drive_folder_name: input.driveFolderName ?? null,
-      drive_folder_path: input.driveFolderPath ?? null,
-      drive_folder_path_ids: input.driveFolderPathIds ?? null,
+      drive_folder_path: input.driveFolderPath ?? [],
+      drive_folder_path_ids: input.driveFolderPathIds ?? [],
       tags: input.tags,
     })
     .select("*")
