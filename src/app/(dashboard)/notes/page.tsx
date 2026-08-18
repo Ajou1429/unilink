@@ -44,6 +44,7 @@ import { getStoredCourses } from "@/lib/course-storage";
 import {
   addNote,
   deleteNote,
+  deleteNotes,
   getMyNotes,
   MyNote,
   NoteSource,
@@ -655,6 +656,24 @@ export default function NotesPage() {
     }
   }
 
+  async function handleDeleteFolder() {
+    if (activeNoteFolder.pathIds.length === 0 || activeFolderNotes.length === 0) return;
+
+    const confirmed = window.confirm(
+      `"${activeNoteFolder.name}" 폴더와 하위 폴더의 노트 ${activeFolderNotes.length}개를 UniLink에서 삭제할까요? Google Drive 원본 폴더와 파일은 삭제되지 않습니다.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      const nextNotes = await deleteNotes(activeFolderNotes.map((note) => note.id));
+      setNotes(nextNotes);
+      setActiveNoteFolderPath([]);
+      setFeedbackMessage(`${activeNoteFolder.name} 폴더의 노트를 삭제했습니다.`);
+    } catch (error) {
+      setFeedbackMessage(error instanceof Error ? error.message : "폴더 삭제에 실패했습니다.");
+    }
+  }
+
   function getAssignmentTitle(linkedType: MyNote["linkedType"], linkedId: string) {
     const course = courses.find((item) => item.id === linkedId);
     const personalStudy = personalStudies.find((item) => item.id === linkedId);
@@ -1239,6 +1258,15 @@ export default function NotesPage() {
 
                 {activeNoteFolder.pathIds.length > 0 && activeFolderNotes.length > 0 && (
                   <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={handleDeleteFolder}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      폴더 삭제
+                    </Button>
                     <Select
                       value={folderAssignmentDraft.linkedType}
                       onValueChange={(value) => {
