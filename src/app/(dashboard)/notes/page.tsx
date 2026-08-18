@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
 import { Badge } from "@/components/ui/badge";
@@ -257,13 +257,13 @@ export default function NotesPage() {
   const [open, setOpen] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState(new Date().toISOString());
   const [feedbackMessage, setFeedbackMessage] = useState("");
-  const manualContentRef = useRef<HTMLTextAreaElement>(null);
   const [newNote, setNewNote] = useState({
     title: "",
     courseName: "",
     linkedType: "unassigned" as "course" | "personal" | "unassigned",
     linkedId: "",
     source: "GoodNotes" as NoteSource,
+    customSource: "",
     content: "",
     tags: "",
     file: undefined as File | undefined,
@@ -413,12 +413,8 @@ export default function NotesPage() {
     setNewNote((prev) => ({
       ...prev,
       source,
-      ...(isManual ? { file: undefined, fileName: "", fileSize: 0 } : {}),
+      ...(isManual ? {} : { customSource: "" }),
     }));
-
-    if (isManual) {
-      window.setTimeout(() => manualContentRef.current?.focus(), 0);
-    }
   }
 
   async function handleAddNote() {
@@ -439,7 +435,10 @@ export default function NotesPage() {
       linkedType: newNote.linkedType,
       linkedId: newNote.linkedId || undefined,
       linkedTitle,
-      source: newNote.source,
+      source:
+        newNote.source === MANUAL_NOTE_SOURCE
+          ? (newNote.customSource.trim() || MANUAL_NOTE_SOURCE) as unknown as NoteSource
+          : newNote.source,
       content: newNote.content.trim(),
       file: newNote.file,
       fileName: newNote.fileName || undefined,
@@ -459,6 +458,7 @@ export default function NotesPage() {
       linkedType: "unassigned",
       linkedId: "",
       source: "GoodNotes",
+      customSource: "",
       content: "",
       tags: "",
       file: undefined,
@@ -882,6 +882,20 @@ export default function NotesPage() {
                               ))}
                             </SelectContent>
                           </Select>
+                          {newNote.source === MANUAL_NOTE_SOURCE && (
+                            <Input
+                              autoFocus
+                              className="mt-2"
+                              placeholder="출처를 직접 입력하세요"
+                              value={newNote.customSource}
+                              onChange={(event) =>
+                                setNewNote((prev) => ({
+                                  ...prev,
+                                  customSource: event.target.value,
+                                }))
+                              }
+                            />
+                          )}
                         </div>
                         <div className="space-y-2">
                           <Label>파일</Label>
@@ -889,7 +903,6 @@ export default function NotesPage() {
                             type="file"
                             accept=".pdf,.png,.jpg,.jpeg,.heic,.webp"
                             onChange={handleFileChange}
-                            disabled={newNote.source === MANUAL_NOTE_SOURCE}
                           />
                           {newNote.fileName && (
                             <p className="text-xs text-muted-foreground">
@@ -901,13 +914,7 @@ export default function NotesPage() {
 
                       <div className="space-y-2">
                         <Label>내용 메모</Label>
-                        {newNote.source === MANUAL_NOTE_SOURCE && (
-                          <p className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
-                            직접 작성 모드입니다. 아래 입력란에 내용을 바로 입력하세요.
-                          </p>
-                        )}
                         <Textarea
-                          ref={manualContentRef}
                           rows={5}
                           placeholder="필기 핵심 내용이나 추후 자동 동기화 메모를 적어주세요."
                           value={newNote.content}
