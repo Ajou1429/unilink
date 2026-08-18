@@ -674,6 +674,29 @@ export default function NotesPage() {
     }
   }
 
+  async function handleDeleteFolderNode(folder: NoteFolderNode) {
+    const folderNotes = notes.filter((note) => noteIsInFolder(note, folder.pathIds));
+    if (folderNotes.length === 0) return;
+
+    const confirmed = window.confirm(
+      `"${folder.name}" 폴더와 하위 폴더의 노트 ${folderNotes.length}개를 UniLink에서 삭제할까요? Google Drive 원본 폴더와 파일은 삭제되지 않습니다.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      const nextNotes = await deleteNotes(folderNotes.map((note) => note.id));
+      setNotes(nextNotes);
+      setActiveNoteFolderPath((currentPath) =>
+        folder.pathIds.every((id, index) => currentPath[index] === id)
+          ? folder.pathIds.slice(0, -1)
+          : currentPath,
+      );
+      setFeedbackMessage(`${folder.name} 폴더의 노트를 삭제했습니다.`);
+    } catch (error) {
+      setFeedbackMessage(error instanceof Error ? error.message : "폴더 삭제에 실패했습니다.");
+    }
+  }
+
   function getAssignmentTitle(linkedType: MyNote["linkedType"], linkedId: string) {
     const course = courses.find((item) => item.id === linkedId);
     const personalStudy = personalStudies.find((item) => item.id === linkedId);
@@ -1329,12 +1352,15 @@ export default function NotesPage() {
               {!search.trim() && activeNoteFolder.children.length > 0 && (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {activeNoteFolder.children.map((folder) => (
-                    <button
+                    <div
                       key={folder.id}
-                      type="button"
-                      className="flex items-center gap-3 rounded-lg border bg-background p-3 text-left transition hover:border-primary/50 hover:bg-primary/5"
-                      onClick={() => setActiveNoteFolderPath(folder.pathIds)}
+                      className="flex items-center gap-2 rounded-lg border bg-background p-2 transition hover:border-primary/50 hover:bg-primary/5"
                     >
+                      <button
+                        type="button"
+                        className="flex min-w-0 flex-1 items-center gap-3 p-1 text-left"
+                        onClick={() => setActiveNoteFolderPath(folder.pathIds)}
+                      >
                       <Folder className="h-5 w-5 shrink-0 text-primary" />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold">{folder.name}</p>
@@ -1342,7 +1368,19 @@ export default function NotesPage() {
                           {folder.totalNotes}개 노트
                         </p>
                       </div>
-                    </button>
+                      </button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        title={`${folder.name} 폴더 삭제`}
+                        aria-label={`${folder.name} 폴더 삭제`}
+                        onClick={() => handleDeleteFolderNode(folder)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   ))}
                 </div>
               )}
