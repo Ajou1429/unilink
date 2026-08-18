@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,6 +11,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { MyNote } from "@/lib/my-notes-storage";
+import { getSupabaseClient } from "@/lib/supabase/client";
 import { CalendarClock, ExternalLink, FileText, HardDrive } from "lucide-react";
 
 interface NoteViewerDialogProps {
@@ -41,6 +43,42 @@ export function NoteViewerDialog({
   note,
   triggerLabel = "노트 열기",
 }: NoteViewerDialogProps) {
+  const [fileUrl, setFileUrl] = useState<string | null>(note.fileDataUrl ?? null);
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFileUrl(note.fileDataUrl ?? null);
+    setFileError(null);
+
+    if (!note.filePath || note.fileDataUrl) return;
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    supabase.storage
+      .from("note-files")
+      .createSignedUrl(note.filePath, 60 * 60)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error || !data?.signedUrl) {
+          setFileError("파일을 불러오지 못했습니다.");
+          return;
+        }
+        setFileUrl(data.signedUrl);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [note.fileDataUrl, note.filePath]);
+
+  const fileExtension = note.fileName?.split(".").pop()?.toLowerCase();
+  const isImage = Boolean(
+    fileExtension && ["png", "jpg", "jpeg", "webp", "gif"].includes(fileExtension),
+  );
+  const isPdf = fileExtension === "pdf";
+
   return (
     <Dialog>
       <DialogTrigger render={<Button size="sm" variant="outline" className="gap-1.5" />}>
@@ -91,6 +129,35 @@ export function NoteViewerDialog({
                 {note.syncStatus === "synced" ? "동기화됨" : "수동"}
               </Badge>
             </div>
+            {fileError && <p className="mb-3 text-sm text-destructive">{fileError}</p>}
+            {fileUrl && (
+              <div className="mb-4 space-y-3">
+                <a
+                  href={fileUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  download={note.fileName}
+                  className="inline-flex rounded-lg border px-3 py-2 text-sm font-medium text-primary hover:bg-primary/5"
+                >
+                  파일 열기 / 다운로드
+                </a>
+                {isImage && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={fileUrl}
+                    alt={note.fileName ?? note.title}
+                    className="max-h-[60vh] w-full object-contain"
+                  />
+                )}
+                {isPdf && (
+                  <iframe
+                    src={fileUrl}
+                    title={note.fileName ?? note.title}
+                    className="h-[60vh] w-full rounded-lg border"
+                  />
+                )}
+              </div>
+            )}
             <p className="whitespace-pre-wrap text-sm leading-7 text-foreground">
               {note.content || "저장된 노트 내용이 없습니다."}
             </p>

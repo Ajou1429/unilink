@@ -25,6 +25,8 @@ export interface MyNote {
   content: string;
   fileName?: string;
   fileSize?: number;
+  filePath?: string;
+  fileDataUrl?: string;
   driveFileId?: string;
   driveFolderId?: string;
   driveFolderName?: string;
@@ -57,6 +59,7 @@ export interface NewNoteInput {
   linkedTitle?: string;
   source: NoteSource;
   content: string;
+  file?: File;
   fileName?: string;
   fileSize?: number;
   driveFolderId?: string;
@@ -148,8 +151,21 @@ function saveLocalNotes(notes: MyNote[]) {
   return notes;
 }
 
-function addLocalNote(input: NewNoteInput): MyNote {
+async function fileToDataUrl(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+
+  return `data:${file.type || "application/octet-stream"};base64,${btoa(binary)}`;
+}
+
+async function addLocalNote(input: NewNoteInput): Promise<MyNote> {
   const now = new Date().toISOString();
+  const fileDataUrl = input.file ? await fileToDataUrl(input.file) : undefined;
   const note: MyNote = {
     id: Date.now().toString(),
     title: input.title,
@@ -160,8 +176,9 @@ function addLocalNote(input: NewNoteInput): MyNote {
     source: input.source,
     syncStatus: input.source === "직접 작성" ? "manual" : "synced",
     content: input.content,
-    fileName: input.fileName,
-    fileSize: input.fileSize,
+    fileName: input.fileName ?? input.file?.name,
+    fileSize: input.fileSize ?? input.file?.size,
+    fileDataUrl,
     driveFileId:
       input.source === "GoodNotes" && input.fileName
         ? `manual-${input.fileName}`
@@ -307,6 +324,7 @@ interface NoteRow {
   content: string;
   file_name: string | null;
   file_size: number | null;
+  file_path: string | null;
   drive_file_id: string | null;
   drive_folder_id: string | null;
   drive_folder_name: string | null;
@@ -332,6 +350,7 @@ function rowToNote(row: NoteRow): MyNote {
     content: row.content,
     fileName: row.file_name ?? undefined,
     fileSize: row.file_size ?? undefined,
+    filePath: row.file_path ?? undefined,
     driveFileId: row.drive_file_id ?? undefined,
     driveFolderId: row.drive_folder_id ?? undefined,
     driveFolderName: row.drive_folder_name ?? undefined,
@@ -361,6 +380,20 @@ async function addSupabaseNote(input: NewNoteInput): Promise<MyNote> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;
   if (!userId) throw new Error("로그인이 필요합니다.");
+  let filePath: string | undefined;
+  if (input.file) {
+    const safeFileName = input.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    filePath = `${userId}/${crypto.randomUUID()}-${safeFileName}`;
+    const { error: uploadError } = await supabase.storage
+      .from("note-files")
+      .upload(filePath, input.file, {
+        contentType: input.file.type || "application/octet-stream",
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+  }
+  if (!userId) throw new Error("로그인이 필요합니다.");
 
   const { data, error } = await supabase
     .from("notes")
@@ -374,8 +407,9 @@ async function addSupabaseNote(input: NewNoteInput): Promise<MyNote> {
       source: input.source,
       sync_status: input.source === "직접 작성" ? "manual" : "synced",
       content: input.content,
-      file_name: input.fileName ?? null,
-      file_size: input.fileSize ?? null,
+      file_name: input.fileName ?? input.file?.name ?? null,
+      file_size: input.fileSize ?? input.file?.size ?? null,
+      file_path: filePath ?? null,
       drive_folder_id: input.driveFolderId ?? null,
       drive_folder_name: input.driveFolderName ?? null,
       drive_folder_path: input.driveFolderPath ?? null,
@@ -385,7 +419,10 @@ async function addSupabaseNote(input: NewNoteInput): Promise<MyNote> {
     .select("*")
     .single();
 
-  if (error) throw error;
+  if (error) {
+    if (filePath) await supabase.storage.from("note-files").remove([filePath]);
+    throw error;
+  }
   return rowToNote(data as NoteRow);
 }
 
@@ -435,9 +472,15 @@ async function updateSupabaseNotesClassification(
 
 async function deleteSupabaseNote(noteId: string): Promise<MyNote[]> {
   const supabase = getSupabaseClient()!;
+  const { data: note } = await supabase
+    .from("notes")
+    .select("file_path")
+    .eq("id", noteId)
+    .maybeSingle();
   const { error } = await supabase.from("notes").delete().eq("id", noteId);
 
   if (error) throw error;
+  if (note?.file_path) await supabase.storage.from("note-files").remove([note.file_path]);
   return getSupabaseNotes();
 }
 
@@ -445,9 +488,19 @@ async function deleteSupabaseNotes(noteIds: string[]): Promise<MyNote[]> {
   if (noteIds.length === 0) return getSupabaseNotes();
 
   const supabase = getSupabaseClient()!;
+  const { data: notes } = await supabase
+    .from("notes")
+    .select("file_path")
+    .in("id", noteIds);
   const { error } = await supabase.from("notes").delete().in("id", noteIds);
 
   if (error) throw error;
+  const filePaths = (notes ?? [])
+    .map((note) => note.file_path as string | null)
+    .filter((filePath): filePath is string => Boolean(filePath));
+  if (filePaths.length > 0) {
+    await supabase.storage.from("note-files").remove(filePaths);
+  }
   return getSupabaseNotes();
 }
 

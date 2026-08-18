@@ -263,6 +263,7 @@ export default function NotesPage() {
     source: "GoodNotes" as NoteSource,
     content: "",
     tags: "",
+    file: undefined as File | undefined,
     fileName: "",
     fileSize: 0,
   });
@@ -395,6 +396,7 @@ export default function NotesPage() {
 
     setNewNote((prev) => ({
       ...prev,
+      file,
       fileName: file.name,
       fileSize: file.size,
       title: prev.title || file.name.replace(/\.[^.]+$/, ""),
@@ -421,6 +423,7 @@ export default function NotesPage() {
       linkedTitle,
       source: newNote.source,
       content: newNote.content.trim(),
+      file: newNote.file,
       fileName: newNote.fileName || undefined,
       fileSize: newNote.fileSize || undefined,
       tags: newNote.tags
@@ -440,6 +443,7 @@ export default function NotesPage() {
       source: "GoodNotes",
       content: "",
       tags: "",
+      file: undefined,
       fileName: "",
       fileSize: 0,
     });
