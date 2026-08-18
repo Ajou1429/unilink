@@ -377,9 +377,14 @@ async function getSupabaseNotes(): Promise<MyNote[]> {
 
 async function addSupabaseNote(input: NewNoteInput): Promise<MyNote> {
   const supabase = getSupabaseClient()!;
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError) {
+    throw new Error(`Supabase 로그인 확인에 실패했습니다: ${userError.message}`);
+  }
   const userId = userData.user?.id;
-  if (!userId) throw new Error("로그인이 필요합니다.");
+  if (!userId) {
+    throw new Error("Supabase 로그인 세션이 없습니다. 로그아웃 후 다시 로그인해주세요.");
+  }
   let filePath: string | undefined;
   if (input.file) {
     const safeFileName = input.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -393,8 +398,6 @@ async function addSupabaseNote(input: NewNoteInput): Promise<MyNote> {
 
     if (uploadError) throw uploadError;
   }
-  if (!userId) throw new Error("로그인이 필요합니다.");
-
   const { data, error } = await supabase
     .from("notes")
     .insert({

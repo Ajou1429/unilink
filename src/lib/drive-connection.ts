@@ -100,7 +100,10 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
 
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id ?? null;
-  if (!userId) return readCachedDriveStatus(null) ?? disconnectedStatus;
+  if (!userId) {
+    clearCachedDriveStatus();
+    return disconnectedStatus;
+  }
 
   const { data, error } = await supabase
     .from("drive_connections")
