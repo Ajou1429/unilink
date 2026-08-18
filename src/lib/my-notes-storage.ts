@@ -26,6 +26,10 @@ export interface MyNote {
   fileName?: string;
   fileSize?: number;
   driveFileId?: string;
+  driveFolderId?: string;
+  driveFolderName?: string;
+  driveFolderPath?: string[];
+  driveFolderPathIds?: string[];
   driveModifiedTime?: string;
   version: number;
   tags: string[];
@@ -39,6 +43,10 @@ export interface GoodNotesDriveFile {
   modifiedTime: string;
   size: number;
   contentSummary: string;
+  driveFolderId?: string;
+  driveFolderName?: string;
+  driveFolderPath?: string[];
+  driveFolderPathIds?: string[];
 }
 
 export interface NewNoteInput {
@@ -51,6 +59,10 @@ export interface NewNoteInput {
   content: string;
   fileName?: string;
   fileSize?: number;
+  driveFolderId?: string;
+  driveFolderName?: string;
+  driveFolderPath?: string[];
+  driveFolderPathIds?: string[];
   tags: string[];
 }
 
@@ -73,6 +85,10 @@ const defaultLocalNotes: MyNote[] = [
     fileName: "OS_week7_goodnotes.pdf",
     fileSize: 2450000,
     driveFileId: "drive-goodnotes-os-week7",
+    driveFolderId: "folder-os",
+    driveFolderName: "운영체제",
+    driveFolderPath: ["GoodNotes", "운영체제"],
+    driveFolderPathIds: ["folder-goodnotes", "folder-os"],
     driveModifiedTime: "2024-03-18T11:30:00Z",
     version: 1,
     tags: ["운영체제", "시험범위"],
@@ -151,6 +167,10 @@ function addLocalNote(input: NewNoteInput): MyNote {
         ? `manual-${input.fileName}`
         : undefined,
     driveModifiedTime: input.source === "GoodNotes" ? now : undefined,
+    driveFolderId: input.driveFolderId,
+    driveFolderName: input.driveFolderName,
+    driveFolderPath: input.driveFolderPath,
+    driveFolderPathIds: input.driveFolderPathIds,
     version: 1,
     tags: input.tags,
     createdAt: now,
@@ -169,6 +189,28 @@ function updateLocalNoteClassification(
 ): MyNote[] {
   const notes = getLocalNotes().map((note) =>
     note.id === noteId
+      ? {
+          ...note,
+          linkedType,
+          linkedId: linkedId || undefined,
+          linkedTitle,
+          courseName: linkedTitle ?? "미분류",
+          updatedAt: new Date().toISOString(),
+        }
+      : note,
+  );
+  return saveLocalNotes(notes);
+}
+
+function updateLocalNotesClassification(
+  noteIds: string[],
+  linkedType: NoteLinkedType,
+  linkedId: string | undefined,
+  linkedTitle: string | undefined,
+): MyNote[] {
+  const targetIds = new Set(noteIds);
+  const notes = getLocalNotes().map((note) =>
+    targetIds.has(note.id)
       ? {
           ...note,
           linkedType,
@@ -202,8 +244,12 @@ function upsertLocalGoodNotesDriveFiles(files: GoodNotesDriveFile[]): MyNote[] {
         content: file.contentSummary,
         fileName: file.fileName,
         fileSize: file.size,
-        driveFileId: file.driveFileId,
-        driveModifiedTime: file.modifiedTime,
+          driveFileId: file.driveFileId,
+          driveFolderId: file.driveFolderId,
+          driveFolderName: file.driveFolderName,
+          driveFolderPath: file.driveFolderPath,
+          driveFolderPathIds: file.driveFolderPathIds,
+          driveModifiedTime: file.modifiedTime,
         version: (existing.version ?? 1) + 1,
         updatedAt: now,
       };
@@ -221,6 +267,10 @@ function upsertLocalGoodNotesDriveFiles(files: GoodNotesDriveFile[]): MyNote[] {
       fileName: file.fileName,
       fileSize: file.size,
       driveFileId: file.driveFileId,
+      driveFolderId: file.driveFolderId,
+      driveFolderName: file.driveFolderName,
+      driveFolderPath: file.driveFolderPath,
+      driveFolderPathIds: file.driveFolderPathIds,
       driveModifiedTime: file.modifiedTime,
       version: 1,
       tags: ["GoodNotes"],
@@ -249,6 +299,10 @@ interface NoteRow {
   file_name: string | null;
   file_size: number | null;
   drive_file_id: string | null;
+  drive_folder_id: string | null;
+  drive_folder_name: string | null;
+  drive_folder_path: string[] | null;
+  drive_folder_path_ids: string[] | null;
   drive_modified_time: string | null;
   version: number;
   tags: string[];
@@ -270,6 +324,10 @@ function rowToNote(row: NoteRow): MyNote {
     fileName: row.file_name ?? undefined,
     fileSize: row.file_size ?? undefined,
     driveFileId: row.drive_file_id ?? undefined,
+    driveFolderId: row.drive_folder_id ?? undefined,
+    driveFolderName: row.drive_folder_name ?? undefined,
+    driveFolderPath: row.drive_folder_path ?? undefined,
+    driveFolderPathIds: row.drive_folder_path_ids ?? undefined,
     driveModifiedTime: row.drive_modified_time ?? undefined,
     version: row.version,
     tags: row.tags ?? [],
@@ -309,6 +367,10 @@ async function addSupabaseNote(input: NewNoteInput): Promise<MyNote> {
       content: input.content,
       file_name: input.fileName ?? null,
       file_size: input.fileSize ?? null,
+      drive_folder_id: input.driveFolderId ?? null,
+      drive_folder_name: input.driveFolderName ?? null,
+      drive_folder_path: input.driveFolderPath ?? null,
+      drive_folder_path_ids: input.driveFolderPathIds ?? null,
       tags: input.tags,
     })
     .select("*")
@@ -339,6 +401,29 @@ async function updateSupabaseNoteClassification(
   return getSupabaseNotes();
 }
 
+async function updateSupabaseNotesClassification(
+  noteIds: string[],
+  linkedType: NoteLinkedType,
+  linkedId: string | undefined,
+  linkedTitle: string | undefined,
+): Promise<MyNote[]> {
+  if (noteIds.length === 0) return getSupabaseNotes();
+
+  const supabase = getSupabaseClient()!;
+  const { error } = await supabase
+    .from("notes")
+    .update({
+      linked_type: linkedType,
+      linked_id: linkedId || null,
+      linked_title: linkedTitle ?? null,
+      course_name: linkedTitle ?? "미분류",
+    })
+    .in("id", noteIds);
+
+  if (error) throw error;
+  return getSupabaseNotes();
+}
+
 // ---------------------------------------------------------------------------
 // Public API — 호출부는 Supabase 설정 여부를 신경 쓰지 않는다.
 // ---------------------------------------------------------------------------
@@ -363,6 +448,18 @@ export async function updateNoteClassification(
     return updateSupabaseNoteClassification(noteId, linkedType, linkedId, linkedTitle);
   }
   return updateLocalNoteClassification(noteId, linkedType, linkedId, linkedTitle);
+}
+
+export async function updateNotesClassification(
+  noteIds: string[],
+  linkedType: NoteLinkedType,
+  linkedId: string | undefined,
+  linkedTitle: string | undefined,
+): Promise<MyNote[]> {
+  if (isSupabaseConfigured) {
+    return updateSupabaseNotesClassification(noteIds, linkedType, linkedId, linkedTitle);
+  }
+  return updateLocalNotesClassification(noteIds, linkedType, linkedId, linkedTitle);
 }
 
 /**

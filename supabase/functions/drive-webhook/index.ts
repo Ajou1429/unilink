@@ -10,7 +10,7 @@ import { decryptSecret } from "../_shared/crypto.ts";
 import {
   buildMetadataSummary,
   listChanges,
-  listDriveFolderIdsInTree,
+  listDriveFolderTree,
   refreshAccessToken,
 } from "../_shared/google.ts";
 
@@ -82,13 +82,28 @@ async function processChanges(
     connection.page_token,
   );
 
-  const folderIds = await listDriveFolderIdsInTree(access_token, connection.folder_id);
-  const pdfFiles = files.filter(
-    (file) =>
-      !file.trashed &&
-      file.mimeType === "application/pdf" &&
-      file.parents?.some((parentId) => folderIds.has(parentId)),
-  );
+  const folders = await listDriveFolderTree(access_token, connection.folder_id);
+  const foldersById = new Map(folders.map((folder) => [folder.id, folder]));
+  const pdfFiles = files
+    .filter(
+      (file) =>
+        !file.trashed &&
+        file.mimeType === "application/pdf" &&
+        file.parents?.some((parentId) => foldersById.has(parentId)),
+    )
+    .map((file) => {
+      const folder = file.parents
+        ?.map((parentId) => foldersById.get(parentId))
+        .find(Boolean);
+
+      return {
+        ...file,
+        driveFolderId: folder?.id,
+        driveFolderName: folder?.name,
+        driveFolderPath: folder?.path,
+        driveFolderPathIds: folder?.pathIds,
+      };
+    });
 
   const { data: existingNotes } = await admin
     .from("notes")
@@ -116,6 +131,10 @@ async function processChanges(
         file_name: file.name,
         file_size: file.size ? Number(file.size) : null,
         drive_file_id: file.id,
+        drive_folder_id: file.driveFolderId ?? null,
+        drive_folder_name: file.driveFolderName ?? null,
+        drive_folder_path: file.driveFolderPath ?? null,
+        drive_folder_path_ids: file.driveFolderPathIds ?? null,
         drive_modified_time: file.modifiedTime,
         version: 1,
         tags: ["GoodNotes"],
@@ -130,6 +149,10 @@ async function processChanges(
           content: contentSummary,
           file_name: file.name,
           file_size: file.size ? Number(file.size) : null,
+          drive_folder_id: file.driveFolderId ?? null,
+          drive_folder_name: file.driveFolderName ?? null,
+          drive_folder_path: file.driveFolderPath ?? null,
+          drive_folder_path_ids: file.driveFolderPathIds ?? null,
           drive_modified_time: file.modifiedTime,
           version: existingVersion + 1,
         })

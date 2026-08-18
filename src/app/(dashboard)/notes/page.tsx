@@ -46,6 +46,7 @@ import {
   MyNote,
   NoteSource,
   updateNoteClassification,
+  updateNotesClassification,
   upsertGoodNotesDriveFiles,
 } from "@/lib/my-notes-storage";
 import {
@@ -109,6 +110,118 @@ function getLinkedTargetLabel(
   );
 }
 
+interface NoteFolderNode {
+  id: string;
+  name: string;
+  pathIds: string[];
+  pathNames: string[];
+  directNotes: MyNote[];
+  totalNotes: number;
+  children: NoteFolderNode[];
+}
+
+const MANUAL_NOTE_FOLDER_ID = "__manual_notes__";
+
+function getNoteFolderSegments(note: MyNote) {
+  if (note.driveFolderPath?.length && note.driveFolderPathIds?.length) {
+    return {
+      names: note.driveFolderPath,
+      ids: note.driveFolderPathIds,
+    };
+  }
+
+  if (note.driveFolderName && note.driveFolderId) {
+    return {
+      names: [note.driveFolderName],
+      ids: [note.driveFolderId],
+    };
+  }
+
+  return {
+    names: ["직접 추가한 노트"],
+    ids: [MANUAL_NOTE_FOLDER_ID],
+  };
+}
+
+function buildNoteFolderTree(notes: MyNote[]): NoteFolderNode {
+  const root: NoteFolderNode = {
+    id: "root",
+    name: "나의 노트",
+    pathIds: [],
+    pathNames: [],
+    directNotes: [],
+    totalNotes: notes.length,
+    children: [],
+  };
+
+  for (const note of notes) {
+    const { names, ids } = getNoteFolderSegments(note);
+    let current = root;
+
+    ids.forEach((id, index) => {
+      const name = names[index] ?? "이름 없는 폴더";
+      let child = current.children.find((item) => item.id === id);
+
+      if (!child) {
+        child = {
+          id,
+          name,
+          pathIds: [...current.pathIds, id],
+          pathNames: [...current.pathNames, name],
+          directNotes: [],
+          totalNotes: 0,
+          children: [],
+        };
+        current.children.push(child);
+      }
+
+      child.totalNotes += 1;
+      current = child;
+    });
+
+    current.directNotes.push(note);
+  }
+
+  const sortTree = (node: NoteFolderNode) => {
+    node.children.sort((a, b) => a.name.localeCompare(b.name, "ko-KR"));
+    node.directNotes.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    node.children.forEach(sortTree);
+  };
+
+  sortTree(root);
+  return root;
+}
+
+function findNoteFolder(root: NoteFolderNode, pathIds: string[]) {
+  let current = root;
+
+  for (const id of pathIds) {
+    const next = current.children.find((child) => child.id === id);
+    if (!next) return root;
+    current = next;
+  }
+
+  return current;
+}
+
+function noteIsInFolder(note: MyNote, pathIds: string[]) {
+  if (pathIds.length === 0) return true;
+  const ids = getNoteFolderSegments(note).ids;
+  return pathIds.every((id, index) => ids[index] === id);
+}
+
+function noteMatchesSearch(note: MyNote, keyword: string) {
+  if (!keyword) return true;
+  return (
+    note.title.includes(keyword) ||
+    note.courseName.includes(keyword) ||
+    note.linkedTitle?.includes(keyword) ||
+    note.driveFolderPath?.some((folder) => folder.includes(keyword)) ||
+    note.content.includes(keyword) ||
+    note.tags.some((tag) => tag.includes(keyword))
+  );
+}
+
 function formatBytes(size?: number) {
   if (!size) return "";
   if (size < 1024 * 1024) return `${Math.round(size / 1024)}KB`;
@@ -129,6 +242,7 @@ export default function NotesPage() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [personalStudies, setPersonalStudies] = useState<PersonalStudy[]>([]);
   const [search, setSearch] = useState("");
+  const [activeNoteFolderPath, setActiveNoteFolderPath] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState(new Date().toISOString());
   const [feedbackMessage, setFeedbackMessage] = useState("");
@@ -142,6 +256,10 @@ export default function NotesPage() {
     tags: "",
     fileName: "",
     fileSize: 0,
+  });
+  const [folderAssignmentDraft, setFolderAssignmentDraft] = useState({
+    linkedType: "unassigned" as MyNote["linkedType"],
+    linkedId: "",
   });
 
   const [driveStatus, setDriveStatus] = useState<DriveConnectionStatus | null>(null);
@@ -208,25 +326,48 @@ export default function NotesPage() {
     return () => window.clearTimeout(timeout);
   }, [feedbackMessage]);
 
+  const noteFolderTree = useMemo(() => buildNoteFolderTree(notes), [notes]);
+  const activeNoteFolder = useMemo(
+    () => findNoteFolder(noteFolderTree, activeNoteFolderPath),
+    [activeNoteFolderPath, noteFolderTree],
+  );
+  const activeFolderNotes = useMemo(
+    () => notes.filter((note) => noteIsInFolder(note, activeNoteFolder.pathIds)),
+    [activeNoteFolder.pathIds, notes],
+  );
+  const activeFolderCommonAssignment = useMemo(() => {
+    if (activeFolderNotes.length === 0) {
+      return { linkedType: "unassigned" as MyNote["linkedType"], linkedId: "" };
+    }
+
+    const first = activeFolderNotes[0];
+    const sameType = activeFolderNotes.every(
+      (note) => note.linkedType === first.linkedType,
+    );
+    const sameId = activeFolderNotes.every(
+      (note) => (note.linkedId ?? "") === (first.linkedId ?? ""),
+    );
+
+    return {
+      linkedType: sameType ? first.linkedType : ("unassigned" as MyNote["linkedType"]),
+      linkedId: sameType && sameId ? first.linkedId ?? "" : "",
+    };
+  }, [activeFolderNotes]);
   const filteredNotes = useMemo(() => {
     const keyword = search.trim();
-    if (!keyword) return notes;
-
-    return notes.filter((note) => {
-      return (
-        note.title.includes(keyword) ||
-        note.courseName.includes(keyword) ||
-        note.content.includes(keyword) ||
-        note.tags.some((tag) => tag.includes(keyword))
-      );
-    });
-  }, [notes, search]);
+    const baseNotes = keyword ? activeFolderNotes : activeNoteFolder.directNotes;
+    return baseNotes.filter((note) => noteMatchesSearch(note, keyword));
+  }, [activeFolderNotes, activeNoteFolder.directNotes, search]);
 
   const syncedCount = notes.filter((note) => note.syncStatus === "synced").length;
   const assignedCount = notes.filter((note) => note.linkedType !== "unassigned").length;
   const connectedDriveAccount =
     driveStatus?.accountEmail || driveStatus?.accountName || null;
   const currentPickerFolder = folderPath[folderPath.length - 1];
+
+  useEffect(() => {
+    setFolderAssignmentDraft(activeFolderCommonAssignment);
+  }, [activeFolderCommonAssignment]);
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -432,14 +573,7 @@ export default function NotesPage() {
   }
 
   async function updateNoteAssignment(noteId: string, linkedType: MyNote["linkedType"], linkedId: string) {
-    const course = courses.find((item) => item.id === linkedId);
-    const personalStudy = personalStudies.find((item) => item.id === linkedId);
-    const linkedTitle =
-      linkedType === "course"
-        ? course?.name
-        : linkedType === "personal"
-          ? personalStudy?.title
-          : undefined;
+    const linkedTitle = getAssignmentTitle(linkedType, linkedId);
 
     const nextNotes = await updateNoteClassification(
       noteId,
@@ -452,6 +586,39 @@ export default function NotesPage() {
       linkedType === "unassigned"
         ? "강의 노트 분류가 해제되었습니다."
         : "강의 노트가 분류되었습니다.",
+    );
+  }
+
+  function getAssignmentTitle(linkedType: MyNote["linkedType"], linkedId: string) {
+    const course = courses.find((item) => item.id === linkedId);
+    const personalStudy = personalStudies.find((item) => item.id === linkedId);
+
+    return linkedType === "course"
+      ? course?.name
+      : linkedType === "personal"
+        ? personalStudy?.title
+        : undefined;
+  }
+
+  async function updateFolderAssignment(
+    linkedType: MyNote["linkedType"],
+    linkedId: string,
+  ) {
+    if (activeFolderNotes.length === 0) return;
+
+    const linkedTitle = getAssignmentTitle(linkedType, linkedId);
+    const nextNotes = await updateNotesClassification(
+      activeFolderNotes.map((note) => note.id),
+      linkedType,
+      linkedId || undefined,
+      linkedTitle,
+    );
+
+    setNotes(nextNotes);
+    setFeedbackMessage(
+      linkedType === "unassigned"
+        ? `${activeNoteFolder.name} 폴더 분류가 해제되었습니다.`
+        : `${activeNoteFolder.name} 폴더가 ${linkedTitle ?? "선택한 항목"}으로 분류되었습니다.`,
     );
   }
 
@@ -937,6 +1104,129 @@ export default function NotesPage() {
             </div>
           </div>
 
+          <Card className="border-0 shadow-sm">
+            <CardContent className="space-y-4 p-4">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <Button
+                  size="sm"
+                  variant={activeNoteFolder.pathIds.length === 0 ? "secondary" : "ghost"}
+                  onClick={() => setActiveNoteFolderPath([])}
+                >
+                  나의 노트
+                </Button>
+                {activeNoteFolder.pathNames.map((name, index) => (
+                  <div key={activeNoteFolder.pathIds[index]} className="flex items-center gap-2">
+                    <span className="text-muted-foreground">/</span>
+                    <Button
+                      size="sm"
+                      variant={
+                        index === activeNoteFolder.pathNames.length - 1 ? "secondary" : "ghost"
+                      }
+                      onClick={() =>
+                        setActiveNoteFolderPath(activeNoteFolder.pathIds.slice(0, index + 1))
+                      }
+                    >
+                      {name}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">{activeNoteFolder.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    하위 포함 {activeNoteFolder.totalNotes}개 노트
+                    {search.trim()
+                      ? ` · 검색 결과 ${filteredNotes.length}개`
+                      : ` · 현재 폴더 파일 ${activeNoteFolder.directNotes.length}개`}
+                  </p>
+                </div>
+
+                {activeNoteFolder.pathIds.length > 0 && activeFolderNotes.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      value={folderAssignmentDraft.linkedType}
+                      onValueChange={(value) => {
+                        const linkedType = value as MyNote["linkedType"];
+                        setFolderAssignmentDraft({ linkedType, linkedId: "" });
+                        if (linkedType === "unassigned") {
+                          updateFolderAssignment(linkedType, "");
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-[130px]">
+                        {getLinkedTypeLabel(folderAssignmentDraft.linkedType)}
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="course">내 수업</SelectItem>
+                        <SelectItem value="personal">개인 학습</SelectItem>
+                        <SelectItem value="unassigned">미분류</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {folderAssignmentDraft.linkedType !== "unassigned" && (
+                      <Select
+                        value={folderAssignmentDraft.linkedId}
+                        onValueChange={(value) => {
+                          const linkedId = value ?? "";
+                          setFolderAssignmentDraft((prev) => ({
+                            ...prev,
+                            linkedId,
+                          }));
+                          updateFolderAssignment(folderAssignmentDraft.linkedType, linkedId);
+                        }}
+                      >
+                        <SelectTrigger className="h-8 w-[180px]">
+                          {getLinkedTargetLabel(
+                            folderAssignmentDraft.linkedType,
+                            folderAssignmentDraft.linkedId,
+                            courses,
+                            personalStudies,
+                          )}
+                        </SelectTrigger>
+                        <SelectContent>
+                          {folderAssignmentDraft.linkedType === "course"
+                            ? courses.map((course) => (
+                                <SelectItem key={course.id} value={course.id}>
+                                  {course.name}
+                                </SelectItem>
+                              ))
+                            : personalStudies.map((study) => (
+                                <SelectItem key={study.id} value={study.id}>
+                                  {study.title}
+                                </SelectItem>
+                              ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {!search.trim() && activeNoteFolder.children.length > 0 && (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {activeNoteFolder.children.map((folder) => (
+                    <button
+                      key={folder.id}
+                      type="button"
+                      className="flex items-center gap-3 rounded-lg border bg-background p-3 text-left transition hover:border-primary/50 hover:bg-primary/5"
+                      onClick={() => setActiveNoteFolderPath(folder.pathIds)}
+                    >
+                      <Folder className="h-5 w-5 shrink-0 text-primary" />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">{folder.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {folder.totalNotes}개 노트
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {filteredNotes.length > 0 ? (
             <div className="grid gap-3 md:grid-cols-2">
               {filteredNotes.map((note) => (
@@ -986,6 +1276,11 @@ export default function NotesPage() {
                             {note.fileName} · {formatBytes(note.fileSize)}
                           </p>
                         )}
+                        {note.driveFolderPath?.length ? (
+                          <p className="mt-1 truncate text-xs text-muted-foreground">
+                            폴더: {note.driveFolderPath.join(" / ")}
+                          </p>
+                        ) : null}
                         {note.driveModifiedTime && (
                           <p className="mt-1 text-xs text-muted-foreground">
                             Drive 수정 시각 {formatDate(note.driveModifiedTime)}
@@ -1066,14 +1361,14 @@ export default function NotesPage() {
                 </Card>
               ))}
             </div>
-          ) : (
+          ) : activeNoteFolder.children.length === 0 || search.trim() ? (
             <Card className="border-dashed shadow-sm">
               <CardContent className="py-12 text-center text-muted-foreground">
                 <FileText className="mx-auto mb-3 h-9 w-9 opacity-40" />
                 <p className="text-sm">아직 등록된 노트가 없어요.</p>
               </CardContent>
             </Card>
-          )}
+          ) : null}
         </section>
       </main>
     </div>

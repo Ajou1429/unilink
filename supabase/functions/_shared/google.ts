@@ -141,6 +141,10 @@ export interface DriveChangeFile {
   size?: string;
   parents?: string[];
   trashed?: boolean;
+  driveFolderId?: string;
+  driveFolderName?: string;
+  driveFolderPath?: string[];
+  driveFolderPathIds?: string[];
 }
 
 export interface DriveFolder {
@@ -149,6 +153,22 @@ export interface DriveFolder {
   mimeType: string;
   modifiedTime?: string;
   parents?: string[];
+}
+
+export interface DriveFolderTreeItem extends DriveFolder {
+  path: string[];
+  pathIds: string[];
+}
+
+export async function getDriveFolder(
+  accessToken: string,
+  folderId: string,
+): Promise<DriveFolder> {
+  const params = new URLSearchParams({
+    fields: "id,name,mimeType,modifiedTime,parents",
+  });
+  const res = await driveFetch(accessToken, `/files/${folderId}?${params.toString()}`);
+  return (await res.json()) as DriveFolder;
 }
 
 export async function listDriveFolders(
@@ -250,23 +270,41 @@ export async function listDriveFolderIdsInTree(
   accessToken: string,
   rootFolderId: string,
 ): Promise<Set<string>> {
-  const folderIds = new Set<string>([rootFolderId]);
-  const queue = [rootFolderId];
+  const folders = await listDriveFolderTree(accessToken, rootFolderId);
+  return new Set(folders.map((folder) => folder.id));
+}
 
-  for (let index = 0; index < queue.length; index += 1) {
-    if (folderIds.size > MAX_DRIVE_FOLDER_SCAN) {
+export async function listDriveFolderTree(
+  accessToken: string,
+  rootFolderId: string,
+): Promise<DriveFolderTreeItem[]> {
+  const root = await getDriveFolder(accessToken, rootFolderId);
+  const folders: DriveFolderTreeItem[] = [
+    {
+      ...root,
+      path: [root.name],
+      pathIds: [root.id],
+    },
+  ];
+
+  for (let index = 0; index < folders.length; index += 1) {
+    if (folders.length > MAX_DRIVE_FOLDER_SCAN) {
       throw new Error("선택한 Drive 폴더의 하위 폴더가 너무 많습니다.");
     }
 
-    const childFolders = await listDriveFolders(accessToken, queue[index]);
+    const current = folders[index];
+    const childFolders = await listDriveFolders(accessToken, current.id);
     for (const folder of childFolders) {
-      if (folderIds.has(folder.id)) continue;
-      folderIds.add(folder.id);
-      queue.push(folder.id);
+      if (folders.some((item) => item.id === folder.id)) continue;
+      folders.push({
+        ...folder,
+        path: [...current.path, folder.name],
+        pathIds: [...current.pathIds, folder.id],
+      });
     }
   }
 
-  return folderIds;
+  return folders;
 }
 
 export async function listPdfFilesInFolderTree(
@@ -274,13 +312,19 @@ export async function listPdfFilesInFolderTree(
   rootFolderId: string,
   modifiedAfter?: string,
 ): Promise<DriveChangeFile[]> {
-  const folderIds = await listDriveFolderIdsInTree(accessToken, rootFolderId);
+  const folders = await listDriveFolderTree(accessToken, rootFolderId);
   const filesById = new Map<string, DriveChangeFile>();
 
-  for (const folderId of folderIds) {
-    const files = await listPdfFilesInFolder(accessToken, folderId, modifiedAfter);
+  for (const folder of folders) {
+    const files = await listPdfFilesInFolder(accessToken, folder.id, modifiedAfter);
     for (const file of files) {
-      filesById.set(file.id, file);
+      filesById.set(file.id, {
+        ...file,
+        driveFolderId: folder.id,
+        driveFolderName: folder.name,
+        driveFolderPath: folder.path,
+        driveFolderPathIds: folder.pathIds,
+      });
     }
   }
 
