@@ -66,10 +66,17 @@ async function processChanges(
     refresh_token_encrypted: string;
     refresh_token_iv: string;
     folder_id: string | null;
+    folder_ids: string[] | null;
     page_token: string | null;
   },
 ) {
-  if (!connection.folder_id || !connection.page_token) return;
+  const rootFolderIds =
+    connection.folder_ids?.length
+      ? connection.folder_ids
+      : connection.folder_id
+        ? [connection.folder_id]
+        : [];
+  if (rootFolderIds.length === 0 || !connection.page_token) return;
 
   const refreshToken = await decryptSecret(
     connection.refresh_token_encrypted,
@@ -82,7 +89,13 @@ async function processChanges(
     connection.page_token,
   );
 
-  const folders = await listDriveFolderTree(access_token, connection.folder_id);
+  const folderTree = new Map<string, Awaited<ReturnType<typeof listDriveFolderTree>>[number]>();
+  for (const rootFolderId of rootFolderIds) {
+    for (const folder of await listDriveFolderTree(access_token, rootFolderId)) {
+      folderTree.set(folder.id, folder);
+    }
+  }
+  const folders = [...folderTree.values()];
   const foldersById = new Map(folders.map((folder) => [folder.id, folder]));
   const pdfFiles = files
     .filter(

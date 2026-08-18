@@ -224,6 +224,10 @@ function updateLocalNotesClassification(
   return saveLocalNotes(notes);
 }
 
+function deleteLocalNote(noteId: string): MyNote[] {
+  return saveLocalNotes(getLocalNotes().filter((note) => note.id !== noteId));
+}
+
 function upsertLocalGoodNotesDriveFiles(files: GoodNotesDriveFile[]): MyNote[] {
   const notes = getLocalNotes();
   const now = new Date().toISOString();
@@ -424,6 +428,14 @@ async function updateSupabaseNotesClassification(
   return getSupabaseNotes();
 }
 
+async function deleteSupabaseNote(noteId: string): Promise<MyNote[]> {
+  const supabase = getSupabaseClient()!;
+  const { error } = await supabase.from("notes").delete().eq("id", noteId);
+
+  if (error) throw error;
+  return getSupabaseNotes();
+}
+
 // ---------------------------------------------------------------------------
 // Public API — 호출부는 Supabase 설정 여부를 신경 쓰지 않는다.
 // ---------------------------------------------------------------------------
@@ -460,6 +472,11 @@ export async function updateNotesClassification(
     return updateSupabaseNotesClassification(noteIds, linkedType, linkedId, linkedTitle);
   }
   return updateLocalNotesClassification(noteIds, linkedType, linkedId, linkedTitle);
+}
+
+export async function deleteNote(noteId: string): Promise<MyNote[]> {
+  if (isSupabaseConfigured) return deleteSupabaseNote(noteId);
+  return deleteLocalNote(noteId);
 }
 
 /**

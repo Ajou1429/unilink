@@ -36,12 +36,14 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Trash2,
   Unlink,
   Upload,
 } from "lucide-react";
 import { getStoredCourses } from "@/lib/course-storage";
 import {
   addNote,
+  deleteNote,
   getMyNotes,
   MyNote,
   NoteSource,
@@ -64,7 +66,7 @@ import {
   listDriveFolders,
   rememberDriveConnectionSucceeded,
   startDriveConnection,
-  syncDriveFolder,
+  syncDriveFolders,
 } from "@/lib/drive-connection";
 
 const NOTE_SOURCES: NoteSource[] = [
@@ -118,6 +120,12 @@ interface NoteFolderNode {
   directNotes: MyNote[];
   totalNotes: number;
   children: NoteFolderNode[];
+}
+
+interface SelectedDriveFolder {
+  id: string;
+  name: string;
+  pathNames?: string[];
 }
 
 const MANUAL_NOTE_FOLDER_ID = "__manual_notes__";
@@ -264,6 +272,7 @@ export default function NotesPage() {
 
   const [driveStatus, setDriveStatus] = useState<DriveConnectionStatus | null>(null);
   const [driveFolderInput, setDriveFolderInput] = useState("");
+  const [selectedDriveFolders, setSelectedDriveFolders] = useState<SelectedDriveFolder[]>([]);
   const [driveBusy, setDriveBusy] = useState(false);
   const [driveMessage, setDriveMessage] = useState<string | null>(null);
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
@@ -282,7 +291,12 @@ export default function NotesPage() {
     if (!isSupabaseConfigured) return;
     const status = await getDriveConnectionStatus();
     setDriveStatus(status);
-    if (status.folderId) setDriveFolderInput(status.folderId);
+    const savedFolders = status.folderIds.map((id, index) => ({
+      id,
+      name: status.folderNames[index] ?? id,
+    }));
+    setSelectedDriveFolders(savedFolders);
+    setDriveFolderInput(status.folderId ?? status.folderIds[0] ?? "");
   }
 
   useEffect(() => {
@@ -298,7 +312,12 @@ export default function NotesPage() {
         setDriveMessage("Google Drive 연결에 성공했습니다.");
         rememberDriveConnectionSucceeded().then((status) => {
           setDriveStatus(status);
-          if (status.folderId) setDriveFolderInput(status.folderId);
+          const savedFolders = status.folderIds.map((id, index) => ({
+            id,
+            name: status.folderNames[index] ?? id,
+          }));
+          setSelectedDriveFolders(savedFolders);
+          setDriveFolderInput(status.folderId ?? status.folderIds[0] ?? "");
         });
       } else if (driveParam === "error") {
         setDriveMessage(
@@ -434,7 +453,12 @@ export default function NotesPage() {
         return;
       }
 
-      if (!driveFolderInput) {
+      const folderSelection = selectedDriveFolders.length
+        ? selectedDriveFolders
+        : driveFolderInput
+          ? [{ id: driveFolderInput, name: driveFolderInput }]
+          : [];
+      if (folderSelection.length === 0) {
         setDriveMessage("GoodNotes 백업 폴더를 먼저 선택해주세요.");
         return;
       }
@@ -442,7 +466,10 @@ export default function NotesPage() {
       setDriveBusy(true);
       setDriveMessage(null);
       try {
-        const result = await syncDriveFolder(driveFolderInput || undefined);
+        const result = await syncDriveFolders(
+          folderSelection.map((folder) => folder.id),
+          folderSelection.map((folder) => folder.name),
+        );
         setLastSyncAt(result.syncedAt);
         setDriveMessage(
           `동기화 완료: PDF ${result.filesFound}개 중 ${result.upserted}개 반영`,
@@ -511,21 +538,42 @@ export default function NotesPage() {
     loadDriveFolders(nextPath[nextPath.length - 1]?.id ?? null);
   }
 
-  async function selectDriveFolder(folder: DriveFolder) {
+  function toggleDriveFolderSelection(folder: DriveFolder) {
+    setSelectedDriveFolders((previous) => {
+      const exists = previous.some((item) => item.id === folder.id);
+      if (exists) return previous.filter((item) => item.id !== folder.id);
+
+      return [
+        ...previous,
+        {
+          id: folder.id,
+          name: folder.name,
+          pathNames: [...folderPath.slice(1).map((item) => item.name), folder.name],
+        },
+      ];
+    });
+  }
+
+  async function syncSelectedDriveFolders() {
+    if (selectedDriveFolders.length === 0) return;
+
     setDriveBusy(true);
     setDriveMessage(null);
     try {
-      setDriveFolderInput(folder.id);
-      const result = await syncDriveFolder(folder.id);
+      const result = await syncDriveFolders(
+        selectedDriveFolders.map((folder) => folder.id),
+        selectedDriveFolders.map((folder) => folder.name),
+      );
+      setDriveFolderInput(selectedDriveFolders[0].id);
       setLastSyncAt(result.syncedAt);
       setFolderPickerOpen(false);
       setDriveMessage(
-        `${folder.name} 폴더를 지정했습니다. PDF ${result.filesFound}개 중 ${result.upserted}개를 반영했습니다.`,
+        `선택한 폴더 ${selectedDriveFolders.length}개를 동기화했습니다. PDF ${result.filesFound}개 중 ${result.upserted}개를 반영했습니다.`,
       );
       await loadNotes();
       await loadDriveStatus();
     } catch (error) {
-      setDriveMessage(error instanceof Error ? error.message : "폴더 지정에 실패했습니다.");
+      setDriveMessage(error instanceof Error ? error.message : "폴더 동기화에 실패했습니다.");
     } finally {
       setDriveBusy(false);
     }
@@ -550,6 +598,7 @@ export default function NotesPage() {
       await loadDriveStatus();
       setDriveStatus(null);
       setDriveFolderInput("");
+      setSelectedDriveFolders([]);
       setDriveMessage("Google Drive 연결을 해제했습니다.");
     } catch (error) {
       setDriveMessage(error instanceof Error ? error.message : "연결 해제에 실패했습니다.");
@@ -587,6 +636,23 @@ export default function NotesPage() {
         ? "강의 노트 분류가 해제되었습니다."
         : "강의 노트가 분류되었습니다.",
     );
+  }
+
+  async function handleDeleteNote(note: MyNote) {
+    const confirmed = window.confirm(
+      note.syncStatus === "synced"
+        ? "이 동기화 노트를 UniLink에서 삭제할까요? Google Drive 원본 파일은 삭제되지 않습니다."
+        : "이 노트를 삭제할까요?",
+    );
+    if (!confirmed) return;
+
+    try {
+      const nextNotes = await deleteNote(note.id);
+      setNotes(nextNotes);
+      setFeedbackMessage("노트가 삭제되었습니다.");
+    } catch (error) {
+      setFeedbackMessage(error instanceof Error ? error.message : "노트 삭제에 실패했습니다.");
+    }
   }
 
   function getAssignmentTitle(linkedType: MyNote["linkedType"], linkedId: string) {
@@ -949,6 +1015,21 @@ export default function NotesPage() {
                           </Button>
                         )}
                       </div>
+                      {selectedDriveFolders.length > 0 && (
+                        <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+                          <p className="text-xs font-semibold text-primary">
+                            선택된 폴더 {selectedDriveFolders.length}개
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {selectedDriveFolders.map((folder) => (
+                              <Badge key={folder.id} variant="secondary" className="gap-1">
+                                <CheckCircle2 className="h-3 w-3" />
+                                {folder.name}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <Dialog open={folderPickerOpen} onOpenChange={setFolderPickerOpen}>
                         <DialogContent className="max-h-[82vh] max-w-xl overflow-y-auto">
                           <DialogHeader>
@@ -981,7 +1062,7 @@ export default function NotesPage() {
                                 size="sm"
                                 className="w-full gap-1.5"
                                 onClick={() =>
-                                  selectDriveFolder({
+                                  toggleDriveFolderSelection({
                                     id: currentPickerFolder.id!,
                                     name: currentPickerFolder.name,
                                     mimeType: "application/vnd.google-apps.folder",
@@ -993,6 +1074,15 @@ export default function NotesPage() {
                                 현재 폴더 선택하고 동기화
                               </Button>
                             )}
+
+                            <Button
+                              className="w-full gap-1.5"
+                              onClick={syncSelectedDriveFolders}
+                              disabled={driveBusy || selectedDriveFolders.length === 0}
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" />
+                              선택한 폴더 {selectedDriveFolders.length}개 동기화
+                            </Button>
 
                             {folderPickerError && (
                               <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
@@ -1024,8 +1114,12 @@ export default function NotesPage() {
                                     </button>
                                     <Button
                                       size="sm"
-                                      variant="outline"
-                                      onClick={() => selectDriveFolder(folder)}
+                                      variant={
+                                        selectedDriveFolders.some((item) => item.id === folder.id)
+                                          ? "secondary"
+                                          : "outline"
+                                      }
+                                      onClick={() => toggleDriveFolderSelection(folder)}
                                       disabled={driveBusy}
                                     >
                                       선택
@@ -1286,8 +1380,18 @@ export default function NotesPage() {
                             Drive 수정 시각 {formatDate(note.driveModifiedTime)}
                           </p>
                         )}
-                        <div className="mt-3">
+                        <div className="mt-3 flex items-center justify-between gap-2">
                           <NoteViewerDialog note={note} />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            onClick={() => handleDeleteNote(note)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            삭제
+                          </Button>
                         </div>
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                           <Select

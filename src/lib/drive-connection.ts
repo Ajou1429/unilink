@@ -4,6 +4,8 @@ import { describeFunctionError } from "@/lib/supabase/function-error";
 export interface DriveConnectionStatus {
   connected: boolean;
   folderId: string | null;
+  folderIds: string[];
+  folderNames: string[];
   accountEmail: string | null;
   accountName: string | null;
   accountPhotoUrl: string | null;
@@ -14,6 +16,8 @@ export interface DriveConnectionStatus {
 const disconnectedStatus: DriveConnectionStatus = {
   connected: false,
   folderId: null,
+  folderIds: [],
+  folderNames: [],
   accountEmail: null,
   accountName: null,
   accountPhotoUrl: null,
@@ -45,7 +49,11 @@ function readCachedDriveStatus(userId: string | null): DriveConnectionStatus | n
     const cached = JSON.parse(raw) as CachedDriveConnection;
     if (cached.userId && userId && cached.userId !== userId) return null;
     if (!cached.status?.connected) return null;
-    return cached.status;
+    return {
+      ...cached.status,
+      folderIds: cached.status.folderIds ?? (cached.status.folderId ? [cached.status.folderId] : []),
+      folderNames: cached.status.folderNames ?? [],
+    };
   } catch {
     return null;
   }
@@ -76,6 +84,8 @@ function makeConnectedStatus(
   return {
     connected: true,
     folderId: partial.folderId ?? null,
+    folderIds: partial.folderIds ?? (partial.folderId ? [partial.folderId] : []),
+    folderNames: partial.folderNames ?? [],
     accountEmail: partial.accountEmail ?? null,
     accountName: partial.accountName ?? null,
     accountPhotoUrl: partial.accountPhotoUrl ?? null,
@@ -94,7 +104,7 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
 
   const { data, error } = await supabase
     .from("drive_connections")
-    .select("folder_id, channel_id, channel_expiration")
+    .select("folder_id, folder_ids, folder_names, channel_id, channel_expiration")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -136,6 +146,12 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
 
   const status = makeConnectedStatus({
     folderId: data.folder_id ?? null,
+    folderIds: Array.isArray(data.folder_ids)
+      ? data.folder_ids
+      : data.folder_id
+        ? [data.folder_id]
+        : [],
+    folderNames: Array.isArray(data.folder_names) ? data.folder_names : [],
     accountEmail,
     accountName,
     accountPhotoUrl,
@@ -157,6 +173,8 @@ export async function rememberDriveConnectionSucceeded(): Promise<DriveConnectio
   const previousStatus = readCachedDriveStatus(userId);
   const cachedStatus = makeConnectedStatus({
     folderId: previousStatus?.folderId ?? null,
+    folderIds: previousStatus?.folderIds ?? [],
+    folderNames: previousStatus?.folderNames ?? [],
     channelActive: previousStatus?.channelActive ?? false,
     channelExpiration: previousStatus?.channelExpiration ?? null,
   });
@@ -226,17 +244,24 @@ export async function listDriveFolders(parentId?: string | null): Promise<DriveF
   return data.folders ?? [];
 }
 
-export async function syncDriveFolder(folderId?: string): Promise<DriveSyncResult> {
+export async function syncDriveFolders(
+  folderIds?: string[],
+  folderNames?: string[],
+): Promise<DriveSyncResult> {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error("Supabase가 설정되지 않았습니다.");
 
   const { data, error } = await supabase.functions.invoke<DriveSyncResult>("drive-sync", {
-    body: folderId ? { folderId } : {},
+    body: folderIds?.length ? { folderIds, folderNames } : {},
   });
   if (error || !data) {
     throw new Error(await describeFunctionError(error, "동기화에 실패했습니다."));
   }
   return data;
+}
+
+export async function syncDriveFolder(folderId?: string): Promise<DriveSyncResult> {
+  return syncDriveFolders(folderId ? [folderId] : undefined);
 }
 
 export async function enableRealtimeWatch(): Promise<void> {

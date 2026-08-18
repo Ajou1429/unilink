@@ -1,5 +1,5 @@
 // POST /drive-sync
-// body: { folderId?: string }
+// body: { folderId?: string, folderIds?: string[], folderNames?: string[] }
 // 인증된 사용자 본인의 Drive 연결을 사용해 지정 폴더의 PDF를 수동으로 pull한다.
 // (roadmap Phase 4 — webhook 전에 검증하기 쉬운 폴백 경로)
 
@@ -17,6 +17,11 @@ function extractFolderId(input: string): string {
   return match ? match[0] : input.trim();
 }
 
+function uniqueFolderIds(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return [...new Set(values.filter((value): value is string => typeof value === "string").map(extractFolderId).filter(Boolean))];
+}
+
 Deno.serve(async (req) => {
   const optionsResponse = handleOptions(req);
   if (optionsResponse) return optionsResponse;
@@ -26,7 +31,12 @@ Deno.serve(async (req) => {
 
   const admin = getAdminClient();
   const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
-  const requestedFolderId: string | undefined = body?.folderId;
+  const requestedFolderIds = uniqueFolderIds(
+    Array.isArray(body?.folderIds) ? body.folderIds : body?.folderId ? [body.folderId] : [],
+  );
+  const requestedFolderNames = Array.isArray(body?.folderNames)
+    ? body.folderNames.filter((value: unknown): value is string => typeof value === "string")
+    : [];
 
   const { data: connection, error: connError } = await admin
     .from("drive_connections")
@@ -41,16 +51,28 @@ Deno.serve(async (req) => {
     );
   }
 
-  let folderId = connection.folder_id as string | null;
-  if (requestedFolderId) {
-    folderId = extractFolderId(requestedFolderId);
+  let folderIds = uniqueFolderIds(
+    Array.isArray(connection.folder_ids) && connection.folder_ids.length > 0
+      ? connection.folder_ids
+      : connection.folder_id
+        ? [connection.folder_id]
+        : [],
+  );
+  let folderNames = Array.isArray(connection.folder_names) ? connection.folder_names : [];
+  if (requestedFolderIds.length > 0) {
+    folderIds = requestedFolderIds;
+    folderNames = requestedFolderNames;
     await admin
       .from("drive_connections")
-      .update({ folder_id: folderId })
+      .update({
+        folder_id: folderIds[0] ?? null,
+        folder_ids: folderIds,
+        folder_names: folderNames,
+      })
       .eq("user_id", user.id);
   }
 
-  if (!folderId) {
+  if (folderIds.length === 0) {
     return jsonResponse(
       { error: "GoodNotes 백업 폴더를 먼저 지정해주세요." },
       { status: 400 },
@@ -63,7 +85,14 @@ Deno.serve(async (req) => {
   );
   const { access_token } = await refreshAccessToken(refreshToken);
 
-  const files = await listPdfFilesInFolderTree(access_token, folderId);
+  const filesById = new Map<string, Awaited<ReturnType<typeof listPdfFilesInFolderTree>>[number]>();
+  for (const folderId of folderIds) {
+    const folderFiles = await listPdfFilesInFolderTree(access_token, folderId);
+    for (const file of folderFiles) filesById.set(file.id, file);
+  }
+  const files = [...filesById.values()].sort((a, b) =>
+    (b.modifiedTime ?? "").localeCompare(a.modifiedTime ?? ""),
+  );
 
   const { data: existingNotes } = await admin
     .from("notes")
