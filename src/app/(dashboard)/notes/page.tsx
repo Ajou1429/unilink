@@ -481,7 +481,22 @@ export default function NotesPage() {
       });
     } catch (error) {
       console.error("노트 저장 실패", error);
-      const message = error instanceof Error ? error.message : "알 수 없는 오류";
+      const errorRecord =
+        typeof error === "object" && error !== null
+          ? (error as { message?: unknown; code?: unknown; details?: unknown })
+          : null;
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof errorRecord?.message === "string"
+            ? [
+                errorRecord.message,
+                typeof errorRecord.code === "string" ? `(${errorRecord.code})` : "",
+                typeof errorRecord.details === "string" ? errorRecord.details : "",
+              ]
+                .filter(Boolean)
+                .join(" ")
+            : String(error ?? "알 수 없는 오류");
       const isStorageError = /storage|bucket|upload/i.test(message);
       const isAuthError = /auth|jwt|로그인|permission|권한|row-level security/i.test(message);
       setNoteSaveError(
