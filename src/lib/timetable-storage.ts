@@ -16,6 +16,8 @@ export interface MonthlyEvent {
   memo: string;
   color: string;
   createdAt: string;
+  kind?: "manual" | "personal-deadline" | "personal-plan-deadline";
+  personalStudyId?: string;
 }
 
 export interface CourseSessionProgress {

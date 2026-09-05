@@ -26,6 +26,7 @@ import {
   getPersonalStudyFiles,
   getPersonalStudyNotes,
   getPersonalStudyPlans,
+  formatPersonalStudyDday,
   PersonalStudy,
   PersonalStudyFile,
   PersonalStudyNote,
@@ -33,6 +34,7 @@ import {
   savePersonalStudyFile,
   savePersonalStudyNote,
   savePersonalStudyPlan,
+  savePersonalStudies,
 } from "@/lib/personal-study-storage";
 import { getMyNotes, MY_NOTES_CHANGED_EVENT, MyNote } from "@/lib/my-notes-storage";
 
@@ -77,6 +79,8 @@ function PersonalStudyContent() {
   const [planTitle, setPlanTitle] = useState("");
   const [planDescription, setPlanDescription] = useState("");
   const [planDueDate, setPlanDueDate] = useState("");
+  const [targetDate, setTargetDate] = useState("");
+  const [studyMessage, setStudyMessage] = useState("");
 
   useEffect(() => {
     const timeout = window.setTimeout(async () => {
@@ -95,6 +99,10 @@ function PersonalStudyContent() {
       setPlanTitle("");
       setPlanDescription("");
       setPlanDueDate("");
+      setTargetDate(
+        getPersonalStudies().find((study) => study.id === studyId)?.targetDate ?? "",
+      );
+      setStudyMessage("");
     }, 0);
 
     return () => window.clearTimeout(timeout);
@@ -159,6 +167,21 @@ function PersonalStudyContent() {
     setPlanDueDate("");
   }
 
+  function saveTargetDate() {
+    if (!study) return;
+
+    const nextStudies = studies.map((item) =>
+      item.id === study.id ? { ...item, targetDate } : item,
+    );
+    savePersonalStudies(nextStudies);
+    setStudies(nextStudies);
+    setStudyMessage(
+      targetDate
+        ? `${study.title} 목표 기한이 저장되었습니다.`
+        : `${study.title} 목표 기한이 삭제되었습니다.`,
+    );
+  }
+
   function uploadFiles(event: ChangeEvent<HTMLInputElement>) {
     if (!study || !event.target.files) return;
 
@@ -199,6 +222,28 @@ function PersonalStudyContent() {
                 <p className="text-sm text-muted-foreground">
                   {study.goal || "목표를 추가하면 여기에서 확인할 수 있습니다."}
                 </p>
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">목표 기한</Label>
+                    <Input
+                      type="date"
+                      value={targetDate}
+                      onChange={(event) => setTargetDate(event.target.value)}
+                      className="h-9 w-44"
+                    />
+                  </div>
+                  <Button size="sm" variant="outline" onClick={saveTargetDate}>
+                    기한 저장
+                  </Button>
+                  {targetDate && (
+                    <Badge variant="secondary">
+                      {formatPersonalStudyDday(targetDate)}
+                    </Badge>
+                  )}
+                </div>
+                {studyMessage && (
+                  <p className="text-xs font-medium text-emerald-600">{studyMessage}</p>
+                )}
               </div>
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div>

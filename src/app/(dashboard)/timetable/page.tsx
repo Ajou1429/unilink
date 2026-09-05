@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { TimetableGrid } from "@/components/timetable/TimetableGrid";
@@ -50,7 +50,12 @@ import {
 } from "@/lib/course-storage";
 import {
   getPersonalStudies,
+  getAllPersonalStudyPlans,
+  formatPersonalStudyDday,
   PersonalStudy,
+  PersonalStudyPlan,
+  PERSONAL_STUDY_PLANS_CHANGED_EVENT,
+  PERSONAL_STUDIES_CHANGED_EVENT,
   savePersonalStudies,
 } from "@/lib/personal-study-storage";
 import {
@@ -103,6 +108,50 @@ const KOREA_2026_HOLIDAYS: Record<string, string[]> = {
   "2026-10-09": ["한글날"],
   "2026-12-25": ["성탄절"],
 };
+
+function getPersonalStudyDeadlineEvents(
+  studies: PersonalStudy[],
+  plans: PersonalStudyPlan[],
+): MonthlyEvent[] {
+  const studyById = new Map(studies.map((study) => [study.id, study]));
+  const studyEvents = studies.flatMap((study) => {
+    if (!study.targetDate) return [];
+
+    return [{
+      id: `personal-deadline:${study.id}`,
+      title: `${formatPersonalStudyDday(study.targetDate)} · ${study.title}`,
+      date: study.targetDate,
+      startTime: "07:00",
+      endTime: "08:00",
+      location: "개인 학습 목표",
+      memo: study.goal || "개인 학습 목표 기한",
+      color: study.color,
+      createdAt: study.createdAt,
+      kind: "personal-deadline" as const,
+      personalStudyId: study.id,
+    }];
+  });
+  const planEvents = plans.flatMap((plan) => {
+    const study = studyById.get(plan.studyId);
+    if (!study || !plan.dueDate) return [];
+
+    return [{
+      id: `personal-plan-deadline:${plan.id}`,
+      title: `계획 마감 · ${plan.title}`,
+      date: plan.dueDate,
+      startTime: "08:00",
+      endTime: "09:00",
+      location: `${study.title} · 개인 학습`,
+      memo: plan.description || "개인 학습 계획 마감일",
+      color: study.color,
+      createdAt: plan.createdAt,
+      kind: "personal-plan-deadline" as const,
+      personalStudyId: study.id,
+    }];
+  });
+
+  return [...studyEvents, ...planEvents];
+}
 
 function getWeekStart(date: Date) {
   const next = new Date(date);
@@ -169,6 +218,7 @@ export default function TimetablePage() {
     "all",
   );
   const [personalStudies, setPersonalStudies] = useState<PersonalStudy[]>([]);
+  const [personalStudyPlans, setPersonalStudyPlans] = useState<PersonalStudyPlan[]>([]);
   const [monthlyEvents, setMonthlyEvents] = useState<MonthlyEvent[]>([]);
   const [courseSessions, setCourseSessions] = useState<CourseSessionProgress[]>([]);
   const [myNotes, setMyNotes] = useState<MyNote[]>([]);
@@ -202,6 +252,7 @@ export default function TimetablePage() {
     title: "",
     category: "자격증",
     goal: "",
+    targetDate: "",
     color: PERSONAL_COLORS[0],
   });
   const [newEvent, setNewEvent] = useState({
@@ -234,6 +285,7 @@ export default function TimetablePage() {
       );
       setCourses(getStoredCourses(selectedTerm));
       setPersonalStudies(getPersonalStudies());
+      setPersonalStudyPlans(getAllPersonalStudyPlans());
       setMonthlyEvents(getMonthlyEvents());
       setCourseSessions(getCourseSessions());
       getMyNotes().then(setMyNotes);
@@ -241,10 +293,14 @@ export default function TimetablePage() {
 
     const timeout = window.setTimeout(syncData, 0);
     window.addEventListener("storage", syncData);
+    window.addEventListener(PERSONAL_STUDIES_CHANGED_EVENT, syncData);
+    window.addEventListener(PERSONAL_STUDY_PLANS_CHANGED_EVENT, syncData);
 
     return () => {
       window.clearTimeout(timeout);
       window.removeEventListener("storage", syncData);
+      window.removeEventListener(PERSONAL_STUDIES_CHANGED_EVENT, syncData);
+      window.removeEventListener(PERSONAL_STUDY_PLANS_CHANGED_EVENT, syncData);
     };
   }, [selectedTerm]);
 
@@ -345,6 +401,7 @@ export default function TimetablePage() {
       title: newPersonalStudy.title.trim(),
       category: newPersonalStudy.category,
       goal: newPersonalStudy.goal.trim(),
+      targetDate: newPersonalStudy.targetDate,
       color: newPersonalStudy.color,
       createdAt: new Date().toISOString(),
     };
@@ -354,6 +411,7 @@ export default function TimetablePage() {
       title: "",
       category: "자격증",
       goal: "",
+      targetDate: "",
       color: PERSONAL_COLORS[personalStudies.length % PERSONAL_COLORS.length],
     });
     setActionFeedback(`${study.title} 개인 학습이 등록되었습니다.`);
@@ -505,6 +563,11 @@ export default function TimetablePage() {
     : [];
   const selectedSessionNote = myNotes.find((note) => note.id === sessionForm.noteId);
   const monthCells = getMonthCalendarCells(2026, calendarMonth);
+  const personalStudyDeadlineEvents = useMemo(
+    () => getPersonalStudyDeadlineEvents(personalStudies, personalStudyPlans),
+    [personalStudies, personalStudyPlans],
+  );
+  const calendarEvents = [...monthlyEvents, ...personalStudyDeadlineEvents];
 
   function openNewEventForDate(dateKey: string) {
     setNewEvent((prev) => ({ ...prev, date: dateKey }));
@@ -868,7 +931,7 @@ export default function TimetablePage() {
                   <CardContent className="p-4">
                     <TimetableGrid
                       courses={filteredCourses}
-                      monthlyEvents={monthlyEvents}
+                      monthlyEvents={calendarEvents}
                       courseSessions={courseSessions}
                       weekStart={weekStart}
                       onCourseClick={selectOccurrence}
@@ -940,7 +1003,7 @@ export default function TimetablePage() {
                     <div className="grid grid-cols-7 rounded-b-xl border-l">
                       {monthCells.map(({ date, dateKey, inMonth, dayOfWeek }) => {
                         const holidays = KOREA_2026_HOLIDAYS[dateKey] ?? [];
-                        const dayEvents = monthlyEvents
+                        const dayEvents = calendarEvents
                           .filter((event) => event.date === dateKey)
                           .sort((a, b) => a.startTime.localeCompare(b.startTime));
                         const isSundayOrHoliday = dayOfWeek === 0 || holidays.length > 0;
@@ -1487,20 +1550,31 @@ export default function TimetablePage() {
                       {selectedEvent.memo}
                     </p>
                   )}
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    className="w-full text-xs"
-                    onClick={() => {
-                      persistMonthlyEvents(
-                        monthlyEvents.filter((event) => event.id !== selectedEvent.id),
-                      );
-                      setActionFeedback(`${selectedEvent.title} 일정이 삭제되었습니다.`);
-                      setSelectedEvent(null);
-                    }}
-                  >
-                    일정 삭제
-                  </Button>
+                  {selectedEvent.personalStudyId ? (
+                    <Link
+                      href={`/personal-study?studyId=${encodeURIComponent(selectedEvent.personalStudyId)}`}
+                      className="block"
+                    >
+                      <Button size="sm" variant="outline" className="w-full text-xs">
+                        개인 학습 열기
+                      </Button>
+                    </Link>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="w-full text-xs"
+                      onClick={() => {
+                        persistMonthlyEvents(
+                          monthlyEvents.filter((event) => event.id !== selectedEvent.id),
+                        );
+                        setActionFeedback(`${selectedEvent.title} 일정이 삭제되었습니다.`);
+                        setSelectedEvent(null);
+                      }}
+                    >
+                      일정 삭제
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             ) : (
@@ -1628,7 +1702,23 @@ export default function TimetablePage() {
                                 goal: event.target.value,
                               }))
                             }
+                            />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>목표 기한</Label>
+                          <Input
+                            type="date"
+                            value={newPersonalStudy.targetDate}
+                            onChange={(event) =>
+                              setNewPersonalStudy((prev) => ({
+                                ...prev,
+                                targetDate: event.target.value,
+                              }))
+                            }
                           />
+                          <p className="text-xs text-muted-foreground">
+                            설정한 날짜는 D-DAY로 표시되고 시간표 일정에 자동으로 추가됩니다.
+                          </p>
                         </div>
                         <div className="space-y-2">
                           <Label>색상</Label>
@@ -1675,6 +1765,9 @@ export default function TimetablePage() {
                         <p className="text-sm font-medium truncate">{study.title}</p>
                         <p className="text-xs text-muted-foreground truncate">
                           {study.category}
+                          {study.targetDate
+                            ? ` · ${formatPersonalStudyDday(study.targetDate)} (${study.targetDate})`
+                            : ""}
                           {study.goal ? ` · ${study.goal}` : ""}
                         </p>
                       </div>

@@ -27,6 +27,7 @@ import {
 } from "@/lib/course-storage";
 import {
   getPersonalStudies,
+  formatPersonalStudyDday,
   PersonalStudy,
   PERSONAL_STUDIES_CHANGED_EVENT,
 } from "@/lib/personal-study-storage";
@@ -204,7 +205,12 @@ export function Sidebar() {
                   )}
                 >
                   <Target className="h-3.5 w-3.5 shrink-0" style={{ color: study.color }} />
-                  <span className="truncate">{study.title}</span>
+                  <span className="min-w-0 flex-1 truncate">{study.title}</span>
+                  {study.targetDate && (
+                    <span className="shrink-0 text-[10px] font-semibold text-primary">
+                      {formatPersonalStudyDday(study.targetDate)}
+                    </span>
+                  )}
                 </Link>
               );
             })

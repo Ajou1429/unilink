@@ -3,12 +3,14 @@ export const PERSONAL_STUDY_NOTES_STORAGE_KEY = "unilink:personal-study-notes";
 export const PERSONAL_STUDY_PLANS_STORAGE_KEY = "unilink:personal-study-plans";
 export const PERSONAL_STUDY_FILES_STORAGE_KEY = "unilink:personal-study-files";
 export const PERSONAL_STUDIES_CHANGED_EVENT = "unilink:personalStudiesChanged";
+export const PERSONAL_STUDY_PLANS_CHANGED_EVENT = "unilink:personalStudyPlansChanged";
 
 export interface PersonalStudy {
   id: string;
   title: string;
   category: string;
   goal: string;
+  targetDate?: string;
   color: string;
   createdAt: string;
 }
@@ -86,6 +88,24 @@ export function getPersonalStudyPlans(studyId: string): PersonalStudyPlan[] {
 export function savePersonalStudyPlan(plan: PersonalStudyPlan) {
   const plans = readJson<PersonalStudyPlan[]>(PERSONAL_STUDY_PLANS_STORAGE_KEY, []);
   writeJson(PERSONAL_STUDY_PLANS_STORAGE_KEY, [plan, ...plans]);
+  window.dispatchEvent(new Event(PERSONAL_STUDY_PLANS_CHANGED_EVENT));
+}
+
+export function getAllPersonalStudyPlans(): PersonalStudyPlan[] {
+  return readJson<PersonalStudyPlan[]>(PERSONAL_STUDY_PLANS_STORAGE_KEY, []);
+}
+
+export function formatPersonalStudyDday(targetDate?: string, today = new Date()) {
+  if (!targetDate) return "";
+
+  const target = new Date(`${targetDate}T00:00:00`);
+  const current = new Date(today);
+  target.setHours(0, 0, 0, 0);
+  current.setHours(0, 0, 0, 0);
+  const days = Math.round((target.getTime() - current.getTime()) / 86400000);
+
+  if (days === 0) return "D-Day";
+  return days > 0 ? `D-${days}` : `D+${Math.abs(days)}`;
 }
 
 export function getPersonalStudyFiles(studyId: string): PersonalStudyFile[] {

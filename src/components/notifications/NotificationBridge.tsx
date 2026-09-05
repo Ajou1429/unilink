@@ -15,6 +15,12 @@ import {
   STUDY_PLANS_CHANGED_EVENT,
 } from "@/lib/study-storage";
 import {
+  getAllPersonalStudyPlans,
+  getPersonalStudies,
+  PERSONAL_STUDIES_CHANGED_EVENT,
+  PERSONAL_STUDY_PLANS_CHANGED_EVENT,
+} from "@/lib/personal-study-storage";
+import {
   AppNotification,
   markAppNotificationRead,
   upsertAppNotification,
@@ -141,6 +147,24 @@ export function NotificationBridge() {
     const plansDueTomorrow = getWeeklyStudyPlans().filter(
       (plan) => plan.dueDate === tomorrowKey && !plan.isCompleted,
     );
+    const studies = getPersonalStudies();
+    const studyById = new Map(studies.map((study) => [study.id, study]));
+    const personalStudyDeadlines = studies
+      .filter((study) => study.targetDate === tomorrowKey)
+      .map((study) => ({
+        id: `personal-study-${study.id}`,
+        title: "개인 학습 목표 마감 하루 전",
+        body: `${study.title} · 목표 기한 ${study.targetDate}`,
+        href: `/personal-study?studyId=${encodeURIComponent(study.id)}`,
+      }));
+    const personalPlansDueTomorrow = getAllPersonalStudyPlans()
+      .filter((plan) => plan.dueDate === tomorrowKey && !plan.isCompleted)
+      .map((plan) => ({
+        id: `personal-plan-${plan.id}`,
+        title: "개인 학습 계획 마감 하루 전",
+        body: `${studyById.get(plan.studyId)?.title ?? "개인 학습"} · ${plan.title}`,
+        href: `/personal-study?studyId=${encodeURIComponent(plan.studyId)}`,
+      }));
     const history = new Set(getNotificationHistory());
     let changed = false;
 
@@ -154,6 +178,23 @@ export function NotificationBridge() {
         title: "마감 하루 전",
         body: `${plan.courseName} · ${plan.title}`,
         href: `/study?planId=${encodeURIComponent(plan.id)}`,
+        read: false,
+        createdAt: new Date().toISOString(),
+      });
+      history.add(historyKey);
+      changed = true;
+    });
+
+    [...personalStudyDeadlines, ...personalPlansDueTomorrow].forEach((item) => {
+      const historyKey = `${todayKey}:deadline:${item.id}`;
+      if (history.has(historyKey)) return;
+
+      showNotification({
+        id: `${item.id}-${todayKey}`,
+        type: "deadline",
+        title: item.title,
+        body: item.body,
+        href: item.href,
         read: false,
         createdAt: new Date().toISOString(),
       });
@@ -177,6 +218,11 @@ export function NotificationBridge() {
 
     window.addEventListener(COMMUNITY_POSTS_CHANGED_EVENT, checkCommunityNotifications);
     window.addEventListener(STUDY_PLANS_CHANGED_EVENT, checkDeadlineNotifications);
+    window.addEventListener(PERSONAL_STUDIES_CHANGED_EVENT, checkDeadlineNotifications);
+    window.addEventListener(
+      PERSONAL_STUDY_PLANS_CHANGED_EVENT,
+      checkDeadlineNotifications,
+    );
     window.addEventListener(
       NOTIFICATION_SETTINGS_CHANGED_EVENT,
       checkDeadlineNotifications,
@@ -191,6 +237,14 @@ export function NotificationBridge() {
         checkCommunityNotifications,
       );
       window.removeEventListener(STUDY_PLANS_CHANGED_EVENT, checkDeadlineNotifications);
+      window.removeEventListener(
+        PERSONAL_STUDIES_CHANGED_EVENT,
+        checkDeadlineNotifications,
+      );
+      window.removeEventListener(
+        PERSONAL_STUDY_PLANS_CHANGED_EVENT,
+        checkDeadlineNotifications,
+      );
       window.removeEventListener(
         NOTIFICATION_SETTINGS_CHANGED_EVENT,
         checkDeadlineNotifications,
