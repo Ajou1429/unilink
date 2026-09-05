@@ -943,26 +943,48 @@ export default function TimetablePage() {
                           return (
                             <div key={day} className="grid grid-cols-[48px_1fr_1fr] items-center gap-2">
                               <span className="text-sm font-medium">{day}</span>
-                              <Input
-                                type="time"
+                              <Select
                                 value={dayTime.startTime}
-                                onChange={(event) =>
+                                onValueChange={(value) =>
+                                  value &&
                                   setWorkDayTimes((prev) => ({
                                     ...prev,
-                                    [day]: { ...dayTime, startTime: event.target.value },
+                                    [day]: { ...dayTime, startTime: value },
                                   }))
                                 }
-                              />
-                              <Input
-                                type="time"
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {TIME_OPTIONS.map((time) => (
+                                    <SelectItem key={time} value={time}>
+                                      {formatTimeOption(time)}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <Select
                                 value={dayTime.endTime}
-                                onChange={(event) =>
+                                onValueChange={(value) =>
+                                  value &&
                                   setWorkDayTimes((prev) => ({
                                     ...prev,
-                                    [day]: { ...dayTime, endTime: event.target.value },
+                                    [day]: { ...dayTime, endTime: value },
                                   }))
                                 }
-                              />
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {TIME_OPTIONS.map((time) => (
+                                    <SelectItem key={time} value={time}>
+                                      {formatTimeOption(time)}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </div>
                           );
                         })}

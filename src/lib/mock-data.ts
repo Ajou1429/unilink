@@ -9,6 +9,8 @@ export const COURSE_COLORS = [
   "#059669",
   "#0891B2",
   "#2563EB",
+  "#65A30D",
+  "#F43F5E",
 ];
 
 export const mockCourses: Course[] = [
