@@ -33,7 +33,6 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  ChevronDown,
   BookOpen,
   CheckCircle2,
   X,
@@ -144,21 +143,20 @@ function TimeField({
   onChange: (value: string) => void;
 }) {
   return (
-    <div className="relative">
+    <div className="flex min-w-0">
       <Input
         value={value}
         placeholder="09:00"
         inputMode="numeric"
-        className="pr-9"
+        className="min-w-0 flex-1 rounded-r-none"
         onChange={(event) => onChange(event.target.value)}
         onBlur={() => onChange(normalizeTimeInput(value, "09:00"))}
       />
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       <select
         aria-label="시간 선택"
         value={TIME_OPTIONS.includes(value) ? value : ""}
         onChange={(event) => onChange(event.target.value)}
-        className="absolute inset-y-0 right-0 w-10 cursor-pointer opacity-0"
+        className="w-12 cursor-pointer rounded-r-md border border-l-0 bg-background px-1 text-foreground outline-none focus:ring-2 focus:ring-ring"
       >
         <option value="" disabled>
           시간 선택

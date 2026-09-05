@@ -17,8 +17,8 @@ const WEEK_DAYS: DayOfWeek[] = [
   "토",
   "일",
 ];
-const START_HOUR = 7;
-const END_HOUR = 22;
+const DEFAULT_START_HOUR = 8;
+const DEFAULT_END_HOUR = 22;
 const HOUR_HEIGHT = 60;
 
 function timeToMinutes(time: string): number {
@@ -26,8 +26,8 @@ function timeToMinutes(time: string): number {
   return h * 60 + m;
 }
 
-function minutesFromStart(time: string): number {
-  return timeToMinutes(time) - START_HOUR * 60;
+function minutesFromStart(time: string, startHour: number): number {
+  return timeToMinutes(time) - startHour * 60;
 }
 
 function addDays(date: Date, amount: number) {
@@ -100,16 +100,34 @@ export function TimetableGrid({
   onCourseClick,
   onEventClick,
 }: TimetableGridProps) {
-  const totalMinutes = (END_HOUR - START_HOUR) * 60;
-  const totalHeight = totalMinutes * (HOUR_HEIGHT / 60);
   const weekDates = WEEK_DAYS.map((day, index) => ({
     label: day,
     date: addDays(weekStart, index),
     dateKey: formatDateKey(addDays(weekStart, index)),
   }));
+  const weekDateKeys = new Set(weekDates.map(({ dateKey }) => dateKey));
+  const timeRanges = [
+    ...courses.flatMap((course) => getCourseSchedules(course)),
+    ...workSchedules.flatMap((schedule) => getWorkSchedules(schedule)),
+    ...monthlyEvents
+      .filter((event) => weekDateKeys.has(event.date))
+      .map((event) => ({ startTime: event.startTime, endTime: event.endTime })),
+  ];
+  const earliestMinutes = timeRanges.reduce(
+    (earliest, range) => Math.min(earliest, timeToMinutes(range.startTime)),
+    DEFAULT_START_HOUR * 60,
+  );
+  const latestMinutes = timeRanges.reduce(
+    (latest, range) => Math.max(latest, timeToMinutes(range.endTime)),
+    DEFAULT_END_HOUR * 60,
+  );
+  const startHour = Math.floor(earliestMinutes / 60);
+  const endHour = Math.max(DEFAULT_END_HOUR, Math.ceil(latestMinutes / 60));
+  const totalMinutes = (endHour - startHour) * 60;
+  const totalHeight = totalMinutes * (HOUR_HEIGHT / 60);
 
   return (
-    <div className="w-full overflow-hidden">
+    <div className="max-h-[calc(100vh-260px)] min-h-[520px] w-full overflow-x-hidden overflow-y-auto">
       <div className="w-full min-w-0">
         <div className="flex ml-14 mb-1">
           {weekDates.map(({ label, date, dateKey }) => (
@@ -125,13 +143,13 @@ export function TimetableGrid({
 
         <div className="flex">
           <div className="w-14 shrink-0 relative" style={{ height: totalHeight }}>
-            {Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => (
+            {Array.from({ length: endHour - startHour + 1 }, (_, i) => (
               <div
                 key={i}
                 className="absolute right-2 text-xs text-muted-foreground -translate-y-2"
                 style={{ top: i * HOUR_HEIGHT }}
               >
-                {START_HOUR + i}시
+                {startHour + i}시
               </div>
             ))}
           </div>
@@ -155,14 +173,14 @@ export function TimetableGrid({
                 className="min-w-0 flex-1 relative border-l border-t bg-white"
                 style={{ height: totalHeight }}
               >
-                {Array.from({ length: END_HOUR - START_HOUR }, (_, i) => (
+                {Array.from({ length: endHour - startHour }, (_, i) => (
                   <div
                     key={i}
                     className="absolute inset-x-0 border-b border-dashed border-gray-100"
                     style={{ top: (i + 1) * HOUR_HEIGHT }}
                   />
                 ))}
-                {Array.from({ length: END_HOUR - START_HOUR }, (_, i) => (
+                {Array.from({ length: endHour - startHour }, (_, i) => (
                   <div
                     key={`h-${i}`}
                     className="absolute inset-x-0 border-b border-gray-50"
@@ -171,7 +189,7 @@ export function TimetableGrid({
                 ))}
 
                 {dayCourses.map(({ course, schedule }) => {
-                  const topMin = minutesFromStart(schedule.startTime);
+                  const topMin = minutesFromStart(schedule.startTime, startHour);
                   const durationMin =
                     timeToMinutes(schedule.endTime) - timeToMinutes(schedule.startTime);
                   const top = (topMin / 60) * HOUR_HEIGHT;
@@ -225,7 +243,7 @@ export function TimetableGrid({
                 })}
 
                 {dayWorkSchedules.map(({ schedule, workSchedule }) => {
-                  const topMin = minutesFromStart(workSchedule.startTime);
+                  const topMin = minutesFromStart(workSchedule.startTime, startHour);
                   const durationMin =
                     timeToMinutes(workSchedule.endTime) - timeToMinutes(workSchedule.startTime);
                   const top = (topMin / 60) * HOUR_HEIGHT;
@@ -255,7 +273,7 @@ export function TimetableGrid({
                 })}
 
                 {dayEvents.map((event) => {
-                  const topMin = minutesFromStart(event.startTime);
+                  const topMin = minutesFromStart(event.startTime, startHour);
                   const durationMin =
                     timeToMinutes(event.endTime) - timeToMinutes(event.startTime);
                   const top = (topMin / 60) * HOUR_HEIGHT;
