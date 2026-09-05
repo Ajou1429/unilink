@@ -284,6 +284,7 @@ export default function TimetablePage() {
     Partial<Record<DayOfWeek, { startTime: string; endTime: string }>>
   >({});
   const [workOpen, setWorkOpen] = useState(false);
+  const [editingWorkScheduleId, setEditingWorkScheduleId] = useState<string | null>(null);
   const [newWorkSchedule, setNewWorkSchedule] = useState({
     title: "기타 일정",
     location: "",
@@ -481,8 +482,11 @@ export default function TimetablePage() {
       startTime: workDayTimes[day]?.startTime ?? newWorkSchedule.startTime,
       endTime: workDayTimes[day]?.endTime ?? newWorkSchedule.endTime,
     }));
+    const existingSchedule = editingWorkScheduleId
+      ? workSchedules.find((item) => item.id === editingWorkScheduleId)
+      : undefined;
     const schedule: WorkSchedule = {
-      id: `work-${Date.now()}`,
+      id: existingSchedule?.id ?? `work-${Date.now()}`,
       title: newWorkSchedule.title.trim(),
       location: newWorkSchedule.location.trim(),
       days: newWorkSchedule.days,
@@ -490,10 +494,15 @@ export default function TimetablePage() {
       startTime: newWorkSchedule.startTime,
       endTime: newWorkSchedule.endTime,
       color: newWorkSchedule.color,
-      createdAt: new Date().toISOString(),
+      createdAt: existingSchedule?.createdAt ?? new Date().toISOString(),
     };
-    persistWorkSchedules([...workSchedules, schedule]);
+    persistWorkSchedules(
+      existingSchedule
+        ? workSchedules.map((item) => (item.id === schedule.id ? schedule : item))
+        : [...workSchedules, schedule],
+    );
     setWorkOpen(false);
+    setEditingWorkScheduleId(null);
     setNewWorkSchedule({
       title: "기타 일정",
       location: "",
@@ -503,7 +512,32 @@ export default function TimetablePage() {
       color: "#64748B",
     });
     setWorkDayTimes({});
-    setActionFeedback(`${schedule.title} 기타 일정이 등록되었습니다.`);
+    setActionFeedback(
+      existingSchedule
+        ? `${schedule.title} 기타 일정이 수정되었습니다.`
+        : `${schedule.title} 기타 일정이 등록되었습니다.`,
+    );
+  }
+
+  function startEditingWorkSchedule(schedule: WorkSchedule) {
+    setEditingWorkScheduleId(schedule.id);
+    setNewWorkSchedule({
+      title: schedule.title,
+      location: schedule.location,
+      days: schedule.days,
+      startTime: schedule.startTime,
+      endTime: schedule.endTime,
+      color: schedule.color,
+    });
+    setWorkDayTimes(
+      Object.fromEntries(
+        (schedule.schedules ?? []).map((item) => [
+          item.day,
+          { startTime: item.startTime, endTime: item.endTime },
+        ]),
+      ),
+    );
+    setWorkOpen(true);
   }
 
   function addPersonalStudy() {
@@ -894,13 +928,21 @@ export default function TimetablePage() {
               </DialogContent>
             </Dialog>
 
-            <Dialog open={workOpen} onOpenChange={setWorkOpen}>
+            <Dialog
+              open={workOpen}
+              onOpenChange={(open) => {
+                setWorkOpen(open);
+                if (!open) setEditingWorkScheduleId(null);
+              }}
+            >
               <DialogTrigger render={<Button variant="outline" className="gap-2" />}>
                 <Briefcase className="h-4 w-4" /> 기타 일정 추가
               </DialogTrigger>
               <DialogContent className="max-w-md">
                 <DialogHeader>
-                  <DialogTitle>주간 기타 일정 추가</DialogTitle>
+                  <DialogTitle>
+                    {editingWorkScheduleId ? "기타 일정 수정" : "주간 기타 일정 추가"}
+                  </DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4 pt-2">
                   <div className="space-y-2">
@@ -1016,7 +1058,7 @@ export default function TimetablePage() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label>근무 장소</Label>
+                    <Label>장소</Label>
                     <Input
                       value={newWorkSchedule.location}
                       onChange={(event) =>
@@ -1025,7 +1067,7 @@ export default function TimetablePage() {
                     />
                   </div>
                   <Button onClick={addWorkSchedule} className="w-full">
-                    기타 일정 저장
+                    {editingWorkScheduleId ? "기타 일정 수정" : "기타 일정 저장"}
                   </Button>
                 </div>
               </DialogContent>
@@ -1445,16 +1487,29 @@ export default function TimetablePage() {
                             : `${schedule.days.join(", ")} · ${schedule.startTime} - ${schedule.endTime}`}
                         </p>
                       </div>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        onClick={() => {
-                          persistWorkSchedules(workSchedules.filter((item) => item.id !== schedule.id));
-                          setActionFeedback(`${schedule.title} 기타 일정이 삭제되었습니다.`);
-                        }}
-                      >
-                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                      </Button>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          title="기타 일정 수정"
+                          aria-label="기타 일정 수정"
+                          onClick={() => startEditingWorkSchedule(schedule)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          title="기타 일정 삭제"
+                          aria-label="기타 일정 삭제"
+                          onClick={() => {
+                            persistWorkSchedules(workSchedules.filter((item) => item.id !== schedule.id));
+                            setActionFeedback(`${schedule.title} 기타 일정이 삭제되었습니다.`);
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </CardContent>
