@@ -230,7 +230,7 @@ export function TimetableGrid({
                       </p>
                       {height > 42 && (
                         <p className="text-white/80 text-[10px] leading-tight truncate mt-0.5">
-                          알바{schedule.location ? ` · ${schedule.location}` : ""}
+                          기타 일정{schedule.location ? ` · ${schedule.location}` : ""}
                         </p>
                       )}
                       {height > 60 && (

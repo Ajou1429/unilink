@@ -89,6 +89,19 @@ const PERSONAL_COLORS = ["#2563EB", "#7C3AED", "#059669", "#D97706", "#DB2777"];
 const EVENT_COLORS = ["#0F766E", "#2563EB", "#9333EA", "#EA580C", "#BE123C"];
 const LEVELS: PaceLevel[] = ["상", "중", "하"];
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
+  const hour = Math.floor(index / 2);
+  const minute = index % 2 === 0 ? "00" : "30";
+  return `${String(hour).padStart(2, "0")}:${minute}`;
+});
+
+function formatTimeOption(time: string) {
+  const [hourText, minute] = time.split(":");
+  const hour = Number(hourText);
+  const period = hour < 12 ? "오전" : "오후";
+  const displayHour = hour % 12 || 12;
+  return `${period} ${displayHour}:${minute} (${time})`;
+}
 const KOREA_2026_HOLIDAYS: Record<string, string[]> = {
   "2026-01-01": ["신정"],
   "2026-02-16": ["설날 연휴"],
@@ -266,7 +279,7 @@ export default function TimetablePage() {
   >({});
   const [workOpen, setWorkOpen] = useState(false);
   const [newWorkSchedule, setNewWorkSchedule] = useState({
-    title: "알바",
+    title: "기타 일정",
     location: "",
     days: [] as DayOfWeek[],
     startTime: "18:00",
@@ -462,14 +475,14 @@ export default function TimetablePage() {
     persistWorkSchedules([...workSchedules, schedule]);
     setWorkOpen(false);
     setNewWorkSchedule({
-      title: "알바",
+      title: "기타 일정",
       location: "",
       days: [],
       startTime: "18:00",
       endTime: "22:00",
       color: "#64748B",
     });
-    setActionFeedback(`${schedule.title} 알바 일정이 등록되었습니다.`);
+    setActionFeedback(`${schedule.title} 기타 일정이 등록되었습니다.`);
   }
 
   function addPersonalStudy() {
@@ -769,29 +782,43 @@ export default function TimetablePage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <Label>시작 시간</Label>
-                      <Input
-                        type="time"
+                      <Select
                         value={newEvent.startTime}
-                        onChange={(event) =>
-                          setNewEvent((prev) => ({
-                            ...prev,
-                            startTime: event.target.value,
-                          }))
+                        onValueChange={(value) =>
+                          value && setNewEvent((prev) => ({ ...prev, startTime: value }))
                         }
-                      />
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TIME_OPTIONS.map((time) => (
+                            <SelectItem key={time} value={time}>
+                              {formatTimeOption(time)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <Label>종료 시간</Label>
-                      <Input
-                        type="time"
+                      <Select
                         value={newEvent.endTime}
-                        onChange={(event) =>
-                          setNewEvent((prev) => ({
-                            ...prev,
-                            endTime: event.target.value,
-                          }))
+                        onValueChange={(value) =>
+                          value && setNewEvent((prev) => ({ ...prev, endTime: value }))
                         }
-                      />
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TIME_OPTIONS.map((time) => (
+                            <SelectItem key={time} value={time}>
+                              {formatTimeOption(time)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -833,11 +860,11 @@ export default function TimetablePage() {
 
             <Dialog open={workOpen} onOpenChange={setWorkOpen}>
               <DialogTrigger render={<Button variant="outline" className="gap-2" />}>
-                <Briefcase className="h-4 w-4" /> 알바 일정 추가
+                <Briefcase className="h-4 w-4" /> 기타 일정 추가
               </DialogTrigger>
               <DialogContent className="max-w-md">
                 <DialogHeader>
-                  <DialogTitle>주간 알바 일정 추가</DialogTitle>
+                  <DialogTitle>주간 기타 일정 추가</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4 pt-2">
                   <div className="space-y-2">
@@ -900,7 +927,7 @@ export default function TimetablePage() {
                     />
                   </div>
                   <Button onClick={addWorkSchedule} className="w-full">
-                    알바 일정 저장
+                    기타 일정 저장
                   </Button>
                 </div>
               </DialogContent>
@@ -1302,7 +1329,7 @@ export default function TimetablePage() {
               <Card className="border-0 shadow-sm">
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-sm">
-                    <Briefcase className="h-4 w-4" /> 알바 일정
+                    <Briefcase className="h-4 w-4" /> 기타 일정
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
@@ -1319,7 +1346,7 @@ export default function TimetablePage() {
                         variant="ghost"
                         onClick={() => {
                           persistWorkSchedules(workSchedules.filter((item) => item.id !== schedule.id));
-                          setActionFeedback(`${schedule.title} 알바 일정이 삭제되었습니다.`);
+                          setActionFeedback(`${schedule.title} 기타 일정이 삭제되었습니다.`);
                         }}
                       >
                         <Trash2 className="h-3.5 w-3.5 text-destructive" />
