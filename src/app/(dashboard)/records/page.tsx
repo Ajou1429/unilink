@@ -602,7 +602,9 @@ export default function RecordsPage() {
                         }}
                       >
                         <SelectTrigger className="w-full">
-                          <SelectValue />
+                          <SelectValue>
+                            {COURSE_TYPE_LABELS[newGrade.courseType]}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {Object.entries(COURSE_TYPE_LABELS).map(([value, label]) => (
@@ -719,7 +721,9 @@ export default function RecordsPage() {
                                   }}
                                 >
                                   <SelectTrigger className="w-full">
-                                    <SelectValue />
+                                    <SelectValue>
+                                      {COURSE_TYPE_LABELS[record.courseType ?? "major"]}
+                                    </SelectValue>
                                   </SelectTrigger>
                                   <SelectContent>
                                     {Object.entries(COURSE_TYPE_LABELS).map(
@@ -761,9 +765,9 @@ export default function RecordsPage() {
                                   if (!value) return;
                                   updateGrade(record.id, { grade: value });
                                 }}
-                              >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue />
+                                >
+                                  <SelectTrigger className="w-full">
+                                    <SelectValue>{record.grade}</SelectValue>
                                 </SelectTrigger>
                                 <SelectContent>
                                   {GRADE_OPTIONS.map((grade) => (
@@ -914,7 +918,7 @@ export default function RecordsPage() {
                         }}
                       >
                         <SelectTrigger className="w-full">
-                          <SelectValue />
+                          <SelectValue>{SPEC_CATEGORY_LABELS[newSpec.category]}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {Object.entries(SPEC_CATEGORY_LABELS).map(([value, label]) => (
@@ -938,7 +942,7 @@ export default function RecordsPage() {
                         }}
                       >
                         <SelectTrigger className="w-full">
-                          <SelectValue />
+                          <SelectValue>{STATUS_LABELS[newSpec.status]}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {Object.entries(STATUS_LABELS).map(([value, label]) => (
@@ -977,7 +981,7 @@ export default function RecordsPage() {
                         }}
                       >
                         <SelectTrigger className="w-full">
-                          <SelectValue />
+                          <SelectValue>{AWARD_STATUS_LABELS[newSpec.awardStatus]}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {Object.entries(AWARD_STATUS_LABELS).map(([value, label]) => (
@@ -1066,7 +1070,7 @@ export default function RecordsPage() {
                                 }}
                               >
                                 <SelectTrigger className="w-full">
-                                  <SelectValue />
+                                  <SelectValue>{SPEC_CATEGORY_LABELS[record.category]}</SelectValue>
                                 </SelectTrigger>
                                 <SelectContent>
                                   {Object.entries(SPEC_CATEGORY_LABELS).map(
@@ -1091,7 +1095,7 @@ export default function RecordsPage() {
                                 }}
                               >
                                 <SelectTrigger className="w-full">
-                                  <SelectValue />
+                                  <SelectValue>{STATUS_LABELS[record.status]}</SelectValue>
                                 </SelectTrigger>
                                 <SelectContent>
                                   {Object.entries(STATUS_LABELS).map(([value, label]) => (
@@ -1128,7 +1132,9 @@ export default function RecordsPage() {
                                 }}
                               >
                                 <SelectTrigger className="w-full">
-                                  <SelectValue />
+                                  <SelectValue>
+                                    {AWARD_STATUS_LABELS[record.awardStatus ?? "not-applicable"]}
+                                  </SelectValue>
                                 </SelectTrigger>
                                 <SelectContent>
                                   {Object.entries(AWARD_STATUS_LABELS).map(

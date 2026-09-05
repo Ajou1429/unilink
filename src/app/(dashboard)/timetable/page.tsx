@@ -1026,7 +1026,9 @@ export default function TimetablePage() {
                     }}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue />
+                      <SelectValue>
+                        {COURSE_TYPE_LABELS[newCourse.courseType ?? "major"]}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {Object.entries(COURSE_TYPE_LABELS).map(([value, label]) => (
@@ -1508,7 +1510,9 @@ export default function TimetablePage() {
                             }
                           >
                             <SelectTrigger className="w-full">
-                              <SelectValue />
+                              <SelectValue>
+                                {COURSE_TYPE_LABELS[editingCourse.courseType ?? "major"]}
+                              </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
                               {Object.entries(COURSE_TYPE_LABELS).map(([value, label]) => (
