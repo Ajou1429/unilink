@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   FileText,
   Paperclip,
+  Pencil,
   Plus,
   Target,
   Trash2,
@@ -88,6 +89,10 @@ function PersonalStudyContent() {
   const [planDescription, setPlanDescription] = useState("");
   const [planDueDate, setPlanDueDate] = useState("");
   const [targetDate, setTargetDate] = useState("");
+  const [editingStudy, setEditingStudy] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editGoal, setEditGoal] = useState("");
   const [studyMessage, setStudyMessage] = useState("");
 
   useEffect(() => {
@@ -110,6 +115,11 @@ function PersonalStudyContent() {
       setTargetDate(
         getPersonalStudies().find((study) => study.id === studyId)?.targetDate ?? "",
       );
+      const currentStudy = getPersonalStudies().find((study) => study.id === studyId);
+      setEditTitle(currentStudy?.title ?? "");
+      setEditCategory(currentStudy?.category ?? "");
+      setEditGoal(currentStudy?.goal ?? "");
+      setEditingStudy(false);
       setStudyMessage("");
     }, 0);
 
@@ -215,6 +225,25 @@ function PersonalStudyContent() {
     setPlans((prev) => prev.filter((plan) => plan.id !== planId));
   }
 
+  function saveStudyDetails() {
+    if (!study || !editTitle.trim()) return;
+
+    const updatedStudy = {
+      ...study,
+      title: editTitle.trim(),
+      category: editCategory.trim() || study.category,
+      goal: editGoal.trim(),
+      targetDate,
+    };
+    const nextStudies = studies.map((item) =>
+      item.id === study.id ? updatedStudy : item,
+    );
+    savePersonalStudies(nextStudies);
+    setStudies(nextStudies);
+    setEditingStudy(false);
+    setStudyMessage("개인 학습 내용이 수정되었습니다.");
+  }
+
   function uploadFiles(event: ChangeEvent<HTMLInputElement>) {
     if (!study || !event.target.files) return;
 
@@ -255,6 +284,45 @@ function PersonalStudyContent() {
                 <p className="text-sm text-muted-foreground">
                   {study.goal || "목표를 추가하면 여기에서 확인할 수 있습니다."}
                 </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1"
+                  onClick={() => setEditingStudy((prev) => !prev)}
+                >
+                  <Pencil className="h-3.5 w-3.5" /> 학습 내용 수정
+                </Button>
+                {editingStudy && (
+                  <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>학습 이름</Label>
+                        <Input
+                          value={editTitle}
+                          onChange={(event) => setEditTitle(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>분류</Label>
+                        <Input
+                          value={editCategory}
+                          onChange={(event) => setEditCategory(event.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>목표</Label>
+                      <Textarea
+                        rows={3}
+                        value={editGoal}
+                        onChange={(event) => setEditGoal(event.target.value)}
+                      />
+                    </div>
+                    <Button size="sm" onClick={saveStudyDetails}>
+                      수정 내용 저장
+                    </Button>
+                  </div>
+                )}
                 <div className="flex flex-wrap items-end gap-2">
                   <div className="space-y-1">
                     <Label className="text-xs">목표 기한</Label>
