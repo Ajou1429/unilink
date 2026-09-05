@@ -340,6 +340,7 @@ export default function TimetablePage() {
   const [addOpen, setAddOpen] = useState(false);
   const [personalOpen, setPersonalOpen] = useState(false);
   const [eventOpen, setEventOpen] = useState(false);
+  const [editingMonthlyEventId, setEditingMonthlyEventId] = useState<string | null>(null);
   const [newCourse, setNewCourse] = useState({
     name: "",
     professor: "",
@@ -662,8 +663,11 @@ export default function TimetablePage() {
   function addMonthlyEvent() {
     if (!newEvent.title.trim()) return;
 
+    const existingEvent = editingMonthlyEventId
+      ? monthlyEvents.find((item) => item.id === editingMonthlyEventId)
+      : undefined;
     const event: MonthlyEvent = {
-      id: Date.now().toString(),
+      id: existingEvent?.id ?? Date.now().toString(),
       title: newEvent.title.trim(),
       date: newEvent.date,
       startTime: newEvent.startTime,
@@ -671,11 +675,16 @@ export default function TimetablePage() {
       location: newEvent.location.trim(),
       memo: newEvent.memo.trim(),
       color: newEvent.color,
-      createdAt: new Date().toISOString(),
+      createdAt: existingEvent?.createdAt ?? new Date().toISOString(),
     };
 
-    persistMonthlyEvents([event, ...monthlyEvents]);
+    persistMonthlyEvents(
+      existingEvent
+        ? monthlyEvents.map((item) => (item.id === event.id ? event : item))
+        : [event, ...monthlyEvents],
+    );
     setEventOpen(false);
+    setEditingMonthlyEventId(null);
     setNewEvent({
       title: "",
       date: newEvent.date,
@@ -685,7 +694,23 @@ export default function TimetablePage() {
       memo: "",
       color: EVENT_COLORS[monthlyEvents.length % EVENT_COLORS.length],
     });
-    setActionFeedback(`${event.title} 일정이 등록되었습니다.`);
+    setActionFeedback(
+      existingEvent ? `${event.title} 일정이 수정되었습니다.` : `${event.title} 일정이 등록되었습니다.`,
+    );
+  }
+
+  function startEditingMonthlyEvent(event: MonthlyEvent) {
+    setEditingMonthlyEventId(event.id);
+    setNewEvent({
+      title: event.title,
+      date: event.date,
+      startTime: event.startTime,
+      endTime: event.endTime,
+      location: event.location,
+      memo: event.memo,
+      color: event.color,
+    });
+    setEventOpen(true);
   }
 
   function selectOccurrence(occurrence: CourseOccurrence) {
@@ -886,13 +911,21 @@ export default function TimetablePage() {
             </div>
           </div>
           <div className="flex gap-2">
-            <Dialog open={eventOpen} onOpenChange={setEventOpen}>
+            <Dialog
+              open={eventOpen}
+              onOpenChange={(open) => {
+                setEventOpen(open);
+                if (!open) setEditingMonthlyEventId(null);
+              }}
+            >
               <DialogTrigger render={<Button variant="outline" className="gap-2" />}>
                 <CalendarDays className="h-4 w-4" /> 월간 일정 추가
               </DialogTrigger>
               <DialogContent className="max-w-md">
                 <DialogHeader>
-                  <DialogTitle>월간 일정 추가</DialogTitle>
+                  <DialogTitle>
+                    {editingMonthlyEventId ? "월간 일정 수정" : "월간 일정 추가"}
+                  </DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4 pt-2">
                   <div className="space-y-2">
@@ -981,7 +1014,7 @@ export default function TimetablePage() {
                     </div>
                   </div>
                   <Button onClick={addMonthlyEvent} className="w-full">
-                    일정 추가
+                    {editingMonthlyEventId ? "일정 수정" : "일정 추가"}
                   </Button>
                 </div>
               </DialogContent>
@@ -2036,20 +2069,31 @@ export default function TimetablePage() {
                       </Button>
                     </Link>
                   ) : (
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="w-full text-xs"
-                      onClick={() => {
-                        persistMonthlyEvents(
-                          monthlyEvents.filter((event) => event.id !== selectedEvent.id),
-                        );
-                        setActionFeedback(`${selectedEvent.title} 일정이 삭제되었습니다.`);
-                        setSelectedEvent(null);
-                      }}
-                    >
-                      일정 삭제
-                    </Button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full text-xs"
+                        onClick={() => startEditingMonthlyEvent(selectedEvent)}
+                      >
+                        <Pencil className="mr-1 h-3.5 w-3.5" />
+                        일정 수정
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="w-full text-xs"
+                        onClick={() => {
+                          persistMonthlyEvents(
+                            monthlyEvents.filter((event) => event.id !== selectedEvent.id),
+                          );
+                          setActionFeedback(`${selectedEvent.title} 일정이 삭제되었습니다.`);
+                          setSelectedEvent(null);
+                        }}
+                      >
+                        일정 삭제
+                      </Button>
+                    </div>
                   )}
                 </CardContent>
               </Card>
