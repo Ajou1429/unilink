@@ -1,4 +1,4 @@
-import { Course } from "./types";
+import { Course, CourseSchedule } from "./types";
 
 export const MONTHLY_EVENTS_STORAGE_KEY = "unilink:monthly-events";
 export const COURSE_SESSIONS_STORAGE_KEY = "unilink:course-sessions";
@@ -53,6 +53,7 @@ export interface WorkSchedule {
   id: string;
   title: string;
   days: Course["days"];
+  schedules?: CourseSchedule[];
   startTime: string;
   endTime: string;
   location: string;

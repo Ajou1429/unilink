@@ -280,6 +280,9 @@ export default function TimetablePage() {
   const [courseDayTimes, setCourseDayTimes] = useState<
     Partial<Record<DayOfWeek, { startTime: string; endTime: string }>>
   >({});
+  const [workDayTimes, setWorkDayTimes] = useState<
+    Partial<Record<DayOfWeek, { startTime: string; endTime: string }>>
+  >({});
   const [workOpen, setWorkOpen] = useState(false);
   const [newWorkSchedule, setNewWorkSchedule] = useState({
     title: "기타 일정",
@@ -461,15 +464,29 @@ export default function TimetablePage() {
         ? prev.days.filter((item) => item !== day)
         : [...prev.days, day],
     }));
+    setWorkDayTimes((prev) => {
+      if (prev[day]) {
+        const next = { ...prev };
+        delete next[day];
+        return next;
+      }
+      return { ...prev, [day]: { startTime: "18:00", endTime: "22:00" } };
+    });
   }
 
   function addWorkSchedule() {
     if (!newWorkSchedule.title.trim() || newWorkSchedule.days.length === 0) return;
+    const schedules = newWorkSchedule.days.map((day) => ({
+      day,
+      startTime: workDayTimes[day]?.startTime ?? newWorkSchedule.startTime,
+      endTime: workDayTimes[day]?.endTime ?? newWorkSchedule.endTime,
+    }));
     const schedule: WorkSchedule = {
       id: `work-${Date.now()}`,
       title: newWorkSchedule.title.trim(),
       location: newWorkSchedule.location.trim(),
       days: newWorkSchedule.days,
+      schedules,
       startTime: newWorkSchedule.startTime,
       endTime: newWorkSchedule.endTime,
       color: newWorkSchedule.color,
@@ -485,6 +502,7 @@ export default function TimetablePage() {
       endTime: "22:00",
       color: "#64748B",
     });
+    setWorkDayTimes({});
     setActionFeedback(`${schedule.title} 기타 일정이 등록되었습니다.`);
   }
 
@@ -913,7 +931,47 @@ export default function TimetablePage() {
                       ))}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>요일별 시간</Label>
+                    {newWorkSchedule.days.length > 0 ? (
+                      <div className="space-y-2">
+                        {newWorkSchedule.days.map((day) => {
+                          const dayTime = workDayTimes[day] ?? {
+                            startTime: newWorkSchedule.startTime,
+                            endTime: newWorkSchedule.endTime,
+                          };
+                          return (
+                            <div key={day} className="grid grid-cols-[48px_1fr_1fr] items-center gap-2">
+                              <span className="text-sm font-medium">{day}</span>
+                              <Input
+                                type="time"
+                                value={dayTime.startTime}
+                                onChange={(event) =>
+                                  setWorkDayTimes((prev) => ({
+                                    ...prev,
+                                    [day]: { ...dayTime, startTime: event.target.value },
+                                  }))
+                                }
+                              />
+                              <Input
+                                type="time"
+                                value={dayTime.endTime}
+                                onChange={(event) =>
+                                  setWorkDayTimes((prev) => ({
+                                    ...prev,
+                                    [day]: { ...dayTime, endTime: event.target.value },
+                                  }))
+                                }
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">요일을 먼저 선택해주세요.</p>
+                    )}
+                  </div>
+                  <div className="hidden grid grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <Label>시작 시간</Label>
                       <Input
@@ -1358,7 +1416,11 @@ export default function TimetablePage() {
                       <div className="min-w-0">
                         <p className="truncate font-medium">{schedule.title}</p>
                         <p className="text-xs text-muted-foreground">
-                          {schedule.days.join(", ")} · {schedule.startTime} - {schedule.endTime}
+                          {schedule.schedules?.length
+                            ? schedule.schedules
+                                .map((item) => `${item.day} ${item.startTime}-${item.endTime}`)
+                                .join(" · ")
+                            : `${schedule.days.join(", ")} · ${schedule.startTime} - ${schedule.endTime}`}
                         </p>
                       </div>
                       <Button

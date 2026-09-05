@@ -57,6 +57,16 @@ function getCourseSchedules(course: Course): CourseSchedule[] {
       }));
 }
 
+function getWorkSchedules(schedule: WorkSchedule): CourseSchedule[] {
+  return schedule.schedules?.length
+    ? schedule.schedules
+    : schedule.days.map((day) => ({
+        day,
+        startTime: schedule.startTime,
+        endTime: schedule.endTime,
+      }));
+}
+
 function formatSessionSummary(session: CourseSessionProgress) {
   const pageRange =
     session.pageStart && session.pageEnd
@@ -133,7 +143,9 @@ export function TimetableGrid({
                 .map((schedule) => ({ course, schedule })),
             );
             const dayWorkSchedules = workSchedules.flatMap((schedule) =>
-              schedule.days.includes(label as DayOfWeek) ? [schedule] : [],
+              getWorkSchedules(schedule)
+                .filter((workSchedule) => workSchedule.day === label)
+                .map((workSchedule) => ({ schedule, workSchedule })),
             );
             const dayEvents = monthlyEvents.filter((event) => event.date === dateKey);
 
@@ -212,10 +224,10 @@ export function TimetableGrid({
                   );
                 })}
 
-                {dayWorkSchedules.map((schedule) => {
-                  const topMin = minutesFromStart(schedule.startTime);
+                {dayWorkSchedules.map(({ schedule, workSchedule }) => {
+                  const topMin = minutesFromStart(workSchedule.startTime);
                   const durationMin =
-                    timeToMinutes(schedule.endTime) - timeToMinutes(schedule.startTime);
+                    timeToMinutes(workSchedule.endTime) - timeToMinutes(workSchedule.startTime);
                   const top = (topMin / 60) * HOUR_HEIGHT;
                   const height = (durationMin / 60) * HOUR_HEIGHT;
 
@@ -235,7 +247,7 @@ export function TimetableGrid({
                       )}
                       {height > 60 && (
                         <p className="text-white/70 text-[10px] leading-tight">
-                          {schedule.startTime} - {schedule.endTime}
+                          {workSchedule.startTime} - {workSchedule.endTime}
                         </p>
                       )}
                     </div>
