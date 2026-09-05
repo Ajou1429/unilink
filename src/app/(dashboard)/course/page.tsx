@@ -495,7 +495,7 @@ function CourseContent() {
                           className="hover:text-primary"
                           onClick={() => setLinkedNoteFolderPath([])}
                         >
-                          ?명듃
+                          노트
                         </button>
                         {activeLinkedNoteFolder.pathNames.map((name, index) => (
                           <span key={`${name}-${index}`} className="flex items-center gap-1">
@@ -525,7 +525,7 @@ function CourseContent() {
                           }
                         >
                           <ChevronLeft className="h-4 w-4" />
-                          ?곗そ
+                          뒤로
                         </Button>
                       )}
                     </div>
