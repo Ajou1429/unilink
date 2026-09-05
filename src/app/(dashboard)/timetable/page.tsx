@@ -89,7 +89,15 @@ const COURSE_TYPE_LABELS = {
   "non-major": "비전공",
 } as const;
 const PERSONAL_COLORS = ["#2563EB", "#7C3AED", "#059669", "#D97706", "#DB2777"];
-const EVENT_COLORS = ["#0F766E", "#2563EB", "#9333EA", "#EA580C", "#BE123C"];
+const EVENT_COLORS = [
+  "#0F766E",
+  "#2563EB",
+  "#9333EA",
+  "#EA580C",
+  "#BE123C",
+  "#65A30D",
+  "#0891B2",
+];
 const LEVELS: PaceLevel[] = ["상", "중", "하"];
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
@@ -104,6 +112,14 @@ function formatTimeOption(time: string) {
   const period = hour < 12 ? "오전" : "오후";
   const displayHour = hour % 12 || 12;
   return `${period} ${displayHour}:${minute} (${time})`;
+}
+
+function formatTimeShort(time: string) {
+  const [hourText, minute] = time.split(":");
+  const hour = Number(hourText);
+  const period = hour < 12 ? "오전" : "오후";
+  const displayHour = hour % 12 || 12;
+  return `${period} ${displayHour}:${minute}`;
 }
 
 function normalizeTimeInput(value: string, fallback: string) {
@@ -156,14 +172,14 @@ function TimeField({
         aria-label="시간 선택"
         value={TIME_OPTIONS.includes(value) ? value : ""}
         onChange={(event) => onChange(event.target.value)}
-        className="w-12 cursor-pointer rounded-r-md border border-l-0 bg-background px-1 text-foreground outline-none focus:ring-2 focus:ring-ring"
+        className="w-20 cursor-pointer rounded-r-md border border-l-0 bg-background px-1.5 text-foreground outline-none focus:ring-2 focus:ring-ring"
       >
         <option value="" disabled>
           시간 선택
         </option>
         {TIME_OPTIONS.map((time) => (
           <option key={time} value={time}>
-            {formatTimeOption(time)}
+            {formatTimeShort(time)}
           </option>
         ))}
       </select>
