@@ -124,10 +124,12 @@ function buildCourseNoteFolderTree(notes: MyNote[]): CourseNoteFolderNode {
     commonPathLength = index;
   }
 
+  const folderStartIndex = Math.max(commonPathLength - 1, 0);
+
   for (const [index, note] of notes.entries()) {
     const { names, ids } = noteSegments[index];
-    const relativeNames = names.slice(commonPathLength);
-    const relativeIds = ids.slice(commonPathLength);
+    const relativeNames = names.slice(folderStartIndex);
+    const relativeIds = ids.slice(folderStartIndex);
     let current = root;
 
     relativeIds.forEach((id, folderIndex) => {
