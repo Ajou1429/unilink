@@ -58,7 +58,10 @@ import {
   PERSONAL_STUDY_PLANS_CHANGED_EVENT,
   PERSONAL_STUDIES_CHANGED_EVENT,
   savePersonalStudies,
+  completePersonalStudy,
+  deletePersonalStudy,
 } from "@/lib/personal-study-storage";
+import { addCompletedPersonalStudySpec } from "@/lib/record-storage";
 import {
   CourseOccurrence,
   CourseSessionProgress,
@@ -506,6 +509,21 @@ export default function TimetablePage() {
       color: PERSONAL_COLORS[personalStudies.length % PERSONAL_COLORS.length],
     });
     setActionFeedback(`${study.title} 개인 학습이 등록되었습니다.`);
+  }
+
+  function completeStudyFromList(study: PersonalStudy) {
+    const completed = completePersonalStudy(study.id);
+    if (!completed) return;
+    addCompletedPersonalStudySpec(completed);
+    setPersonalStudies((prev) => prev.filter((item) => item.id !== study.id));
+    setActionFeedback(`${study.title} 학습을 완료하고 내 스펙에 등록했습니다.`);
+  }
+
+  function deleteStudyFromList(study: PersonalStudy) {
+    if (!window.confirm(`${study.title} 학습과 연결된 계획·자료를 삭제할까요?`)) return;
+    deletePersonalStudy(study.id);
+    setPersonalStudies((prev) => prev.filter((item) => item.id !== study.id));
+    setActionFeedback(`${study.title} 개인 학습이 삭제되었습니다.`);
   }
 
   function addMonthlyEvent() {
@@ -2018,11 +2036,14 @@ export default function TimetablePage() {
               <CardContent className="space-y-2">
                 {personalStudies.length > 0 ? (
                   personalStudies.map((study) => (
-                    <Link
+                    <div
                       key={study.id}
-                      href={`/personal-study?studyId=${encodeURIComponent(study.id)}`}
                       className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-accent transition-colors"
                     >
+                      <Link
+                        href={`/personal-study?studyId=${encodeURIComponent(study.id)}`}
+                        className="flex min-w-0 flex-1 items-center gap-2.5"
+                      >
                       <div
                         className="h-3 w-3 rounded-full shrink-0"
                         style={{ backgroundColor: study.color }}
@@ -2037,7 +2058,28 @@ export default function TimetablePage() {
                           {study.goal ? ` · ${study.goal}` : ""}
                         </p>
                       </div>
-                    </Link>
+                      </Link>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        title="학습 완료"
+                        onClick={() => completeStudyFromList(study)}
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        title="학습 삭제"
+                        onClick={() => deleteStudyFromList(study)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
                   ))
                 ) : (
                   <div className="text-center py-5 text-muted-foreground">
