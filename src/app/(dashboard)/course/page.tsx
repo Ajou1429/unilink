@@ -15,8 +15,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   BookOpen,
   CalendarCheck,
+  ChevronLeft,
   Clock,
   FileText,
+  Folder,
   MapPin,
   Paperclip,
   Plus,
@@ -77,6 +79,66 @@ function formatBytes(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+interface CourseNoteFolderNode {
+  id: string;
+  name: string;
+  pathIds: string[];
+  pathNames: string[];
+  directNotes: MyNote[];
+  children: CourseNoteFolderNode[];
+}
+
+function getCourseNoteFolderSegments(note: MyNote) {
+  if (note.driveFolderPath?.length && note.driveFolderPathIds?.length) {
+    return { names: note.driveFolderPath, ids: note.driveFolderPathIds };
+  }
+
+  if (note.driveFolderName && note.driveFolderId) {
+    return { names: [note.driveFolderName], ids: [note.driveFolderId] };
+  }
+
+  return { names: ["직접 추가한 노트"], ids: ["__manual_notes__"] };
+}
+
+function buildCourseNoteFolderTree(notes: MyNote[]): CourseNoteFolderNode {
+  const root: CourseNoteFolderNode = {
+    id: "root",
+    name: "강의 노트",
+    pathIds: [],
+    pathNames: [],
+    directNotes: [],
+    children: [],
+  };
+
+  for (const note of notes) {
+    const { names, ids } = getCourseNoteFolderSegments(note);
+    let current = root;
+
+    ids.forEach((id, index) => {
+      const name = names[index] ?? "이름 없는 폴더";
+      let child = current.children.find((item) => item.id === id);
+
+      if (!child) {
+        child = {
+          id,
+          name,
+          pathIds: [...current.pathIds, id],
+          pathNames: [...current.pathNames, name],
+          directNotes: [],
+          children: [],
+        };
+        current.children.push(child);
+      }
+
+      current = child;
+    });
+
+    current.directNotes.push(note);
+  }
+
+  return root;
+}
+
 function EmptyCourseState() {
   return (
     <div className="flex flex-col min-h-screen">
@@ -113,6 +175,7 @@ function CourseContent() {
   const [planDescription, setPlanDescription] = useState("");
   const [planDueDate, setPlanDueDate] = useState("");
   const [planFeedback, setPlanFeedback] = useState("");
+  const [linkedNoteFolderPath, setLinkedNoteFolderPath] = useState<string[]>([]);
 
   useEffect(() => {
     const timeout = window.setTimeout(async () => {
@@ -132,6 +195,7 @@ function CourseContent() {
       setPlanDescription("");
       setPlanDueDate("");
       setPlanFeedback("");
+      setLinkedNoteFolderPath([]);
     }, 0);
 
     return () => window.clearTimeout(timeout);
@@ -157,6 +221,20 @@ function CourseContent() {
   }, [courseId]);
 
   const course = courses.find((item) => item.id === courseId) ?? null;
+
+  const linkedNoteFolderTree = useMemo(
+    () => buildCourseNoteFolderTree(linkedMyNotes),
+    [linkedMyNotes],
+  );
+  const activeLinkedNoteFolder = useMemo(() => {
+    let current = linkedNoteFolderTree;
+    for (const folderId of linkedNoteFolderPath) {
+      const next = current.children.find((folder) => folder.id === folderId);
+      if (!next) return linkedNoteFolderTree;
+      current = next;
+    }
+    return current;
+  }, [linkedNoteFolderPath, linkedNoteFolderTree]);
 
   const courseTime = useMemo(() => {
     if (!course) return "";
@@ -392,7 +470,70 @@ function CourseContent() {
                     <p className="text-xs font-semibold text-muted-foreground">
                       GoodNotes 연동 노트
                     </p>
-                    {linkedMyNotes.map((note) => (
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                        <button
+                          type="button"
+                          className="hover:text-primary"
+                          onClick={() => setLinkedNoteFolderPath([])}
+                        >
+                          ?명듃
+                        </button>
+                        {activeLinkedNoteFolder.pathNames.map((name, index) => (
+                          <span key={`${name}-${index}`} className="flex items-center gap-1">
+                            <span>/</span>
+                            <button
+                              type="button"
+                              className="hover:text-primary"
+                              onClick={() =>
+                                setLinkedNoteFolderPath(
+                                  activeLinkedNoteFolder.pathIds.slice(0, index + 1),
+                                )
+                              }
+                            >
+                              {name}
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      {linkedNoteFolderPath.length > 0 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 gap-1"
+                          onClick={() =>
+                            setLinkedNoteFolderPath((path) => path.slice(0, -1))
+                          }
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                          ?곗そ
+                        </Button>
+                      )}
+                    </div>
+                    {activeLinkedNoteFolder.children.length > 0 && (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {activeLinkedNoteFolder.children.map((folder) => (
+                          <button
+                            key={folder.id}
+                            type="button"
+                            className="flex items-center gap-3 rounded-lg border bg-background p-3 text-left transition hover:border-primary/50 hover:bg-primary/5"
+                            onClick={() => setLinkedNoteFolderPath(folder.pathIds)}
+                          >
+                            <Folder className="h-5 w-5 shrink-0 text-primary" />
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-semibold">
+                                {folder.name}
+                              </span>
+                              <span className="block text-xs text-muted-foreground">
+                                {folder.directNotes.length}개 노트
+                              </span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {activeLinkedNoteFolder.directNotes.map((note) => (
                       <Card key={note.id} className="border-0 shadow-sm">
                         <CardContent className="p-4">
                           <div className="flex items-start gap-3">
