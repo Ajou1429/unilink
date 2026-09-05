@@ -110,12 +110,28 @@ function buildCourseNoteFolderTree(notes: MyNote[]): CourseNoteFolderNode {
     children: [],
   };
 
-  for (const note of notes) {
-    const { names, ids } = getCourseNoteFolderSegments(note);
+  const noteSegments = notes.map(getCourseNoteFolderSegments);
+  let commonPathLength = noteSegments[0]?.ids.length ?? 0;
+
+  for (const segments of noteSegments.slice(1)) {
+    let index = 0;
+    while (
+      index < commonPathLength &&
+      segments.ids[index] === noteSegments[0]?.ids[index]
+    ) {
+      index += 1;
+    }
+    commonPathLength = index;
+  }
+
+  for (const [index, note] of notes.entries()) {
+    const { names, ids } = noteSegments[index];
+    const relativeNames = names.slice(commonPathLength);
+    const relativeIds = ids.slice(commonPathLength);
     let current = root;
 
-    ids.forEach((id, index) => {
-      const name = names[index] ?? "이름 없는 폴더";
+    relativeIds.forEach((id, folderIndex) => {
+      const name = relativeNames[folderIndex] ?? "이름 없는 폴더";
       let child = current.children.find((item) => item.id === id);
 
       if (!child) {
@@ -433,8 +449,8 @@ function CourseContent() {
           </TabsList>
 
           <TabsContent value="notes">
-            <div className="grid lg:grid-cols-3 gap-6">
-              <Card className="border-0 shadow-sm">
+            <div className="grid items-start gap-6 lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)]">
+              <Card className="self-start border-0 shadow-sm lg:sticky lg:top-20">
                 <CardHeader>
                   <CardTitle className="text-base flex items-center gap-2">
                     <Plus className="h-4 w-4" /> 노트 추가
@@ -464,7 +480,7 @@ function CourseContent() {
                 </CardContent>
               </Card>
 
-              <div className="lg:col-span-2 space-y-3">
+              <div className="min-w-0 space-y-3">
                 {linkedMyNotes.length > 0 && (
                   <div className="space-y-3">
                     <p className="text-xs font-semibold text-muted-foreground">
@@ -512,7 +528,7 @@ function CourseContent() {
                       )}
                     </div>
                     {activeLinkedNoteFolder.children.length > 0 && (
-                      <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
                         {activeLinkedNoteFolder.children.map((folder) => (
                           <button
                             key={folder.id}
@@ -533,6 +549,7 @@ function CourseContent() {
                         ))}
                       </div>
                     )}
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     {activeLinkedNoteFolder.directNotes.map((note) => (
                       <Card key={note.id} className="border-0 shadow-sm">
                         <CardContent className="p-4">
@@ -558,6 +575,7 @@ function CourseContent() {
                         </CardContent>
                       </Card>
                     ))}
+                    </div>
                   </div>
                 )}
 
