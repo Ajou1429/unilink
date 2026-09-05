@@ -276,6 +276,9 @@ export default function NotesPage() {
     linkedType: "unassigned" as MyNote["linkedType"],
     linkedId: "",
   });
+  const [folderAssignmentDrafts, setFolderAssignmentDrafts] = useState<
+    Record<string, { linkedType: MyNote["linkedType"]; linkedId: string }>
+  >({});
 
   const [driveStatus, setDriveStatus] = useState<DriveConnectionStatus | null>(null);
   const [driveFolderInput, setDriveFolderInput] = useState("");
@@ -793,6 +796,56 @@ export default function NotesPage() {
       linkedType === "unassigned"
         ? `${activeNoteFolder.name} 폴더 분류가 해제되었습니다.`
         : `${activeNoteFolder.name} 폴더가 ${linkedTitle ?? "선택한 항목"}으로 분류되었습니다.`,
+    );
+  }
+
+  function getFolderAssignment(folder: NoteFolderNode) {
+    const folderKey = folder.pathIds.join("/") || "__root__";
+    const draft = folderAssignmentDrafts[folderKey];
+    if (draft) return draft;
+
+    const folderNotes = notes.filter((note) => noteIsInFolder(note, folder.pathIds));
+    if (folderNotes.length === 0) {
+      return { linkedType: "unassigned" as MyNote["linkedType"], linkedId: "" };
+    }
+
+    const first = folderNotes[0];
+    const sameType = folderNotes.every((note) => note.linkedType === first.linkedType);
+    const sameId = folderNotes.every(
+      (note) => (note.linkedId ?? "") === (first.linkedId ?? ""),
+    );
+
+    return {
+      linkedType: sameType ? first.linkedType : ("unassigned" as MyNote["linkedType"]),
+      linkedId: sameType && sameId ? first.linkedId ?? "" : "",
+    };
+  }
+
+  async function updateFolderNodeAssignment(
+    folder: NoteFolderNode,
+    linkedType: MyNote["linkedType"],
+    linkedId: string,
+  ) {
+    const folderNotes = notes.filter((note) => noteIsInFolder(note, folder.pathIds));
+    if (folderNotes.length === 0) return;
+
+    const linkedTitle = getAssignmentTitle(linkedType, linkedId);
+    const nextNotes = await updateNotesClassification(
+      folderNotes.map((note) => note.id),
+      linkedType,
+      linkedId || undefined,
+      linkedTitle,
+    );
+    setNotes(nextNotes);
+    setFolderAssignmentDrafts((prev) => {
+      const next = { ...prev };
+      delete next[folder.pathIds.join("/") || "__root__"];
+      return next;
+    });
+    setFeedbackMessage(
+      linkedType === "unassigned"
+        ? `${folder.name} 폴더의 분류를 해제했습니다.`
+        : `${folder.name} 폴더를 ${linkedTitle ?? "선택한 항목"}으로 분류했습니다.`,
     );
   }
 
@@ -1440,10 +1493,13 @@ export default function NotesPage() {
 
               {!search.trim() && activeNoteFolder.children.length > 0 && (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {activeNoteFolder.children.map((folder) => (
+                  {activeNoteFolder.children.map((folder) => {
+                    const folderAssignment = getFolderAssignment(folder);
+
+                    return (
                     <div
                       key={folder.id}
-                      className="flex items-center gap-2 rounded-lg border bg-background p-2 transition hover:border-primary/50 hover:bg-primary/5"
+                      className="grid grid-cols-[1fr_auto] gap-2 rounded-lg border bg-background p-2 transition hover:border-primary/50 hover:bg-primary/5"
                     >
                       <button
                         type="button"
@@ -1469,8 +1525,68 @@ export default function NotesPage() {
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
+                      {folder.totalNotes > 0 && (
+                        <div className="col-span-2 grid grid-cols-2 gap-1.5">
+                          <Select
+                            value={folderAssignment.linkedType}
+                            onValueChange={(value) => {
+                              const linkedType = value as MyNote["linkedType"];
+                              const folderKey = folder.pathIds.join("/") || "__root__";
+                              setFolderAssignmentDrafts((prev) => ({
+                                ...prev,
+                                [folderKey]: { linkedType, linkedId: "" },
+                              }));
+                              if (linkedType === "unassigned") {
+                                updateFolderNodeAssignment(folder, linkedType, "");
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="h-7 text-xs">
+                              {getLinkedTypeLabel(folderAssignment.linkedType)}
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="course">내 수업</SelectItem>
+                              <SelectItem value="personal">개인 학습</SelectItem>
+                              <SelectItem value="unassigned">미분류</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Select
+                            value={folderAssignment.linkedId}
+                            onValueChange={(value) =>
+                              updateFolderNodeAssignment(
+                                folder,
+                                folderAssignment.linkedType,
+                                value ?? "",
+                              )
+                            }
+                          >
+                            <SelectTrigger className="h-7 text-xs">
+                              {getLinkedTargetLabel(
+                                folderAssignment.linkedType,
+                                folderAssignment.linkedId,
+                                courses,
+                                personalStudies,
+                              )}
+                            </SelectTrigger>
+                            <SelectContent>
+                              {folderAssignment.linkedType === "course"
+                                ? courses.map((course) => (
+                                    <SelectItem key={course.id} value={course.id}>
+                                      {course.name}
+                                    </SelectItem>
+                                  ))
+                                : personalStudies.map((study) => (
+                                    <SelectItem key={study.id} value={study.id}>
+                                      {study.title}
+                                    </SelectItem>
+                                  ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
