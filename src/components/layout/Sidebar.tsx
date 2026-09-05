@@ -55,7 +55,9 @@ function useSidebarData() {
   useEffect(() => {
     function syncData() {
       setCourses(getStoredCourses());
-      setPersonalStudies(getPersonalStudies());
+      setPersonalStudies(
+        getPersonalStudies().filter((study) => (study.status ?? "active") === "active"),
+      );
     }
 
     syncData();

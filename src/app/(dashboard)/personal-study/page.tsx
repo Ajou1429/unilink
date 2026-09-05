@@ -2,7 +2,7 @@
 
 import { ChangeEvent, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
 import { Badge } from "@/components/ui/badge";
@@ -15,10 +15,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Award,
   CalendarCheck,
+  CheckCircle2,
   FileText,
   Paperclip,
   Plus,
   Target,
+  Trash2,
   Upload,
 } from "lucide-react";
 import {
@@ -35,7 +37,12 @@ import {
   savePersonalStudyNote,
   savePersonalStudyPlan,
   savePersonalStudies,
+  completePersonalStudy,
+  deletePersonalStudy,
+  deletePersonalStudyPlan,
+  updatePersonalStudyPlan,
 } from "@/lib/personal-study-storage";
+import { addCompletedPersonalStudySpec } from "@/lib/record-storage";
 import { getMyNotes, MY_NOTES_CHANGED_EVENT, MyNote } from "@/lib/my-notes-storage";
 
 function formatBytes(size: number) {
@@ -68,6 +75,7 @@ function EmptyPersonalStudyState() {
 
 function PersonalStudyContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const studyId = searchParams.get("studyId") ?? "";
   const [studies, setStudies] = useState<PersonalStudy[]>([]);
   const [notes, setNotes] = useState<PersonalStudyNote[]>([]);
@@ -182,6 +190,31 @@ function PersonalStudyContent() {
     );
   }
 
+  function completeStudy() {
+    if (!study) return;
+    const completed = completePersonalStudy(study.id);
+    if (!completed) return;
+    addCompletedPersonalStudySpec(completed);
+    setStudyMessage("개인 학습을 완료하고 내 스펙에 등록했습니다.");
+    window.setTimeout(() => router.push("/timetable"), 700);
+  }
+
+  function cancelStudy() {
+    if (!study || !window.confirm("이 개인 학습과 연결된 계획·자료를 삭제할까요?")) return;
+    deletePersonalStudy(study.id);
+    router.push("/timetable");
+  }
+
+  function togglePlan(plan: PersonalStudyPlan) {
+    const updated = updatePersonalStudyPlan(plan.id, { isCompleted: !plan.isCompleted });
+    if (updated) setPlans((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+  }
+
+  function removePlan(planId: string) {
+    deletePersonalStudyPlan(planId);
+    setPlans((prev) => prev.filter((plan) => plan.id !== planId));
+  }
+
   function uploadFiles(event: ChangeEvent<HTMLInputElement>) {
     if (!study || !event.target.files) return;
 
@@ -240,6 +273,14 @@ function PersonalStudyContent() {
                       {formatPersonalStudyDday(targetDate)}
                     </Badge>
                   )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={completeStudy} className="gap-1">
+                    <CheckCircle2 className="h-4 w-4" /> 학습 완료
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={cancelStudy} className="gap-1">
+                    <Trash2 className="h-4 w-4" /> 학습 취소·삭제
+                  </Button>
                 </div>
                 {studyMessage && (
                   <p className="text-xs font-medium text-emerald-600">{studyMessage}</p>
@@ -414,13 +455,21 @@ function PersonalStudyContent() {
               </Card>
 
               <div className="lg:col-span-2 space-y-3">
-                {plans.length > 0 ? (
-                  plans.map((plan) => (
+                {plans.filter((plan) => !plan.isCompleted).length > 0 ? (
+                  plans.filter((plan) => !plan.isCompleted).map((plan) => (
                     <Card key={plan.id} className="border-0 shadow-sm">
                       <CardContent className="p-4">
                         <div className="flex items-start gap-3">
+                          <button
+                            type="button"
+                            className="mt-0.5 text-muted-foreground hover:text-primary"
+                            onClick={() => togglePlan(plan)}
+                            aria-label="학습 계획 완료 처리"
+                          >
+                            <CheckCircle2 className="h-5 w-5" />
+                          </button>
                           <CalendarCheck className="h-4 w-4 text-primary mt-1 shrink-0" />
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 flex-wrap">
                               <h3 className="font-semibold">{plan.title}</h3>
                               {plan.dueDate && (
@@ -431,6 +480,9 @@ function PersonalStudyContent() {
                               {plan.description || "설명이 비어 있습니다."}
                             </p>
                           </div>
+                          <Button size="icon-sm" variant="ghost" onClick={() => removePlan(plan.id)}>
+                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                          </Button>
                         </div>
                       </CardContent>
                     </Card>
@@ -440,6 +492,25 @@ function PersonalStudyContent() {
                     <CardContent className="py-12 text-center text-muted-foreground">
                       <CalendarCheck className="h-8 w-8 mx-auto mb-3 opacity-30" />
                       <p className="text-sm">아직 등록한 학습 계획이 없어요.</p>
+                    </CardContent>
+                  </Card>
+                )}
+                {plans.some((plan) => plan.isCompleted) && (
+                  <Card className="border-0 bg-emerald-50 shadow-none">
+                    <CardContent className="p-4">
+                      <p className="mb-2 text-sm font-semibold text-emerald-700">완료한 계획</p>
+                      <div className="space-y-1">
+                        {plans.filter((plan) => plan.isCompleted).map((plan) => (
+                          <button
+                            key={plan.id}
+                            type="button"
+                            className="flex w-full items-center gap-2 text-left text-sm text-emerald-700 line-through"
+                            onClick={() => togglePlan(plan)}
+                          >
+                            <CheckCircle2 className="h-4 w-4" /> {plan.title}
+                          </button>
+                        ))}
+                      </div>
                     </CardContent>
                   </Card>
                 )}

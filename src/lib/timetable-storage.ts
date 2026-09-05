@@ -3,6 +3,8 @@ import { Course } from "./types";
 export const MONTHLY_EVENTS_STORAGE_KEY = "unilink:monthly-events";
 export const COURSE_SESSIONS_STORAGE_KEY = "unilink:course-sessions";
 export const TIMETABLE_CHANGED_EVENT = "unilink:timetableChanged";
+export const WORK_SCHEDULES_STORAGE_KEY = "unilink:work-schedules";
+export const WORK_SCHEDULES_CHANGED_EVENT = "unilink:workSchedulesChanged";
 
 export type PaceLevel = "상" | "중" | "하";
 
@@ -47,6 +49,17 @@ export interface CourseOccurrence {
   endTime: string;
 }
 
+export interface WorkSchedule {
+  id: string;
+  title: string;
+  days: Course["days"];
+  startTime: string;
+  endTime: string;
+  location: string;
+  color: string;
+  createdAt: string;
+}
+
 function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
 
@@ -70,6 +83,15 @@ export function getMonthlyEvents(): MonthlyEvent[] {
 export function saveMonthlyEvents(events: MonthlyEvent[]) {
   writeJson(MONTHLY_EVENTS_STORAGE_KEY, events);
   window.dispatchEvent(new Event(TIMETABLE_CHANGED_EVENT));
+}
+
+export function getWorkSchedules(): WorkSchedule[] {
+  return readJson<WorkSchedule[]>(WORK_SCHEDULES_STORAGE_KEY, []);
+}
+
+export function saveWorkSchedules(schedules: WorkSchedule[]) {
+  writeJson(WORK_SCHEDULES_STORAGE_KEY, schedules);
+  window.dispatchEvent(new Event(WORK_SCHEDULES_CHANGED_EVENT));
 }
 
 export function getCourseSessions(): CourseSessionProgress[] {

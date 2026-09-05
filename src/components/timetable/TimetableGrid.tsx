@@ -1,10 +1,11 @@
 "use client";
 
-import { Course, DayOfWeek } from "@/lib/types";
+import { Course, CourseSchedule, DayOfWeek } from "@/lib/types";
 import {
   CourseOccurrence,
   CourseSessionProgress,
   MonthlyEvent,
+  WorkSchedule,
 } from "@/lib/timetable-storage";
 
 const WEEK_DAYS: Array<DayOfWeek | "토" | "일"> = [
@@ -46,6 +47,16 @@ function formatDayNumber(date: Date) {
   return date.toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
 }
 
+function getCourseSchedules(course: Course): CourseSchedule[] {
+  return course.schedules?.length
+    ? course.schedules
+    : course.days.map((day) => ({
+        day,
+        startTime: course.startTime,
+        endTime: course.endTime,
+      }));
+}
+
 function formatSessionSummary(session: CourseSessionProgress) {
   const pageRange =
     session.pageStart && session.pageEnd
@@ -62,6 +73,7 @@ function formatSessionSummary(session: CourseSessionProgress) {
 
 interface TimetableGridProps {
   courses: Course[];
+  workSchedules?: WorkSchedule[];
   monthlyEvents: MonthlyEvent[];
   courseSessions: CourseSessionProgress[];
   weekStart: Date;
@@ -71,6 +83,7 @@ interface TimetableGridProps {
 
 export function TimetableGrid({
   courses,
+  workSchedules = [],
   monthlyEvents,
   courseSessions,
   weekStart,
@@ -114,8 +127,13 @@ export function TimetableGrid({
           </div>
 
           {weekDates.map(({ label, dateKey }) => {
-            const dayCourses = courses.filter((course) =>
-              course.days.includes(label as DayOfWeek),
+            const dayCourses = courses.flatMap((course) =>
+              getCourseSchedules(course)
+                .filter((schedule) => schedule.day === label)
+                .map((schedule) => ({ course, schedule })),
+            );
+            const dayWorkSchedules = workSchedules.flatMap((schedule) =>
+              schedule.days.includes(label as DayOfWeek) ? [schedule] : [],
             );
             const dayEvents = monthlyEvents.filter((event) => event.date === dateKey);
 
@@ -140,17 +158,17 @@ export function TimetableGrid({
                   />
                 ))}
 
-                {dayCourses.map((course) => {
-                  const topMin = minutesFromStart(course.startTime);
+                {dayCourses.map(({ course, schedule }) => {
+                  const topMin = minutesFromStart(schedule.startTime);
                   const durationMin =
-                    timeToMinutes(course.endTime) - timeToMinutes(course.startTime);
+                    timeToMinutes(schedule.endTime) - timeToMinutes(schedule.startTime);
                   const top = (topMin / 60) * HOUR_HEIGHT;
                   const height = (durationMin / 60) * HOUR_HEIGHT;
                   const session = courseSessions.find(
                     (item) =>
                       item.courseId === course.id &&
                       item.date === dateKey &&
-                      item.startTime === course.startTime,
+                      item.startTime === schedule.startTime,
                   );
 
                   return (
@@ -161,8 +179,8 @@ export function TimetableGrid({
                           course,
                           date: dateKey,
                           dayLabel: label,
-                          startTime: course.startTime,
-                          endTime: course.endTime,
+                          startTime: schedule.startTime,
+                          endTime: schedule.endTime,
                         })
                       }
                       className="absolute inset-x-1 rounded-md px-2 py-1.5 text-left overflow-hidden transition-opacity hover:opacity-90 cursor-pointer"
@@ -182,7 +200,7 @@ export function TimetableGrid({
                       )}
                       {height > 60 && (
                         <p className="text-white/70 text-[10px] leading-tight mt-0.5">
-                          {course.startTime} - {course.endTime}
+                          {schedule.startTime} - {schedule.endTime}
                         </p>
                       )}
                       {session && height > 76 && (
@@ -191,6 +209,36 @@ export function TimetableGrid({
                         </p>
                       )}
                     </button>
+                  );
+                })}
+
+                {dayWorkSchedules.map((schedule) => {
+                  const topMin = minutesFromStart(schedule.startTime);
+                  const durationMin =
+                    timeToMinutes(schedule.endTime) - timeToMinutes(schedule.startTime);
+                  const top = (topMin / 60) * HOUR_HEIGHT;
+                  const height = (durationMin / 60) * HOUR_HEIGHT;
+
+                  return (
+                    <div
+                      key={`${dateKey}-${schedule.id}`}
+                      className="absolute inset-x-1 rounded-md border border-dashed border-white/80 px-2 py-1.5 text-left overflow-hidden"
+                      style={{ top, height, backgroundColor: schedule.color }}
+                    >
+                      <p className="text-white text-xs font-semibold leading-tight truncate">
+                        {schedule.title}
+                      </p>
+                      {height > 42 && (
+                        <p className="text-white/80 text-[10px] leading-tight truncate mt-0.5">
+                          알바{schedule.location ? ` · ${schedule.location}` : ""}
+                        </p>
+                      )}
+                      {height > 60 && (
+                        <p className="text-white/70 text-[10px] leading-tight">
+                          {schedule.startTime} - {schedule.endTime}
+                        </p>
+                      )}
+                    </div>
                   );
                 })}
 

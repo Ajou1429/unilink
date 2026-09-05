@@ -10,6 +10,12 @@ export interface User {
 
 export type DayOfWeek = "월" | "화" | "수" | "목" | "금";
 
+export interface CourseSchedule {
+  day: DayOfWeek;
+  startTime: string;
+  endTime: string;
+}
+
 export interface Course {
   id: string;
   term?: string;
@@ -21,6 +27,7 @@ export interface Course {
   days: DayOfWeek[];
   startTime: string;
   endTime: string;
+  schedules?: CourseSchedule[];
   credits: number;
 }
 

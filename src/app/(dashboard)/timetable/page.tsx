@@ -38,6 +38,7 @@ import {
   X,
   Target,
   Award,
+  Briefcase,
   Pencil,
   Trash2,
 } from "lucide-react";
@@ -68,6 +69,10 @@ import {
   PaceLevel,
   saveCourseSession,
   saveMonthlyEvents,
+  getWorkSchedules,
+  saveWorkSchedules,
+  WorkSchedule,
+  WORK_SCHEDULES_CHANGED_EVENT,
 } from "@/lib/timetable-storage";
 import { getMyNotes, MyNote } from "@/lib/my-notes-storage";
 import {
@@ -210,6 +215,7 @@ function getNoteDisplayName(note?: MyNote) {
 export default function TimetablePage() {
   const currentTerm = getCurrentAcademicTermLabel();
   const [courses, setCourses] = useState<Course[]>([]);
+  const [workSchedules, setWorkSchedules] = useState<WorkSchedule[]>([]);
   const [termOptions, setTermOptions] = useState<string[]>(() =>
     getAcademicTermOptions(),
   );
@@ -255,6 +261,18 @@ export default function TimetablePage() {
     targetDate: "",
     color: PERSONAL_COLORS[0],
   });
+  const [courseDayTimes, setCourseDayTimes] = useState<
+    Partial<Record<DayOfWeek, { startTime: string; endTime: string }>>
+  >({});
+  const [workOpen, setWorkOpen] = useState(false);
+  const [newWorkSchedule, setNewWorkSchedule] = useState({
+    title: "알바",
+    location: "",
+    days: [] as DayOfWeek[],
+    startTime: "18:00",
+    endTime: "22:00",
+    color: "#64748B",
+  });
   const [newEvent, setNewEvent] = useState({
     title: "",
     date: formatDateKey(new Date()),
@@ -284,7 +302,10 @@ export default function TimetablePage() {
         ),
       );
       setCourses(getStoredCourses(selectedTerm));
-      setPersonalStudies(getPersonalStudies());
+      setWorkSchedules(getWorkSchedules());
+      setPersonalStudies(
+        getPersonalStudies().filter((study) => (study.status ?? "active") === "active"),
+      );
       setPersonalStudyPlans(getAllPersonalStudyPlans());
       setMonthlyEvents(getMonthlyEvents());
       setCourseSessions(getCourseSessions());
@@ -295,12 +316,14 @@ export default function TimetablePage() {
     window.addEventListener("storage", syncData);
     window.addEventListener(PERSONAL_STUDIES_CHANGED_EVENT, syncData);
     window.addEventListener(PERSONAL_STUDY_PLANS_CHANGED_EVENT, syncData);
+    window.addEventListener(WORK_SCHEDULES_CHANGED_EVENT, syncData);
 
     return () => {
       window.clearTimeout(timeout);
       window.removeEventListener("storage", syncData);
       window.removeEventListener(PERSONAL_STUDIES_CHANGED_EVENT, syncData);
       window.removeEventListener(PERSONAL_STUDY_PLANS_CHANGED_EVENT, syncData);
+      window.removeEventListener(WORK_SCHEDULES_CHANGED_EVENT, syncData);
     };
   }, [selectedTerm]);
 
@@ -338,6 +361,11 @@ export default function TimetablePage() {
     saveMonthlyEvents(nextEvents);
   }
 
+  function persistWorkSchedules(nextSchedules: WorkSchedule[]) {
+    setWorkSchedules(nextSchedules);
+    saveWorkSchedules(nextSchedules);
+  }
+
   function changeSelectedTerm(term: string) {
     setSelectedTerm(term);
     setSelectedCourse(null);
@@ -355,6 +383,14 @@ export default function TimetablePage() {
         ? prev.days.filter((d) => d !== day)
         : [...prev.days, day],
     }));
+    setCourseDayTimes((prev) => {
+      if (prev[day]) {
+        const next = { ...prev };
+        delete next[day];
+        return next;
+      }
+      return { ...prev, [day]: { startTime: "09:00", endTime: "10:30" } };
+    });
   }
 
   function toggleEditingDay(day: DayOfWeek) {
@@ -372,8 +408,16 @@ export default function TimetablePage() {
 
   function addCourse() {
     if (!newCourse.name || newCourse.days.length === 0) return;
+    const schedules = newCourse.days.map((day) => ({
+      day,
+      startTime: courseDayTimes[day]?.startTime ?? newCourse.startTime,
+      endTime: courseDayTimes[day]?.endTime ?? newCourse.endTime,
+    }));
     const course: Course = {
       ...newCourse,
+      schedules,
+      startTime: schedules[0].startTime,
+      endTime: schedules[0].endTime,
       id: Date.now().toString(),
       term: selectedTerm,
       courseType: newCourse.courseType ?? "major",
@@ -392,6 +436,40 @@ export default function TimetablePage() {
       color: COURSE_COLORS[courses.length % COURSE_COLORS.length],
     });
     setActionFeedback(`${course.name} 수업이 ${selectedTerm} 시간표에 등록되었습니다.`);
+  }
+
+  function toggleWorkDay(day: DayOfWeek) {
+    setNewWorkSchedule((prev) => ({
+      ...prev,
+      days: prev.days.includes(day)
+        ? prev.days.filter((item) => item !== day)
+        : [...prev.days, day],
+    }));
+  }
+
+  function addWorkSchedule() {
+    if (!newWorkSchedule.title.trim() || newWorkSchedule.days.length === 0) return;
+    const schedule: WorkSchedule = {
+      id: `work-${Date.now()}`,
+      title: newWorkSchedule.title.trim(),
+      location: newWorkSchedule.location.trim(),
+      days: newWorkSchedule.days,
+      startTime: newWorkSchedule.startTime,
+      endTime: newWorkSchedule.endTime,
+      color: newWorkSchedule.color,
+      createdAt: new Date().toISOString(),
+    };
+    persistWorkSchedules([...workSchedules, schedule]);
+    setWorkOpen(false);
+    setNewWorkSchedule({
+      title: "알바",
+      location: "",
+      days: [],
+      startTime: "18:00",
+      endTime: "22:00",
+      color: "#64748B",
+    });
+    setActionFeedback(`${schedule.title} 알바 일정이 등록되었습니다.`);
   }
 
   function addPersonalStudy() {
@@ -517,8 +595,26 @@ export default function TimetablePage() {
       return;
     }
 
+    const existingSchedules = editingCourse.schedules?.length
+      ? editingCourse.schedules
+      : editingCourse.days.map((day) => ({
+          day,
+          startTime: editingCourse.startTime,
+          endTime: editingCourse.endTime,
+        }));
+    const schedules = editingCourse.days.map(
+      (day) =>
+        existingSchedules.find((schedule) => schedule.day === day) ?? {
+          day,
+          startTime: editingCourse.startTime,
+          endTime: editingCourse.endTime,
+        },
+    );
     const updatedCourse: Course = {
       ...editingCourse,
+      schedules,
+      startTime: schedules[0]?.startTime ?? editingCourse.startTime,
+      endTime: schedules[0]?.endTime ?? editingCourse.endTime,
       name: editingCourse.name.trim(),
       professor: editingCourse.professor.trim(),
       location: editingCourse.location.trim(),
@@ -735,6 +831,81 @@ export default function TimetablePage() {
               </DialogContent>
             </Dialog>
 
+            <Dialog open={workOpen} onOpenChange={setWorkOpen}>
+              <DialogTrigger render={<Button variant="outline" className="gap-2" />}>
+                <Briefcase className="h-4 w-4" /> 알바 일정 추가
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>주간 알바 일정 추가</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 pt-2">
+                  <div className="space-y-2">
+                    <Label>일정 이름</Label>
+                    <Input
+                      value={newWorkSchedule.title}
+                      onChange={(event) =>
+                        setNewWorkSchedule((prev) => ({ ...prev, title: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>요일</Label>
+                    <div className="flex gap-2">
+                      {DAYS.map((day) => (
+                        <button
+                          key={day}
+                          type="button"
+                          onClick={() => toggleWorkDay(day)}
+                          className={`h-9 w-9 rounded-full text-sm font-medium ${
+                            newWorkSchedule.days.includes(day)
+                              ? "bg-slate-700 text-white"
+                              : "bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          {day}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>시작 시간</Label>
+                      <Input
+                        type="time"
+                        value={newWorkSchedule.startTime}
+                        onChange={(event) =>
+                          setNewWorkSchedule((prev) => ({ ...prev, startTime: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>종료 시간</Label>
+                      <Input
+                        type="time"
+                        value={newWorkSchedule.endTime}
+                        onChange={(event) =>
+                          setNewWorkSchedule((prev) => ({ ...prev, endTime: event.target.value }))
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>근무 장소</Label>
+                    <Input
+                      value={newWorkSchedule.location}
+                      onChange={(event) =>
+                        setNewWorkSchedule((prev) => ({ ...prev, location: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <Button onClick={addWorkSchedule} className="w-full">
+                    알바 일정 저장
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+
             <Dialog open={addOpen} onOpenChange={setAddOpen}>
               <DialogTrigger render={<Button className="gap-2" />}>
                 <Plus className="h-4 w-4" /> 수업 추가
@@ -840,6 +1011,42 @@ export default function TimetablePage() {
                     ))}
                   </div>
                 </div>
+                {newCourse.days.length > 0 && (
+                  <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+                    <Label>요일별 수업 시간</Label>
+                    {newCourse.days.map((day) => (
+                      <div key={day} className="grid grid-cols-[2rem_1fr_1fr] items-center gap-2">
+                        <span className="text-sm font-medium">{day}</span>
+                        <Input
+                          type="time"
+                          value={courseDayTimes[day]?.startTime ?? newCourse.startTime}
+                          onChange={(event) =>
+                            setCourseDayTimes((prev) => ({
+                              ...prev,
+                              [day]: {
+                                startTime: event.target.value,
+                                endTime: prev[day]?.endTime ?? newCourse.endTime,
+                              },
+                            }))
+                          }
+                        />
+                        <Input
+                          type="time"
+                          value={courseDayTimes[day]?.endTime ?? newCourse.endTime}
+                          onChange={(event) =>
+                            setCourseDayTimes((prev) => ({
+                              ...prev,
+                              [day]: {
+                                startTime: prev[day]?.startTime ?? newCourse.startTime,
+                                endTime: event.target.value,
+                              },
+                            }))
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label>시작 시간</Label>
@@ -931,6 +1138,7 @@ export default function TimetablePage() {
                   <CardContent className="p-4">
                     <TimetableGrid
                       courses={filteredCourses}
+                      workSchedules={workSchedules}
                       monthlyEvents={calendarEvents}
                       courseSessions={courseSessions}
                       weekStart={weekStart}
@@ -1090,6 +1298,37 @@ export default function TimetablePage() {
           </div>
 
           <div className="space-y-4">
+            {workSchedules.length > 0 && (
+              <Card className="border-0 shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Briefcase className="h-4 w-4" /> 알바 일정
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {workSchedules.map((schedule) => (
+                    <div key={schedule.id} className="flex items-center justify-between gap-2 text-sm">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{schedule.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {schedule.days.join(", ")} · {schedule.startTime} - {schedule.endTime}
+                        </p>
+                      </div>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        onClick={() => {
+                          persistWorkSchedules(workSchedules.filter((item) => item.id !== schedule.id));
+                          setActionFeedback(`${schedule.title} 알바 일정이 삭제되었습니다.`);
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      </Button>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
             {selectedCourse ? (
               <Card className="border-0 shadow-sm">
                 <CardHeader className="pb-3">

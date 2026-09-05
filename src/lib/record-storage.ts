@@ -104,3 +104,37 @@ export function saveSpecRecords(records: SpecRecord[]) {
   writeJson(SPEC_RECORDS_STORAGE_KEY, records);
   window.dispatchEvent(new Event(RECORDS_CHANGED_EVENT));
 }
+
+export function addCompletedPersonalStudySpec(study: {
+  id: string;
+  title: string;
+  category: string;
+  goal: string;
+  completedAt?: string;
+}) {
+  const records = getSpecRecords();
+  if (records.some((record) => record.personalStudyId === study.id)) return false;
+
+  const now = new Date().toISOString();
+  saveSpecRecords([
+    {
+      id: `spec-study-${study.id}`,
+      personalStudyId: study.id,
+      title: study.title,
+      category: study.category.includes("먭꺽")
+        ? "certificate"
+        : study.category.includes("怨듬")
+          ? "competition"
+          : "experience",
+      status: "done",
+      awardStatus: "not-applicable",
+      awardRank: "",
+      completedAt: study.completedAt ?? now.slice(0, 10),
+      memo: study.goal,
+      createdAt: now,
+      updatedAt: now,
+    },
+    ...records,
+  ]);
+  return true;
+}
