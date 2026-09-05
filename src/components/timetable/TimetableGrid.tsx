@@ -8,7 +8,7 @@ import {
   WorkSchedule,
 } from "@/lib/timetable-storage";
 
-const WEEK_DAYS: Array<DayOfWeek | "토" | "일"> = [
+const WEEK_DAYS: DayOfWeek[] = [
   "월",
   "화",
   "수",

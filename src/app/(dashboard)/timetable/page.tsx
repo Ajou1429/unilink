@@ -33,6 +33,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   BookOpen,
   CheckCircle2,
   X,
@@ -83,7 +84,7 @@ import {
   getCurrentAcademicTermLabel,
 } from "@/lib/academic-term";
 
-const DAYS: DayOfWeek[] = ["월", "화", "수", "목", "금"];
+const DAYS: DayOfWeek[] = ["월", "화", "수", "목", "금", "토", "일"];
 const COURSE_TYPE_LABELS = {
   major: "전공",
   "non-major": "비전공",
@@ -104,6 +105,72 @@ function formatTimeOption(time: string) {
   const period = hour < 12 ? "오전" : "오후";
   const displayHour = hour % 12 || 12;
   return `${period} ${displayHour}:${minute} (${time})`;
+}
+
+function normalizeTimeInput(value: string, fallback: string) {
+  const trimmed = value.trim();
+  const colonParts = trimmed.split(":");
+  let hour = 0;
+  let minute = 0;
+
+  if (colonParts.length === 2) {
+    hour = Number(colonParts[0]);
+    minute = Number(colonParts[1]);
+  } else {
+    const digits = trimmed.replace(/\D/g, "");
+    if (digits.length <= 2) {
+      hour = Number(digits);
+    } else if (digits.length === 3) {
+      hour = Number(digits.slice(0, 1));
+      minute = Number(digits.slice(1));
+    } else if (digits.length >= 4) {
+      hour = Number(digits.slice(0, 2));
+      minute = Number(digits.slice(2, 4));
+    }
+  }
+
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour > 23 || minute > 59) {
+    return fallback;
+  }
+
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function TimeField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="relative">
+      <Input
+        value={value}
+        placeholder="09:00"
+        inputMode="numeric"
+        className="pr-9"
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={() => onChange(normalizeTimeInput(value, "09:00"))}
+      />
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <select
+        aria-label="시간 선택"
+        value={TIME_OPTIONS.includes(value) ? value : ""}
+        onChange={(event) => onChange(event.target.value)}
+        className="absolute inset-y-0 right-0 w-10 cursor-pointer opacity-0"
+      >
+        <option value="" disabled>
+          시간 선택
+        </option>
+        {TIME_OPTIONS.map((time) => (
+          <option key={time} value={time}>
+            {formatTimeOption(time)}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 }
 const KOREA_2026_HOLIDAYS: Record<string, string[]> = {
   "2026-01-01": ["신정"],
@@ -852,43 +919,21 @@ export default function TimetablePage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <Label>시작 시간</Label>
-                      <Select
+                      <TimeField
                         value={newEvent.startTime}
-                        onValueChange={(value) =>
-                          value && setNewEvent((prev) => ({ ...prev, startTime: value }))
+                        onChange={(value) =>
+                          setNewEvent((prev) => ({ ...prev, startTime: value }))
                         }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {TIME_OPTIONS.map((time) => (
-                            <SelectItem key={time} value={time}>
-                              {formatTimeOption(time)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      />
                     </div>
                     <div className="space-y-2">
                       <Label>종료 시간</Label>
-                      <Select
+                      <TimeField
                         value={newEvent.endTime}
-                        onValueChange={(value) =>
-                          value && setNewEvent((prev) => ({ ...prev, endTime: value }))
+                        onChange={(value) =>
+                          setNewEvent((prev) => ({ ...prev, endTime: value }))
                         }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {TIME_OPTIONS.map((time) => (
-                            <SelectItem key={time} value={time}>
-                              {formatTimeOption(time)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      />
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -1186,28 +1231,26 @@ export default function TimetablePage() {
                     {newCourse.days.map((day) => (
                       <div key={day} className="grid grid-cols-[2rem_1fr_1fr] items-center gap-2">
                         <span className="text-sm font-medium">{day}</span>
-                        <Input
-                          type="time"
+                        <TimeField
                           value={courseDayTimes[day]?.startTime ?? newCourse.startTime}
-                          onChange={(event) =>
+                          onChange={(value) =>
                             setCourseDayTimes((prev) => ({
                               ...prev,
                               [day]: {
-                                startTime: event.target.value,
+                                startTime: value,
                                 endTime: prev[day]?.endTime ?? newCourse.endTime,
                               },
                             }))
                           }
                         />
-                        <Input
-                          type="time"
+                        <TimeField
                           value={courseDayTimes[day]?.endTime ?? newCourse.endTime}
-                          onChange={(event) =>
+                          onChange={(value) =>
                             setCourseDayTimes((prev) => ({
                               ...prev,
                               [day]: {
                                 startTime: prev[day]?.startTime ?? newCourse.startTime,
-                                endTime: event.target.value,
+                                endTime: value,
                               },
                             }))
                           }
@@ -1219,22 +1262,16 @@ export default function TimetablePage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label>시작 시간</Label>
-                    <Input
-                      type="time"
+                    <TimeField
                       value={newCourse.startTime}
-                      onChange={(e) =>
-                        setNewCourse((p) => ({ ...p, startTime: e.target.value }))
-                      }
+                      onChange={(value) => setNewCourse((prev) => ({ ...prev, startTime: value }))}
                     />
                   </div>
                   <div className="space-y-2">
                     <Label>종료 시간</Label>
-                    <Input
-                      type="time"
+                    <TimeField
                       value={newCourse.endTime}
-                      onChange={(e) =>
-                        setNewCourse((p) => ({ ...p, endTime: e.target.value }))
-                      }
+                      onChange={(value) => setNewCourse((prev) => ({ ...prev, endTime: value }))}
                     />
                   </div>
                 </div>
@@ -1685,24 +1722,22 @@ export default function TimetablePage() {
                       <div className="grid grid-cols-2 gap-2">
                         <div className="space-y-2">
                           <Label>시작 시간</Label>
-                          <Input
-                            type="time"
+                          <TimeField
                             value={editingCourse.startTime}
-                            onChange={(event) =>
+                            onChange={(value) =>
                               setEditingCourse((prev) =>
-                                prev ? { ...prev, startTime: event.target.value } : prev,
+                                prev ? { ...prev, startTime: value } : prev,
                               )
                             }
                           />
                         </div>
                         <div className="space-y-2">
                           <Label>종료 시간</Label>
-                          <Input
-                            type="time"
+                          <TimeField
                             value={editingCourse.endTime}
-                            onChange={(event) =>
+                            onChange={(value) =>
                               setEditingCourse((prev) =>
-                                prev ? { ...prev, endTime: event.target.value } : prev,
+                                prev ? { ...prev, endTime: value } : prev,
                               )
                             }
                           />

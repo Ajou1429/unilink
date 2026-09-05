@@ -8,7 +8,7 @@ export interface User {
   createdAt: string;
 }
 
-export type DayOfWeek = "월" | "화" | "수" | "목" | "금";
+export type DayOfWeek = "일" | "월" | "화" | "수" | "목" | "금" | "토";
 
 export interface CourseSchedule {
   day: DayOfWeek;
