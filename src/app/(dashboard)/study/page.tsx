@@ -73,6 +73,19 @@ function getSundayWeekStart(date: Date) {
   return addDays(next, -next.getDay());
 }
 
+function getPlanWeekStart(plan: StudyPlan) {
+  if (plan.weekStart) return plan.weekStart;
+  const sourceDate = plan.dueDate || plan.createdAt;
+  return formatDateKey(getSundayWeekStart(new Date(sourceDate)));
+}
+
+function isMonthlyPlanOverdue(plan: MonthlyStudyPlan, today = new Date()) {
+  if (plan.isCompleted) return false;
+  const [year, month, day] = plan.weekStart.split("-").map(Number);
+  const weekEnd = new Date(year, month - 1, day + 6, 23, 59, 59, 999);
+  return today.getTime() > weekEnd.getTime();
+}
+
 function getMonthFromDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -195,7 +208,7 @@ export default function StudyPage() {
   const currentWeekStartDate = getSundayWeekStart(new Date());
   const currentWeekStartKey = formatDateKey(currentWeekStartDate);
   const currentWeekPlans = plans.filter(
-    (plan) => (plan.weekStart ?? currentWeekStartKey) === currentWeekStartKey,
+    (plan) => getPlanWeekStart(plan) === currentWeekStartKey,
   );
   const completed = currentWeekPlans.filter((plan) => plan.isCompleted).length;
   const total = currentWeekPlans.length;
@@ -264,7 +277,7 @@ export default function StudyPage() {
   }
 
   function syncWeeklyPlanToMonthly(plan: StudyPlan) {
-    const weekStart = plan.weekStart ?? currentWeekStartKey;
+    const weekStart = getPlanWeekStart(plan);
     const month = getMonthFromDate(new Date(weekStart));
     const monthlyPlan: MonthlyStudyPlan = {
       id: `weekly-${plan.id}`,
@@ -971,12 +984,17 @@ export default function StudyPage() {
                           </div>
                           {weekPlans.length > 0 ? (
                             <div className="grid gap-2 md:grid-cols-2">
-                              {weekPlans.map((plan) => (
+                              {weekPlans.map((plan) => {
+                                const overdue = isMonthlyPlanOverdue(plan);
+
+                                return (
                                 <div
                                   key={plan.id}
                                   className={`rounded-md border p-3 ${
                                     plan.isCompleted
                                       ? "border-emerald-200 bg-emerald-50/70 opacity-80"
+                                      : overdue
+                                        ? "border-red-200 bg-red-50/70"
                                       : "bg-muted/20"
                                   }`}
                                 >
@@ -985,6 +1003,8 @@ export default function StudyPage() {
                                       className={`font-medium ${
                                         plan.isCompleted
                                           ? "text-muted-foreground line-through"
+                                          : overdue
+                                            ? "text-red-700 line-through"
                                           : ""
                                       }`}
                                     >
@@ -999,14 +1019,22 @@ export default function StudyPage() {
                                           이행 완료
                                         </Badge>
                                       )}
+                                      {overdue && (
+                                        <Badge
+                                          variant="destructive"
+                                          className="bg-red-100 text-red-700"
+                                        >
+                                          미완료
+                                        </Badge>
+                                      )}
                                       <Badge variant="outline">{plan.courseName}</Badge>
                                     </div>
                                   </div>
                                   {plan.description && (
                                     <p
                                       className={`mt-1 text-sm text-muted-foreground ${
-                                        plan.isCompleted ? "line-through" : ""
-                                      }`}
+                                        plan.isCompleted || overdue ? "line-through" : ""
+                                      } ${overdue ? "text-red-700" : ""}`}
                                     >
                                       {plan.description}
                                     </p>
@@ -1022,7 +1050,8 @@ export default function StudyPage() {
                                     수정
                                   </Button>
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           ) : (
                             <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">

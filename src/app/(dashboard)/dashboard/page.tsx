@@ -89,6 +89,11 @@ function getSundayWeekStart(date: Date) {
   return addDays(next, -next.getDay());
 }
 
+function getPlanWeekStart(plan: StudyPlan) {
+  if (plan.weekStart) return plan.weekStart;
+  return formatDateKey(getSundayWeekStart(new Date(plan.dueDate || plan.createdAt)));
+}
+
 export default function DashboardPage() {
   const [courses, setCourses] = useState<Course[]>(mockCourses);
   const [plans, setPlans] = useState<StudyPlan[]>(mockStudyPlans);
@@ -133,7 +138,7 @@ export default function DashboardPage() {
     .filter(
       (plan) =>
         !plan.isCompleted &&
-        (plan.weekStart ?? currentWeekStartKey) === currentWeekStartKey,
+        getPlanWeekStart(plan) === currentWeekStartKey,
     )
     .slice(0, 4);
   const displayName =
