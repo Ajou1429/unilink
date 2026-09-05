@@ -259,6 +259,12 @@ function CourseContent() {
     return `${course.days.join(", ")} ${course.startTime} - ${course.endTime}`;
   }, [course]);
 
+  const noteCount = notes.length + linkedMyNotes.length;
+  const todayKey = formatDateKey(new Date());
+  const openPlanCount = plans.filter(
+    (plan) => !plan.isCompleted && (!plan.dueDate || plan.dueDate >= todayKey),
+  ).length;
+
   function addNote() {
     if (!course || !noteTitle.trim()) return;
 
@@ -421,11 +427,11 @@ function CourseContent() {
               </div>
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div>
-                  <div className="text-xl font-bold text-primary">{notes.length}</div>
+                  <div className="text-xl font-bold text-primary">{noteCount}</div>
                   <div className="text-xs text-muted-foreground">노트</div>
                 </div>
                 <div>
-                  <div className="text-xl font-bold text-primary">{plans.length}</div>
+                  <div className="text-xl font-bold text-primary">{openPlanCount}</div>
                   <div className="text-xs text-muted-foreground">계획</div>
                 </div>
                 <div>
