@@ -292,13 +292,13 @@ export default function NotesPage() {
     fileName: "",
     fileSize: 0,
   });
-  const [folderAssignmentDraft, setFolderAssignmentDraft] = useState({
-    linkedType: "unassigned" as MyNote["linkedType"],
-    linkedId: "",
-  });
   const [folderAssignmentDrafts, setFolderAssignmentDrafts] = useState<
     Record<string, { linkedType: MyNote["linkedType"]; linkedId: string }>
   >({});
+  const [classificationFilter, setClassificationFilter] = useState({
+    linkedType: "all" as MyNote["linkedType"] | "all",
+    linkedId: "",
+  });
 
   const [driveStatus, setDriveStatus] = useState<DriveConnectionStatus | null>(null);
   const [driveFolderInput, setDriveFolderInput] = useState("");
@@ -436,39 +436,29 @@ export default function NotesPage() {
     () => notes.filter((note) => noteIsInFolder(note, activeNoteFolder.pathIds)),
     [activeNoteFolder.pathIds, notes],
   );
-  const activeFolderCommonAssignment = useMemo(() => {
-    if (activeFolderNotes.length === 0) {
-      return { linkedType: "unassigned" as MyNote["linkedType"], linkedId: "" };
-    }
-
-    const first = activeFolderNotes[0];
-    const sameType = activeFolderNotes.every(
-      (note) => note.linkedType === first.linkedType,
-    );
-    const sameId = activeFolderNotes.every(
-      (note) => (note.linkedId ?? "") === (first.linkedId ?? ""),
-    );
-
-    return {
-      linkedType: sameType ? first.linkedType : ("unassigned" as MyNote["linkedType"]),
-      linkedId: sameType && sameId ? first.linkedId ?? "" : "",
-    };
-  }, [activeFolderNotes]);
   const filteredNotes = useMemo(() => {
     const keyword = search.trim();
-    const baseNotes = keyword ? activeFolderNotes : activeNoteFolder.directNotes;
+    const classificationNotes = activeFolderNotes.filter((note) => {
+      if (classificationFilter.linkedType === "all") return true;
+      if (classificationFilter.linkedType === "unassigned") {
+        return note.linkedType === "unassigned";
+      }
+      return (
+        note.linkedType === classificationFilter.linkedType &&
+        (!classificationFilter.linkedId || note.linkedId === classificationFilter.linkedId)
+      );
+    });
+    const baseNotes = keyword || classificationFilter.linkedType !== "all"
+      ? classificationNotes
+      : activeNoteFolder.directNotes.filter((note) => classificationNotes.includes(note));
     return baseNotes.filter((note) => noteMatchesSearch(note, keyword));
-  }, [activeFolderNotes, activeNoteFolder.directNotes, search]);
+  }, [activeFolderNotes, activeNoteFolder.directNotes, classificationFilter, search]);
 
   const syncedCount = notes.filter((note) => note.syncStatus === "synced").length;
   const assignedCount = notes.filter((note) => note.linkedType !== "unassigned").length;
   const connectedDriveAccount =
     driveStatus?.accountEmail || driveStatus?.accountName || null;
   const currentPickerFolder = folderPath[folderPath.length - 1];
-
-  useEffect(() => {
-    setFolderAssignmentDraft(activeFolderCommonAssignment);
-  }, [activeFolderCommonAssignment]);
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -847,28 +837,6 @@ export default function NotesPage() {
       : linkedType === "personal"
         ? personalStudy?.title
         : undefined;
-  }
-
-  async function updateFolderAssignment(
-    linkedType: MyNote["linkedType"],
-    linkedId: string,
-  ) {
-    if (activeFolderNotes.length === 0) return;
-
-    const linkedTitle = getAssignmentTitle(linkedType, linkedId);
-    const nextNotes = await updateNotesClassification(
-      activeFolderNotes.map((note) => note.id),
-      linkedType,
-      linkedId || undefined,
-      linkedTitle,
-    );
-
-    setNotes(nextNotes);
-    setFeedbackMessage(
-      linkedType === "unassigned"
-        ? `${activeNoteFolder.name} 폴더 분류가 해제되었습니다.`
-        : `${activeNoteFolder.name} 폴더가 ${linkedTitle ?? "선택한 항목"}으로 분류되었습니다.`,
-    );
   }
 
   function getFolderAssignment(folder: NoteFolderNode) {
@@ -1487,65 +1455,57 @@ export default function NotesPage() {
                   <p className="text-sm font-semibold">{activeNoteFolder.name}</p>
                   <p className="text-xs text-muted-foreground">
                     하위 포함 {activeNoteFolder.totalNotes}개 노트
-                    {search.trim()
-                      ? ` · 검색 결과 ${filteredNotes.length}개`
+                    {classificationFilter.linkedType !== "all"
+                      ? ` · 분류 결과 ${filteredNotes.length}개`
+                      : search.trim()
+                        ? ` · 검색 결과 ${filteredNotes.length}개`
                       : ` · 현재 폴더 파일 ${activeNoteFolder.directNotes.length}개`}
                   </p>
                 </div>
 
-                {activeNoteFolder.pathIds.length > 0 && activeFolderNotes.length > 0 && (
+                {activeNoteFolder.pathIds.length > 0 && (
                   <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      onClick={handleDeleteFolder}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      폴더 삭제
-                    </Button>
                     <Select
-                      value={folderAssignmentDraft.linkedType}
+                      value={classificationFilter.linkedType}
                       onValueChange={(value) => {
-                        const linkedType = value as MyNote["linkedType"];
-                        setFolderAssignmentDraft({ linkedType, linkedId: "" });
-                        if (linkedType === "unassigned") {
-                          updateFolderAssignment(linkedType, "");
-                        }
+                        const linkedType = value as MyNote["linkedType"] | "all";
+                        setClassificationFilter({ linkedType, linkedId: "" });
                       }}
                     >
                       <SelectTrigger className="h-8 w-[130px]">
-                        {getLinkedTypeLabel(folderAssignmentDraft.linkedType)}
+                        {classificationFilter.linkedType === "all"
+                          ? "전체 보기"
+                          : getLinkedTypeLabel(classificationFilter.linkedType)}
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="all">전체 보기</SelectItem>
                         <SelectItem value="course">내 수업</SelectItem>
                         <SelectItem value="personal">개인 학습</SelectItem>
                         <SelectItem value="unassigned">미분류</SelectItem>
                       </SelectContent>
                     </Select>
 
-                    {folderAssignmentDraft.linkedType !== "unassigned" && (
+                    {classificationFilter.linkedType !== "unassigned" &&
+                      classificationFilter.linkedType !== "all" && (
                       <Select
-                        value={folderAssignmentDraft.linkedId}
-                        onValueChange={(value) => {
-                          const linkedId = value ?? "";
-                          setFolderAssignmentDraft((prev) => ({
+                        value={classificationFilter.linkedId}
+                        onValueChange={(value) =>
+                          setClassificationFilter((prev) => ({
                             ...prev,
-                            linkedId,
-                          }));
-                          updateFolderAssignment(folderAssignmentDraft.linkedType, linkedId);
-                        }}
+                            linkedId: value ?? "",
+                          }))
+                        }
                       >
                         <SelectTrigger className="h-8 w-[180px]">
                           {getLinkedTargetLabel(
-                            folderAssignmentDraft.linkedType,
-                            folderAssignmentDraft.linkedId,
+                            classificationFilter.linkedType,
+                            classificationFilter.linkedId,
                             courses,
                             personalStudies,
                           )}
                         </SelectTrigger>
                         <SelectContent>
-                          {folderAssignmentDraft.linkedType === "course"
+                          {classificationFilter.linkedType === "course"
                             ? courses.map((course) => (
                                 <SelectItem key={course.id} value={course.id}>
                                   {course.name}
@@ -1559,6 +1519,15 @@ export default function NotesPage() {
                         </SelectContent>
                       </Select>
                     )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={handleDeleteFolder}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      폴더 삭제
+                    </Button>
                   </div>
                 )}
               </div>
