@@ -453,6 +453,23 @@ export default function NotesPage() {
       : activeNoteFolder.directNotes.filter((note) => classificationNotes.includes(note));
     return baseNotes.filter((note) => noteMatchesSearch(note, keyword));
   }, [activeFolderNotes, activeNoteFolder.directNotes, classificationFilter, search]);
+  const visibleChildFolders = useMemo(
+    () =>
+      activeNoteFolder.children.filter((folder) => {
+        if (classificationFilter.linkedType === "all") return true;
+        return notes.some((note) => {
+          if (!noteIsInFolder(note, folder.pathIds)) return false;
+          if (classificationFilter.linkedType === "unassigned") {
+            return note.linkedType === "unassigned";
+          }
+          return (
+            note.linkedType === classificationFilter.linkedType &&
+            (!classificationFilter.linkedId || note.linkedId === classificationFilter.linkedId)
+          );
+        });
+      }),
+    [activeNoteFolder.children, classificationFilter, notes],
+  );
 
   const syncedCount = notes.filter((note) => note.syncStatus === "synced").length;
   const assignedCount = notes.filter((note) => note.linkedType !== "unassigned").length;
@@ -1532,9 +1549,9 @@ export default function NotesPage() {
                 )}
               </div>
 
-              {!search.trim() && activeNoteFolder.children.length > 0 && (
+              {!search.trim() && visibleChildFolders.length > 0 && (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {activeNoteFolder.children.map((folder) => {
+                  {visibleChildFolders.map((folder) => {
                     const folderAssignment = getFolderAssignment(folder);
 
                     return (
@@ -1777,7 +1794,7 @@ export default function NotesPage() {
                 </Card>
               ))}
             </div>
-          ) : activeNoteFolder.children.length === 0 || search.trim() ? (
+          ) : visibleChildFolders.length === 0 || search.trim() ? (
             <Card className="border-dashed shadow-sm">
               <CardContent className="py-12 text-center text-muted-foreground">
                 <FileText className="mx-auto mb-3 h-9 w-9 opacity-40" />
