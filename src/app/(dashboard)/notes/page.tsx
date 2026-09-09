@@ -805,18 +805,30 @@ export default function NotesPage() {
   }
 
   async function handleDeleteFolder() {
-    if (activeNoteFolder.pathIds.length === 0 || activeFolderNotes.length === 0) return;
+    if (activeNoteFolder.pathIds.length === 0) return;
 
     const confirmed = window.confirm(
-      `"${activeNoteFolder.name}" 폴더와 하위 폴더의 노트 ${activeFolderNotes.length}개를 UniLink에서 삭제할까요? Google Drive 원본 폴더와 파일은 삭제되지 않습니다.`,
+      `"${activeNoteFolder.name}" 폴더와 하위 폴더를 UniLink에서 삭제할까요? ${
+        activeFolderNotes.length > 0
+          ? `포함된 노트 ${activeFolderNotes.length}개도 함께 삭제됩니다. `
+          : "폴더 안에 노트가 없어 폴더만 숨겨집니다. "
+      }Google Drive 원본 폴더와 파일은 삭제되지 않습니다.`,
     );
     if (!confirmed) return;
 
     try {
-      const nextNotes = await deleteNotes(activeFolderNotes.map((note) => note.id));
-      setNotes(nextNotes);
+      if (activeFolderNotes.length > 0) {
+        const nextNotes = await deleteNotes(activeFolderNotes.map((note) => note.id));
+        setNotes(nextNotes);
+      }
+      setDriveFolderPaths((paths) =>
+        paths.filter(
+          (path) =>
+            !activeNoteFolder.pathIds.every((id, index) => path.ids[index] === id),
+        ),
+      );
       setActiveNoteFolderPath([]);
-      setFeedbackMessage(`${activeNoteFolder.name} 폴더의 노트를 삭제했습니다.`);
+      setFeedbackMessage(`${activeNoteFolder.name} 폴더를 UniLink에서 삭제했습니다.`);
     } catch (error) {
       setFeedbackMessage(error instanceof Error ? error.message : "폴더 삭제에 실패했습니다.");
     }
@@ -824,22 +836,32 @@ export default function NotesPage() {
 
   async function handleDeleteFolderNode(folder: NoteFolderNode) {
     const folderNotes = notes.filter((note) => noteIsInFolder(note, folder.pathIds));
-    if (folderNotes.length === 0) return;
 
     const confirmed = window.confirm(
-      `"${folder.name}" 폴더와 하위 폴더의 노트 ${folderNotes.length}개를 UniLink에서 삭제할까요? Google Drive 원본 폴더와 파일은 삭제되지 않습니다.`,
+      `"${folder.name}" 폴더와 하위 폴더를 UniLink에서 삭제할까요? ${
+        folderNotes.length > 0
+          ? `포함된 노트 ${folderNotes.length}개도 함께 삭제됩니다. `
+          : "폴더 안에 노트가 없어 폴더만 숨겨집니다. "
+      }Google Drive 원본 폴더와 파일은 삭제되지 않습니다.`,
     );
     if (!confirmed) return;
 
     try {
-      const nextNotes = await deleteNotes(folderNotes.map((note) => note.id));
-      setNotes(nextNotes);
+      if (folderNotes.length > 0) {
+        const nextNotes = await deleteNotes(folderNotes.map((note) => note.id));
+        setNotes(nextNotes);
+      }
+      setDriveFolderPaths((paths) =>
+        paths.filter(
+          (path) => !folder.pathIds.every((id, index) => path.ids[index] === id),
+        ),
+      );
       setActiveNoteFolderPath((currentPath) =>
         folder.pathIds.every((id, index) => currentPath[index] === id)
           ? folder.pathIds.slice(0, -1)
           : currentPath,
       );
-      setFeedbackMessage(`${folder.name} 폴더의 노트를 삭제했습니다.`);
+      setFeedbackMessage(`${folder.name} 폴더를 UniLink에서 삭제했습니다.`);
     } catch (error) {
       setFeedbackMessage(error instanceof Error ? error.message : "폴더 삭제에 실패했습니다.");
     }
