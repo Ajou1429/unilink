@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { MyNote } from "@/lib/my-notes-storage";
 import { getSupabaseClient } from "@/lib/supabase/client";
+import { fetchDrivePdf } from "@/lib/drive-connection";
 import { CalendarClock, ExternalLink, FileText, HardDrive } from "lucide-react";
 
 interface NoteViewerDialogProps {
@@ -48,30 +49,48 @@ export function NoteViewerDialog({
 
   useEffect(() => {
     let cancelled = false;
-    setFileUrl(note.fileDataUrl ?? null);
-    setFileError(null);
+    if (note.filePath && !note.fileDataUrl) {
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
 
-    if (!note.filePath || note.fileDataUrl) return;
+      supabase.storage
+        .from("note-files")
+        .createSignedUrl(note.filePath, 60 * 60)
+        .then(({ data, error }) => {
+          if (cancelled) return;
+          if (error || !data?.signedUrl) {
+            setFileError("파일을 불러오지 못했습니다.");
+            return;
+          }
+          setFileUrl(data.signedUrl);
+        });
 
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
+      return () => {
+        cancelled = true;
+      };
+    }
 
-    supabase.storage
-      .from("note-files")
-      .createSignedUrl(note.filePath, 60 * 60)
-      .then(({ data, error }) => {
+    const isDrivePdf = note.fileName?.toLowerCase().endsWith(".pdf");
+    if (!note.driveFileId || !isDrivePdf) return;
+
+    let objectUrl: string | null = null;
+    fetchDrivePdf(note.driveFileId)
+      .then((blob) => {
         if (cancelled) return;
-        if (error || !data?.signedUrl) {
-          setFileError("파일을 불러오지 못했습니다.");
-          return;
+        objectUrl = URL.createObjectURL(blob);
+        setFileUrl(objectUrl);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setFileError(error instanceof Error ? error.message : "Drive PDF를 불러오지 못했습니다.");
         }
-        setFileUrl(data.signedUrl);
-      });
+      })
 
     return () => {
       cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [note.fileDataUrl, note.filePath]);
+  }, [note.driveFileId, note.fileDataUrl, note.fileName, note.filePath]);
 
   const fileExtension = note.fileName?.split(".").pop()?.toLowerCase();
   const isImage = Boolean(

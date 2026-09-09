@@ -267,6 +267,19 @@ export async function syncDriveFolder(folderId?: string): Promise<DriveSyncResul
   return syncDriveFolders(folderId ? [folderId] : undefined);
 }
 
+export async function fetchDrivePdf(fileId: string): Promise<Blob> {
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error("Supabase가 설정되지 않았습니다.");
+
+  const { data, error } = await supabase.functions.invoke<Blob>("drive-file", {
+    body: { fileId },
+  });
+  if (error || !(data instanceof Blob)) {
+    throw new Error(await describeFunctionError(error, "Google Drive PDF를 불러오지 못했습니다."));
+  }
+  return data;
+}
+
 export async function enableRealtimeWatch(): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error("Supabase가 설정되지 않았습니다.");
