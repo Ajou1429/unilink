@@ -137,6 +137,7 @@ interface DriveFolderPath {
 }
 
 const MANUAL_NOTE_FOLDER_ID = "__manual_notes__";
+const HIDDEN_DRIVE_FOLDERS_KEY = "unilink:hidden-drive-folders";
 
 function getNoteFolderSegments(note: MyNote) {
   if (note.driveFolderPath?.length && note.driveFolderPathIds?.length) {
@@ -310,6 +311,15 @@ export default function NotesPage() {
   const [folderPickerError, setFolderPickerError] = useState<string | null>(null);
   const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([]);
   const [driveFolderPaths, setDriveFolderPaths] = useState<DriveFolderPath[]>([]);
+  const [hiddenDriveFolderIds, setHiddenDriveFolderIds] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(HIDDEN_DRIVE_FOLDERS_KEY) ?? "[]");
+      return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : [];
+    } catch {
+      return [];
+    }
+  });
   const [folderPath, setFolderPath] = useState<{ id: string | null; name: string }[]>([
     { id: null, name: "내 드라이브" },
   ]);
@@ -424,10 +434,12 @@ export default function NotesPage() {
     };
   }, [driveStatus?.connected, driveStatus?.folderIds, driveStatus?.folderNames]);
 
-  const noteFolderTree = useMemo(
-    () => buildNoteFolderTree(notes, driveFolderPaths),
-    [notes, driveFolderPaths],
-  );
+  const noteFolderTree = useMemo(() => {
+    const visibleDriveFolderPaths = driveFolderPaths.filter(
+      (path) => !path.ids.some((id) => hiddenDriveFolderIds.includes(id)),
+    );
+    return buildNoteFolderTree(notes, visibleDriveFolderPaths);
+  }, [hiddenDriveFolderIds, notes, driveFolderPaths]);
   const activeNoteFolder = useMemo(
     () => findNoteFolder(noteFolderTree, activeNoteFolderPath),
     [activeNoteFolderPath, noteFolderTree],
@@ -804,6 +816,18 @@ export default function NotesPage() {
     }
   }
 
+  function hideDriveFolder(folderPathIds: string[]) {
+    const folderId = folderPathIds[folderPathIds.length - 1];
+    if (!folderId) return;
+
+    setHiddenDriveFolderIds((previous) => {
+      if (previous.includes(folderId)) return previous;
+      const next = [...previous, folderId];
+      window.localStorage.setItem(HIDDEN_DRIVE_FOLDERS_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
   async function handleDeleteFolder() {
     if (activeNoteFolder.pathIds.length === 0) return;
 
@@ -827,6 +851,7 @@ export default function NotesPage() {
             !activeNoteFolder.pathIds.every((id, index) => path.ids[index] === id),
         ),
       );
+      hideDriveFolder(activeNoteFolder.pathIds);
       setActiveNoteFolderPath([]);
       setFeedbackMessage(`${activeNoteFolder.name} 폴더를 UniLink에서 삭제했습니다.`);
     } catch (error) {
@@ -856,6 +881,7 @@ export default function NotesPage() {
           (path) => !folder.pathIds.every((id, index) => path.ids[index] === id),
         ),
       );
+      hideDriveFolder(folder.pathIds);
       setActiveNoteFolderPath((currentPath) =>
         folder.pathIds.every((id, index) => currentPath[index] === id)
           ? folder.pathIds.slice(0, -1)
