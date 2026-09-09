@@ -131,6 +131,11 @@ interface SelectedDriveFolder {
   pathNames?: string[];
 }
 
+interface DriveFolderPath {
+  names: string[];
+  ids: string[];
+}
+
 const MANUAL_NOTE_FOLDER_ID = "__manual_notes__";
 
 function getNoteFolderSegments(note: MyNote) {
@@ -154,7 +159,7 @@ function getNoteFolderSegments(note: MyNote) {
   };
 }
 
-function buildNoteFolderTree(notes: MyNote[]): NoteFolderNode {
+function buildNoteFolderTree(notes: MyNote[], driveFolderPaths: DriveFolderPath[] = []): NoteFolderNode {
   const root: NoteFolderNode = {
     id: "root",
     name: "나의 노트",
@@ -165,8 +170,7 @@ function buildNoteFolderTree(notes: MyNote[]): NoteFolderNode {
     children: [],
   };
 
-  for (const note of notes) {
-    const { names, ids } = getNoteFolderSegments(note);
+  const ensureFolderPath = (names: string[], ids: string[]) => {
     let current = root;
 
     ids.forEach((id, index) => {
@@ -186,6 +190,22 @@ function buildNoteFolderTree(notes: MyNote[]): NoteFolderNode {
         current.children.push(child);
       }
 
+      current = child;
+    });
+  };
+
+  for (const folderPath of driveFolderPaths) {
+    ensureFolderPath(folderPath.names, folderPath.ids);
+  }
+
+  for (const note of notes) {
+    const { names, ids } = getNoteFolderSegments(note);
+    ensureFolderPath(names, ids);
+    let current = root;
+
+    ids.forEach((id) => {
+      const child = current.children.find((item) => item.id === id);
+      if (!child) return;
       child.totalNotes += 1;
       current = child;
     });
@@ -289,6 +309,7 @@ export default function NotesPage() {
   const [folderPickerBusy, setFolderPickerBusy] = useState(false);
   const [folderPickerError, setFolderPickerError] = useState<string | null>(null);
   const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([]);
+  const [driveFolderPaths, setDriveFolderPaths] = useState<DriveFolderPath[]>([]);
   const [folderPath, setFolderPath] = useState<{ id: string | null; name: string }[]>([
     { id: null, name: "내 드라이브" },
   ]);
@@ -355,7 +376,58 @@ export default function NotesPage() {
     return () => window.clearTimeout(timeout);
   }, [feedbackMessage]);
 
-  const noteFolderTree = useMemo(() => buildNoteFolderTree(notes), [notes]);
+  useEffect(() => {
+    const currentDriveStatus = driveStatus;
+    if (!currentDriveStatus) return;
+    if (!isSupabaseConfigured || !currentDriveStatus.connected || currentDriveStatus.folderIds.length === 0) {
+      return;
+    }
+    const selectedFolderIds = currentDriveStatus.folderIds;
+    const selectedFolderNames = currentDriveStatus.folderNames;
+
+    let cancelled = false;
+
+    async function loadDriveFolderPaths() {
+      const paths: DriveFolderPath[] = [];
+
+      async function walk(parentId: string, names: string[], ids: string[]) {
+        const children = await listDriveFolders(parentId);
+        await Promise.all(
+          children.map(async (folder) => {
+            const nextNames = [...names, folder.name];
+            const nextIds = [...ids, folder.id];
+            paths.push({ names: nextNames, ids: nextIds });
+            await walk(folder.id, nextNames, nextIds);
+          }),
+        );
+      }
+
+      await Promise.all(
+        selectedFolderIds.map(async (folderId, index) => {
+          const rootName = selectedFolderNames[index] ?? folderId;
+          const rootNames = [rootName];
+          const rootIds = [folderId];
+          paths.push({ names: rootNames, ids: rootIds });
+          await walk(folderId, rootNames, rootIds);
+        }),
+      );
+
+      if (!cancelled) setDriveFolderPaths(paths);
+    }
+
+    loadDriveFolderPaths().catch(() => {
+      if (!cancelled) setDriveFolderPaths([]);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [driveStatus?.connected, driveStatus?.folderIds, driveStatus?.folderNames]);
+
+  const noteFolderTree = useMemo(
+    () => buildNoteFolderTree(notes, driveFolderPaths),
+    [notes, driveFolderPaths],
+  );
   const activeNoteFolder = useMemo(
     () => findNoteFolder(noteFolderTree, activeNoteFolderPath),
     [activeNoteFolderPath, noteFolderTree],
