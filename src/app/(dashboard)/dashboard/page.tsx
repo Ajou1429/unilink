@@ -1,5 +1,6 @@
 "use client";
 
+import { useCurrentTime } from "@/lib/use-current-time";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Header } from "@/components/layout/Header";
@@ -95,6 +96,7 @@ function getPlanWeekStart(plan: StudyPlan) {
 }
 
 export default function DashboardPage() {
+  const now = useCurrentTime();
   const [courses, setCourses] = useState<Course[]>(mockCourses);
   const [plans, setPlans] = useState<StudyPlan[]>(mockStudyPlans);
   const [personalStudies, setPersonalStudies] = useState<PersonalStudy[]>([]);
@@ -138,7 +140,7 @@ export default function DashboardPage() {
       ? course.days.includes(koreanToday.courseDayOfWeek)
       : false,
   );
-  const currentWeekStartKey = formatDateKey(getSundayWeekStart(new Date()));
+  const currentWeekStartKey = formatDateKey(getSundayWeekStart(new Date(now)));
   const upcomingPlans = plans
     .filter(
       (plan) =>
@@ -157,7 +159,7 @@ export default function DashboardPage() {
     courseSessions
       .filter((session) => {
         const updatedAt = new Date(session.updatedAt || session.createdAt).getTime();
-        return Number.isFinite(updatedAt) && Date.now() - updatedAt <= 604800000;
+        return Number.isFinite(updatedAt) && now - updatedAt <= 604800000;
       })
       .map((session) => session.courseId),
   ).size;

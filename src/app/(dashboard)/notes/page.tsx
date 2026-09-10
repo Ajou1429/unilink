@@ -278,7 +278,7 @@ export default function NotesPage() {
   const [open, setOpen] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteSaveError, setNoteSaveError] = useState("");
-  const [lastSyncAt, setLastSyncAt] = useState(new Date().toISOString());
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [newNote, setNewNote] = useState({
     title: "",
@@ -341,42 +341,64 @@ export default function NotesPage() {
   }
 
   useEffect(() => {
-    loadNotes();
-    setCourses(getStoredCourses());
-    setPersonalStudies(getPersonalStudies());
-    loadDriveStatus();
+    let cancelled = false;
 
-    if (typeof window !== "undefined" && isSupabaseConfigured) {
-      const params = new URLSearchParams(window.location.search);
-      const driveParam = params.get("drive");
-      if (driveParam === "connected") {
-        setDriveMessage("Google Drive 연결에 성공했습니다.");
-        rememberDriveConnectionSucceeded().then((status) => {
-          setDriveStatus(status);
-          const savedFolders = status.folderIds.map((id, index) => ({
-            id,
-            name: status.folderNames[index] ?? id,
-          }));
-          setSelectedDriveFolders(savedFolders);
-          setDriveFolderInput(status.folderId ?? status.folderIds[0] ?? "");
-        });
-      } else if (driveParam === "error") {
-        setDriveMessage(
-          `Google Drive 연결에 실패했습니다. (${params.get("reason") ?? "알 수 없는 오류"})`,
-        );
-      }
-      if (driveParam) {
-        params.delete("drive");
-        params.delete("reason");
-        const query = params.toString();
-        window.history.replaceState(
-          {},
-          "",
-          window.location.pathname + (query ? `?${query}` : ""),
-        );
+    async function initializeNotes() {
+      try {
+        const notes = await getMyNotes();
+        if (cancelled) return;
+        setNotes(notes);
+        setLastSyncAt(new Date().toISOString());
+      } catch {
+        if (!cancelled) setFeedbackMessage("노트를 불러오지 못했습니다.");
+      } finally {
+        if (!cancelled) {
+          setCourses(getStoredCourses());
+          setPersonalStudies(getPersonalStudies());
+        }
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    async function initializeDrive() {
+      if (!isSupabaseConfigured) return;
+      const params = new URLSearchParams(window.location.search);
+      const driveParam = params.get("drive");
+
+      try {
+        // On an OAuth return, confirm the connection before applying its status.
+        const status = await (driveParam === "connected"
+          ? rememberDriveConnectionSucceeded()
+          : getDriveConnectionStatus());
+        if (cancelled) return;
+        setDriveStatus(status);
+        setSelectedDriveFolders(status.folderIds.map((id, index) => ({
+          id,
+          name: status.folderNames[index] ?? id,
+        })));
+        setDriveFolderInput(status.folderId ?? status.folderIds[0] ?? "");
+        if (driveParam === "connected") {
+          setDriveMessage("Google Drive 연결에 성공했습니다.");
+        } else if (driveParam === "error") {
+          setDriveMessage(
+            `Google Drive 연결에 실패했습니다. (${params.get("reason") ?? "알 수 없는 오류"})`,
+          );
+        }
+        if (driveParam) {
+          params.delete("drive");
+          params.delete("reason");
+          const query = params.toString();
+          window.history.replaceState(
+            {}, "", window.location.pathname + (query ? `?${query}` : "") + window.location.hash,
+          );
+        }
+      } catch {
+        if (!cancelled) setDriveMessage("Google Drive 연결 상태를 불러오지 못했습니다.");
+      }
+    }
+
+    void initializeNotes();
+    void initializeDrive();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -432,7 +454,7 @@ export default function NotesPage() {
     return () => {
       cancelled = true;
     };
-  }, [driveStatus?.connected, driveStatus?.folderIds, driveStatus?.folderNames]);
+  }, [driveStatus]);
 
   const noteFolderTree = useMemo(() => {
     const visibleDriveFolderPaths = driveFolderPaths.filter(
@@ -1468,7 +1490,7 @@ export default function NotesPage() {
               )}
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Clock className="h-3.5 w-3.5" />
-                마지막 확인: {formatDate(lastSyncAt)}
+                마지막 확인: {lastSyncAt ? formatDate(lastSyncAt) : "아직 확인하지 않음"}
               </p>
             </CardContent>
           </Card>

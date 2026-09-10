@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   COMMUNITY_POSTS_CHANGED_EVENT,
@@ -110,7 +110,7 @@ export function NotificationBridge() {
     }, 5200);
   }
 
-  function checkCommunityNotifications() {
+  const checkCommunityNotifications = useEffectEvent(() => {
     const settings = getNotificationSettings();
     const posts = getCommunityPosts();
     const previousPostIds = seenPostIdsRef.current;
@@ -138,9 +138,9 @@ export function NotificationBridge() {
       read: false,
       createdAt: new Date().toISOString(),
     });
-  }
+  });
 
-  function checkDeadlineNotifications() {
+  const checkDeadlineNotifications = useEffectEvent(() => {
     const settings = getNotificationSettings();
     if (!settings.deadline) return;
 
@@ -209,7 +209,7 @@ export function NotificationBridge() {
     if (changed) {
       saveNotificationHistory(Array.from(history));
     }
-  }
+  });
 
   useEffect(() => {
     seenPostIdsRef.current = new Set(getCommunityPosts().map((post) => post.id));

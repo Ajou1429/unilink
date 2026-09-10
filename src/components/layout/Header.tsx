@@ -1,5 +1,6 @@
 "use client";
 
+import { useCurrentTime } from "@/lib/use-current-time";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, Search } from "lucide-react";
@@ -24,6 +25,7 @@ interface HeaderProps {
 }
 
 export function Header({ title }: HeaderProps) {
+  const now = useCurrentTime();
   const router = useRouter();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const unreadCount = notifications.filter((notification) => !notification.read).length;
@@ -44,7 +46,7 @@ export function Header({ title }: HeaderProps) {
   }, []);
 
   function formatNotificationTime(createdAt: string) {
-    const diff = Date.now() - new Date(createdAt).getTime();
+    const diff = now - new Date(createdAt).getTime();
     if (diff < 60 * 1000) return "방금 전";
     if (diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)}분 전`;
     if (diff < 24 * 60 * 60 * 1000) return `${Math.floor(diff / 3600000)}시간 전`;

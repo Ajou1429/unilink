@@ -1,5 +1,6 @@
 "use client";
 
+import { useCurrentTime } from "@/lib/use-current-time";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
@@ -62,6 +63,7 @@ function formatProgress(session: CourseSessionProgress) {
 }
 
 export default function AiCoachingPage() {
+  const now = useCurrentTime();
   const [courses, setCourses] = useState<Course[]>([]);
   const [plans, setPlans] = useState<StudyPlan[]>([]);
   const [courseSessions, setCourseSessions] = useState<CourseSessionProgress[]>([]);
@@ -87,7 +89,7 @@ export default function AiCoachingPage() {
     };
   }, []);
 
-  const currentWeekStartKey = formatDateKey(getSundayWeekStart(new Date()));
+  const currentWeekStartKey = formatDateKey(getSundayWeekStart(new Date(now)));
   const weeklyPlans = plans.filter(
     (plan) => (plan.weekStart ?? currentWeekStartKey) === currentWeekStartKey,
   );
@@ -129,7 +131,7 @@ export default function AiCoachingPage() {
     const updatedAt = latestSession
       ? new Date(latestSession.updatedAt || latestSession.createdAt).getTime()
       : 0;
-    const isStale = !updatedAt || Date.now() - updatedAt > WEEK_MS;
+    const isStale = !updatedAt || now - updatedAt > WEEK_MS;
 
     return {
       course,

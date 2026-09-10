@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -139,12 +139,10 @@ export default function RecordsPage() {
     };
   }, [selectedTerm]);
 
-  const terms = useMemo(() => {
-    return getAcademicTermOptions(
-      new Date(),
-      gradeRecords.map((record) => record.term),
-    );
-  }, [currentTerm, gradeRecords]);
+  const terms = getAcademicTermOptions(
+    new Date(),
+    gradeRecords.map((record) => record.term),
+  );
 
   const currentGrades = gradeRecords.filter((record) => record.term === selectedTerm);
   const linkedCourseIds = new Set(
