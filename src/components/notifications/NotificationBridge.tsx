@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   COMMUNITY_POSTS_CHANGED_EVENT,
-  getCommunityPosts,
+  getCommunityPosts as readCommunityPosts,
 } from "@/lib/community-storage";
 import {
   getNotificationSettings,
@@ -27,6 +27,10 @@ import {
 } from "@/lib/notification-storage";
 
 const NOTIFICATION_HISTORY_STORAGE_KEY = "unilink:notification-history";
+
+function getCommunityPosts() {
+  try { return readCommunityPosts(); } catch { return []; }
+}
 
 interface NotificationToast {
   id: string;

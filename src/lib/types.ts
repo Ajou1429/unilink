@@ -14,10 +14,16 @@ export interface CourseSchedule {
   day: DayOfWeek;
   startTime: string;
   endTime: string;
+  location?: string;
 }
 
 export interface Course {
   id: string;
+  catalogSource?: "ajou";
+  registrationNumber?: string;
+  courseCode?: string;
+  catalogSubjectId?: string;
+  originalSchedule?: string;
   term?: string;
   courseType?: "major" | "non-major";
   name: string;
@@ -40,6 +46,16 @@ export interface Timetable {
 
 export type PostCategory = "자유" | "질문" | "정보" | "수업" | "시험";
 
+export interface CourseBoardReference {
+  key: string;
+  name: string;
+  term: string;
+  university: string;
+  courseCode: string;
+  registrationNumber?: string;
+  professor?: string;
+}
+
 export interface Post {
   id: string;
   authorId: string;
@@ -51,6 +67,7 @@ export interface Post {
   likes: number;
   commentCount: number;
   courseId?: string;
+  courseBoard?: CourseBoardReference;
   createdAt: string;
 }
 

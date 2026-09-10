@@ -106,7 +106,7 @@ export function Sidebar() {
       : "로그인 후 학과가 표시됩니다";
 
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-60 bg-white border-r flex flex-col z-40">
+    <aside className="fixed left-0 top-0 bottom-0 w-60 bg-white border-r hidden lg:flex flex-col z-40">
       <div className="h-16 flex items-center px-5 border-b">
         <GraduationCap className="h-6 w-6 text-primary mr-2" />
         <span className="text-lg font-bold text-primary">UniLink</span>

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { TimetableGrid } from "@/components/timetable/TimetableGrid";
+import { AjouCoursePicker } from "@/components/timetable/AjouCoursePicker";
+import { AJOU_TERM, courseSchedules, sameCatalogSubject, schedulesOverlap } from "@/lib/ajou-catalog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +50,7 @@ import {
   getAllStoredCourses,
   getStoredCourses,
   saveStoredCourses,
+  COURSES_CHANGED_EVENT,
 } from "@/lib/course-storage";
 import {
   getPersonalStudies,
@@ -338,6 +341,7 @@ export default function TimetablePage() {
   const [sessionFeedback, setSessionFeedback] = useState("");
   const [actionFeedback, setActionFeedback] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [ajouCourses, setAjouCourses] = useState<Course[]>([]);
   const [personalOpen, setPersonalOpen] = useState(false);
   const [eventOpen, setEventOpen] = useState(false);
   const [editingMonthlyEventId, setEditingMonthlyEventId] = useState<string | null>(null);
@@ -404,6 +408,7 @@ export default function TimetablePage() {
         ),
       );
       setCourses(getStoredCourses(selectedTerm));
+      setAjouCourses(getStoredCourses(AJOU_TERM));
       setWorkSchedules(getWorkSchedules());
       setPersonalStudies(
         getPersonalStudies().filter((study) => (study.status ?? "active") === "active"),
@@ -411,11 +416,12 @@ export default function TimetablePage() {
       setPersonalStudyPlans(getAllPersonalStudyPlans());
       setMonthlyEvents(getMonthlyEvents());
       setCourseSessions(getCourseSessions());
-      getMyNotes().then(setMyNotes);
+      getMyNotes().then(setMyNotes).catch(() => setMyNotes([]));
     }
 
     const timeout = window.setTimeout(syncData, 0);
     window.addEventListener("storage", syncData);
+    window.addEventListener(COURSES_CHANGED_EVENT, syncData);
     window.addEventListener(PERSONAL_STUDIES_CHANGED_EVENT, syncData);
     window.addEventListener(PERSONAL_STUDY_PLANS_CHANGED_EVENT, syncData);
     window.addEventListener(WORK_SCHEDULES_CHANGED_EVENT, syncData);
@@ -423,6 +429,7 @@ export default function TimetablePage() {
     return () => {
       window.clearTimeout(timeout);
       window.removeEventListener("storage", syncData);
+      window.removeEventListener(COURSES_CHANGED_EVENT, syncData);
       window.removeEventListener(PERSONAL_STUDIES_CHANGED_EVENT, syncData);
       window.removeEventListener(PERSONAL_STUDY_PLANS_CHANGED_EVENT, syncData);
       window.removeEventListener(WORK_SCHEDULES_CHANGED_EVENT, syncData);
@@ -451,6 +458,27 @@ export default function TimetablePage() {
   function persistCourses(nextCourses: Course[]) {
     setCourses(nextCourses);
     saveStoredCourses(nextCourses, selectedTerm);
+  }
+
+  function addCatalogCourses(additions: Course[]) {
+    // Re-read at commit time: another tab may have edited the timetable while the picker was open.
+    const next = [...getStoredCourses(AJOU_TERM)];
+    const currentWork = getWorkSchedules();
+    for (const course of additions) {
+      if (next.some((item) => item.id === course.id || sameCatalogSubject({ registrationNumber: course.registrationNumber ?? "", subjectId: course.catalogSubjectId ?? "", courseCode: course.courseCode ?? "" }, item))) {
+        throw new Error(`${course.name} 과목이 이미 편성되어 있습니다. 선택을 확인해주세요.`);
+      }
+      const conflict = next.find((item) => schedulesOverlap(courseSchedules(course), courseSchedules(item)));
+      const workConflict = currentWork.find((item) => schedulesOverlap(courseSchedules(course), courseSchedules(item)));
+      if (conflict || workConflict) throw new Error(`${course.name}: ${conflict?.name ?? workConflict?.title} 일정과 시간이 겹칩니다.`);
+      next.push(course);
+    }
+    saveStoredCourses(next, AJOU_TERM);
+    setAjouCourses(next);
+    changeSelectedTerm(AJOU_TERM);
+    setTermOptions((previous) => [...new Set([...previous, AJOU_TERM])]);
+    setCourses(next);
+    setActionFeedback(`${additions.length}개 과목을 ${AJOU_TERM} 시간표에 추가했습니다.`);
   }
 
   function persistPersonalStudies(nextStudies: PersonalStudy[]) {
@@ -791,13 +819,15 @@ export default function TimetablePage() {
           startTime: editingCourse.startTime,
           endTime: editingCourse.endTime,
         }));
-    const schedules = editingCourse.days.map(
-      (day) =>
-        existingSchedules.find((schedule) => schedule.day === day) ?? {
+    const schedules = editingCourse.days.flatMap(
+      (day) => {
+        const matches = existingSchedules.filter((schedule) => schedule.day === day);
+        return matches.length ? matches : [{
           day,
           startTime: editingCourse.startTime,
           endTime: editingCourse.endTime,
-        },
+        }];
+      },
     );
     const updatedCourse: Course = {
       ...editingCourse,
@@ -870,7 +900,8 @@ export default function TimetablePage() {
     <div className="flex flex-col min-h-screen">
       <Header title="시간표" />
       <div className="flex-1 p-6 max-w-[1600px] mx-auto w-full">
-        <div className="flex items-center justify-between mb-6">
+        <AjouCoursePicker selectedTerm={selectedTerm} existingCourses={selectedTerm === AJOU_TERM ? courses : ajouCourses} workSchedules={workSchedules} onApply={addCatalogCourses} />
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <div className="space-y-2">
             <p className="text-muted-foreground text-sm">
               {selectedTerm} · 총 {totalCredits}학점 · 전공 {majorCredits}학점 · 비전공{" "}
@@ -910,7 +941,7 @@ export default function TimetablePage() {
               </Select>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Dialog
               open={eventOpen}
               onOpenChange={(open) => {
@@ -2012,6 +2043,7 @@ export default function TimetablePage() {
                     >
                       수업 삭제
                     </Button>
+                    <Button size="sm" variant="outline" className="w-full" render={<Link href={"/community?courseId=" + encodeURIComponent(selectedCourse.id)} />}>이 수업 커뮤니티</Button>
                   </div>
                 </CardContent>
               </Card>

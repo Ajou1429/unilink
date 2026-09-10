@@ -203,7 +203,7 @@ export function TimetableGrid({
 
                   return (
                     <button
-                      key={`${dateKey}-${course.id}`}
+                      key={`${dateKey}-${course.id}-${schedule.startTime}`}
                       onClick={() =>
                         onCourseClick?.({
                           course,
@@ -225,7 +225,7 @@ export function TimetableGrid({
                       </p>
                       {height > 40 && (
                         <p className="text-white/80 text-[10px] leading-tight truncate mt-0.5">
-                          {course.location}
+                          {schedule.location || course.location}
                         </p>
                       )}
                       {height > 60 && (

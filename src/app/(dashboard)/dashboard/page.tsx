@@ -17,7 +17,8 @@ import {
   Clock,
   Target,
 } from "lucide-react";
-import { mockCourses, mockPosts, mockStudyPlans } from "@/lib/mock-data";
+import { mockCourses, mockStudyPlans } from "@/lib/mock-data";
+import { getCommunityPosts, COMMUNITY_POSTS_CHANGED_EVENT } from "@/lib/community-storage";
 import { getStoredCourses } from "@/lib/course-storage";
 import {
   getPersonalStudies,
@@ -29,7 +30,7 @@ import {
   saveWeeklyStudyPlans,
   STUDY_PLANS_CHANGED_EVENT,
 } from "@/lib/study-storage";
-import { Course, DayOfWeek, StudyPlan } from "@/lib/types";
+import { Course, DayOfWeek, StudyPlan, Post } from "@/lib/types";
 import {
   CourseSessionProgress,
   getCourseSessions,
@@ -45,7 +46,6 @@ import {
   KOREA_TIME_ZONE,
 } from "@/lib/academic-term";
 
-const recentPosts = mockPosts.slice(0, 3);
 const COURSE_WEEKDAYS: DayOfWeek[] = ["월", "화", "수", "목", "금"];
 
 function getKoreanToday() {
@@ -101,6 +101,7 @@ export default function DashboardPage() {
   const [courseSessions, setCourseSessions] = useState<CourseSessionProgress[]>([]);
   const [koreanToday, setKoreanToday] = useState(getKoreanToday);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [recentPosts, setRecentPosts] = useState<Post[]>([]);
 
   useEffect(() => {
     function loadDashboardData() {
@@ -110,6 +111,8 @@ export default function DashboardPage() {
       setCourseSessions(getCourseSessions());
       setKoreanToday(getKoreanToday());
       setCurrentUser(getCurrentUser());
+      try { setRecentPosts(getCommunityPosts().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 3)); }
+      catch { setRecentPosts([]); }
     }
 
     window.setTimeout(loadDashboardData, 0);
@@ -118,6 +121,7 @@ export default function DashboardPage() {
     window.addEventListener(TIMETABLE_CHANGED_EVENT, loadDashboardData);
     window.addEventListener(AUTH_CHANGED_EVENT, loadDashboardData);
     window.addEventListener("storage", loadDashboardData);
+    window.addEventListener(COMMUNITY_POSTS_CHANGED_EVENT, loadDashboardData);
 
     return () => {
       window.removeEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
@@ -125,6 +129,7 @@ export default function DashboardPage() {
       window.removeEventListener(TIMETABLE_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener(AUTH_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener("storage", loadDashboardData);
+      window.removeEventListener(COMMUNITY_POSTS_CHANGED_EVENT, loadDashboardData);
     };
   }, []);
 
@@ -365,7 +370,7 @@ export default function DashboardPage() {
             <div className="space-y-0">
               {recentPosts.map((post, idx) => (
                 <div key={post.id}>
-                  <Link href="/community">
+                  <Link href={"/community?postId=" + encodeURIComponent(post.id)}>
                     <div className="py-3 flex items-center gap-3 hover:bg-accent/50 -mx-2 px-2 rounded-lg transition-colors cursor-pointer">
                       <Badge variant="outline" className="text-[10px] shrink-0">
                         {post.category}
