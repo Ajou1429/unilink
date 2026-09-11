@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +13,15 @@ import {
 import { MyNote } from "@/lib/my-notes-storage";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { fetchDrivePdf } from "@/lib/drive-connection";
-import { CalendarClock, ExternalLink, FileText, HardDrive, Maximize2, Minimize2 } from "lucide-react";
+import {
+  CalendarClock,
+  ExternalLink,
+  FileText,
+  HardDrive,
+  Maximize2,
+  Minimize2,
+  Scaling,
+} from "lucide-react";
 
 interface NoteViewerDialogProps {
   note: MyNote;
@@ -47,6 +55,49 @@ export function NoteViewerDialog({
   const [fileUrl, setFileUrl] = useState<string | null>(note.fileDataUrl ?? null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [dialogSize, setDialogSize] = useState<{ width: number; height: number } | null>(null);
+
+  function startResizing(event: ReactPointerEvent<HTMLButtonElement>) {
+    const dialog = event.currentTarget.closest<HTMLElement>("[data-slot='dialog-content']");
+    if (!dialog || expanded) return;
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startBounds = dialog.getBoundingClientRect();
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+
+    const resize = (moveEvent: PointerEvent) => {
+      const maxWidth = Math.max(320, window.innerWidth - 32);
+      const maxHeight = Math.max(320, window.innerHeight - 32);
+      const minWidth = Math.min(420, maxWidth);
+      const minHeight = Math.min(420, maxHeight);
+
+      setDialogSize({
+        width: Math.min(
+          maxWidth,
+          Math.max(minWidth, startBounds.width + (moveEvent.clientX - startX) * 2),
+        ),
+        height: Math.min(
+          maxHeight,
+          Math.max(minHeight, startBounds.height + (moveEvent.clientY - startY) * 2),
+        ),
+      });
+    };
+
+    const stopResizing = () => {
+      window.removeEventListener("pointermove", resize);
+      window.removeEventListener("pointerup", stopResizing);
+      window.removeEventListener("pointercancel", stopResizing);
+      document.body.style.userSelect = previousUserSelect;
+    };
+
+    window.addEventListener("pointermove", resize);
+    window.addEventListener("pointerup", stopResizing);
+    window.addEventListener("pointercancel", stopResizing);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -108,13 +159,20 @@ export function NoteViewerDialog({
       <DialogContent
         className="flex flex-col overflow-hidden sm:max-w-none"
         style={{
-          width: expanded ? "calc(100vw - 2rem)" : "min(960px, calc(100vw - 2rem))",
-          height: expanded ? "calc(100dvh - 2rem)" : "82dvh",
+          width: expanded
+            ? "calc(100vw - 2rem)"
+            : dialogSize
+              ? `${dialogSize.width}px`
+              : "min(960px, calc(100vw - 2rem))",
+          height: expanded
+            ? "calc(100dvh - 2rem)"
+            : dialogSize
+              ? `${dialogSize.height}px`
+              : "82dvh",
           maxWidth: "calc(100vw - 2rem)",
           maxHeight: "calc(100dvh - 2rem)",
           minWidth: "min(360px, calc(100vw - 2rem))",
           minHeight: "min(360px, calc(100dvh - 2rem))",
-          resize: expanded ? "none" : "both",
           containerType: "size",
         }}
       >
@@ -217,6 +275,17 @@ export function NoteViewerDialog({
             </div>
           )}
         </div>
+        {!expanded && (
+          <button
+            type="button"
+            className="absolute bottom-1 right-1 z-20 flex h-8 w-8 touch-none cursor-nwse-resize items-center justify-center rounded-md bg-background/90 text-muted-foreground shadow-sm ring-1 ring-border hover:bg-muted hover:text-foreground"
+            title="드래그해서 창 크기 조절"
+            aria-label="드래그해서 창 크기 조절"
+            onPointerDown={startResizing}
+          >
+            <Scaling className="h-4 w-4" />
+          </button>
+        )}
       </DialogContent>
     </Dialog>
   );
