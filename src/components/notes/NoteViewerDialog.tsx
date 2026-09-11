@@ -13,7 +13,7 @@ import {
 import { MyNote } from "@/lib/my-notes-storage";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { fetchDrivePdf } from "@/lib/drive-connection";
-import { CalendarClock, ExternalLink, FileText, HardDrive } from "lucide-react";
+import { CalendarClock, ExternalLink, FileText, HardDrive, Maximize2, Minimize2 } from "lucide-react";
 
 interface NoteViewerDialogProps {
   note: MyNote;
@@ -46,6 +46,7 @@ export function NoteViewerDialog({
 }: NoteViewerDialogProps) {
   const [fileUrl, setFileUrl] = useState<string | null>(note.fileDataUrl ?? null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,15 +105,38 @@ export function NoteViewerDialog({
         <ExternalLink className="h-3.5 w-3.5" />
         {triggerLabel}
       </DialogTrigger>
-      <DialogContent className="max-h-[86vh] max-w-3xl overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="pr-8">{note.title}</DialogTitle>
+      <DialogContent
+        className="flex flex-col overflow-hidden sm:max-w-none"
+        style={{
+          width: expanded ? "calc(100vw - 2rem)" : "min(960px, calc(100vw - 2rem))",
+          height: expanded ? "calc(100dvh - 2rem)" : "82dvh",
+          maxWidth: "calc(100vw - 2rem)",
+          maxHeight: "calc(100dvh - 2rem)",
+          minWidth: "min(360px, calc(100vw - 2rem))",
+          minHeight: "min(360px, calc(100dvh - 2rem))",
+          resize: expanded ? "none" : "both",
+          containerType: "size",
+        }}
+      >
+        <DialogHeader className="shrink-0 min-w-0 pr-16">
+          <DialogTitle className="break-words leading-snug">{note.title}</DialogTitle>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="absolute right-11 top-2"
+            title={expanded ? "원래 크기로" : "크게 보기"}
+            aria-label={expanded ? "원래 크기로" : "크게 보기"}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? <Minimize2 /> : <Maximize2 />}
+          </Button>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden [overflow-wrap:anywhere]">
           <div className="rounded-lg border bg-muted/30 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-primary" />
                   <p className="truncate font-semibold">{getNoteFileName(note)}</p>
@@ -129,8 +153,8 @@ export function NoteViewerDialog({
                   </span>
                 </div>
               </div>
-              <div className="flex shrink-0 flex-wrap gap-1.5">
-                <Badge variant="secondary">{note.linkedTitle ?? note.courseName}</Badge>
+              <div className="flex min-w-0 max-w-full flex-wrap gap-1.5 sm:max-w-[40%]">
+                <Badge variant="secondary" className="h-auto whitespace-normal break-words">{note.linkedTitle ?? note.courseName}</Badge>
                 {note.version > 1 && <Badge variant="outline">v{note.version}</Badge>}
               </div>
             </div>
@@ -172,7 +196,8 @@ export function NoteViewerDialog({
                   <iframe
                     src={fileUrl}
                     title={note.fileName ?? note.title}
-                    className="h-[60vh] w-full rounded-lg border"
+                    className="w-full rounded-lg border"
+                    style={{ height: "max(280px, calc(100cqh - 240px))" }}
                   />
                 )}
               </div>
