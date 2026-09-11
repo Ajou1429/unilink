@@ -5,7 +5,7 @@ import { BookOpen, Check, Plus, Search, ShoppingBag, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { COURSE_COLORS } from "@/lib/mock-data";
+import { SCHEDULE_COLORS } from "@/lib/schedule-colors";
 import { AJOU_TERM, courseSchedules, matchesCatalogSearch, prepareSection, sameCatalogSubject, schedulesOverlap, sectionToCourse, type ParsedSection } from "@/lib/ajou-catalog";
 import type { Course, DayOfWeek } from "@/lib/types";
 import type { WorkSchedule } from "@/lib/timetable-storage";
@@ -71,7 +71,7 @@ function PickerBody({ selectedTerm, existingCourses, workSchedules, onApply, onC
   }, [retry]);
 
   const departments = useMemo(() => [...new Set(catalog.map((c) => c.department))].filter(Boolean).sort((a, b) => a.localeCompare(b, "ko")), [catalog]);
-  const additions = useMemo(() => basket.map((s, i) => sectionToCourse(s, COURSE_COLORS[(existingCourses.length + i) % COURSE_COLORS.length])), [basket, existingCourses.length]);
+  const additions = useMemo(() => basket.map((s, i) => sectionToCourse(s, SCHEDULE_COLORS[(existingCourses.length + i) % SCHEDULE_COLORS.length])), [basket, existingCourses.length]);
   const allCourses = [...existingCourses, ...additions];
   const creditTotal = allCourses.reduce((sum, c) => sum + c.credits, 0);
 

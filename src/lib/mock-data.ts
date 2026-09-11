@@ -1,17 +1,7 @@
 import { Course, LectureNote, Post, StudyPlan } from "./types";
+import { SCHEDULE_COLORS } from "./schedule-colors";
 
-export const COURSE_COLORS = [
-  "#4F46E5",
-  "#7C3AED",
-  "#DB2777",
-  "#DC2626",
-  "#D97706",
-  "#059669",
-  "#0891B2",
-  "#2563EB",
-  "#65A30D",
-  "#F43F5E",
-];
+export const COURSE_COLORS = SCHEDULE_COLORS;
 
 export const mockCourses: Course[] = [
   {

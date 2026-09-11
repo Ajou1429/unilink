@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { TimetableGrid } from "@/components/timetable/TimetableGrid";
 import { AjouCoursePicker } from "@/components/timetable/AjouCoursePicker";
+import { ScheduleColorPicker } from "@/components/timetable/ScheduleColorPicker";
 import { AJOU_TERM, courseSchedules, sameCatalogSubject, schedulesOverlap } from "@/lib/ajou-catalog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,7 +45,7 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import { COURSE_COLORS } from "@/lib/mock-data";
+import { SCHEDULE_COLORS } from "@/lib/schedule-colors";
 import { Course, DayOfWeek } from "@/lib/types";
 import {
   getAllStoredCourses,
@@ -91,16 +92,6 @@ const COURSE_TYPE_LABELS = {
   major: "전공",
   "non-major": "비전공",
 } as const;
-const PERSONAL_COLORS = ["#2563EB", "#7C3AED", "#059669", "#D97706", "#DB2777"];
-const EVENT_COLORS = [
-  "#0F766E",
-  "#2563EB",
-  "#9333EA",
-  "#EA580C",
-  "#BE123C",
-  "#65A30D",
-  "#0891B2",
-];
 const LEVELS: PaceLevel[] = ["상", "중", "하"];
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
@@ -354,14 +345,14 @@ export default function TimetablePage() {
     endTime: "10:30",
     credits: 3,
     courseType: "major" as Course["courseType"],
-    color: COURSE_COLORS[0],
+    color: SCHEDULE_COLORS[0],
   });
   const [newPersonalStudy, setNewPersonalStudy] = useState({
     title: "",
     category: "자격증",
     goal: "",
     targetDate: "",
-    color: PERSONAL_COLORS[0],
+    color: SCHEDULE_COLORS[0],
   });
   const [courseDayTimes, setCourseDayTimes] = useState<
     Partial<Record<DayOfWeek, { startTime: string; endTime: string }>>
@@ -377,7 +368,7 @@ export default function TimetablePage() {
     days: [] as DayOfWeek[],
     startTime: "18:00",
     endTime: "22:00",
-    color: "#64748B",
+    color: SCHEDULE_COLORS[SCHEDULE_COLORS.length - 1],
   });
   const [newEvent, setNewEvent] = useState({
     title: "",
@@ -386,7 +377,7 @@ export default function TimetablePage() {
     endTime: "10:00",
     location: "",
     memo: "",
-    color: EVENT_COLORS[0],
+    color: SCHEDULE_COLORS[0],
   });
   const [sessionForm, setSessionForm] = useState({
     progressTitle: "",
@@ -503,7 +494,7 @@ export default function TimetablePage() {
     setSelectedEvent(null);
     setEditingCourse(null);
     setCourseFilter("all");
-    setNewCourse((prev) => ({ ...prev, color: COURSE_COLORS[0] }));
+    setNewCourse((prev) => ({ ...prev, color: SCHEDULE_COLORS[0] }));
   }
 
   function toggleDay(day: DayOfWeek) {
@@ -563,7 +554,7 @@ export default function TimetablePage() {
       endTime: "10:30",
       credits: 3,
       courseType: "major",
-      color: COURSE_COLORS[courses.length % COURSE_COLORS.length],
+      color: SCHEDULE_COLORS[courses.length % SCHEDULE_COLORS.length],
     });
     setActionFeedback(`${course.name} 수업이 ${selectedTerm} 시간표에 등록되었습니다.`);
   }
@@ -619,7 +610,7 @@ export default function TimetablePage() {
       days: [],
       startTime: "18:00",
       endTime: "22:00",
-      color: "#64748B",
+      color: SCHEDULE_COLORS[SCHEDULE_COLORS.length - 1],
     });
     setWorkDayTimes({});
     setActionFeedback(
@@ -668,7 +659,7 @@ export default function TimetablePage() {
       category: "자격증",
       goal: "",
       targetDate: "",
-      color: PERSONAL_COLORS[personalStudies.length % PERSONAL_COLORS.length],
+      color: SCHEDULE_COLORS[personalStudies.length % SCHEDULE_COLORS.length],
     });
     setActionFeedback(`${study.title} 개인 학습이 등록되었습니다.`);
   }
@@ -720,7 +711,7 @@ export default function TimetablePage() {
       endTime: "10:00",
       location: "",
       memo: "",
-      color: EVENT_COLORS[monthlyEvents.length % EVENT_COLORS.length],
+      color: SCHEDULE_COLORS[monthlyEvents.length % SCHEDULE_COLORS.length],
     });
     setActionFeedback(
       existingEvent ? `${event.title} 일정이 수정되었습니다.` : `${event.title} 일정이 등록되었습니다.`,
@@ -1027,22 +1018,11 @@ export default function TimetablePage() {
                   </div>
                   <div className="space-y-2">
                     <Label>색상</Label>
-                    <div className="flex gap-2">
-                      {EVENT_COLORS.map((color) => (
-                        <button
-                          key={color}
-                          type="button"
-                          aria-label={`${color} 일정 색상 선택`}
-                          onClick={() => setNewEvent((prev) => ({ ...prev, color }))}
-                          className={`h-7 w-7 rounded-full transition-transform ${
-                            newEvent.color === color
-                              ? "scale-125 ring-2 ring-offset-1 ring-gray-400"
-                              : "hover:scale-110"
-                          }`}
-                          style={{ backgroundColor: color }}
-                        />
-                      ))}
-                    </div>
+                    <ScheduleColorPicker
+                      value={newEvent.color}
+                      labelPrefix="월간 일정"
+                      onChange={(color) => setNewEvent((prev) => ({ ...prev, color }))}
+                    />
                   </div>
                   <Button onClick={addMonthlyEvent} className="w-full">
                     {editingMonthlyEventId ? "일정 수정" : "일정 추가"}
@@ -1186,6 +1166,16 @@ export default function TimetablePage() {
                       value={newWorkSchedule.location}
                       onChange={(event) =>
                         setNewWorkSchedule((prev) => ({ ...prev, location: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>색상</Label>
+                    <ScheduleColorPicker
+                      value={newWorkSchedule.color}
+                      labelPrefix="기타 일정"
+                      onChange={(color) =>
+                        setNewWorkSchedule((prev) => ({ ...prev, color }))
                       }
                     />
                   </div>
@@ -1355,22 +1345,11 @@ export default function TimetablePage() {
                 </div>
                 <div className="space-y-2">
                   <Label>색상</Label>
-                  <div className="flex gap-2">
-                    {COURSE_COLORS.map((color) => (
-                      <button
-                        key={color}
-                        type="button"
-                        aria-label={`${color} 색상 선택`}
-                        onClick={() => setNewCourse((p) => ({ ...p, color }))}
-                        className={`h-7 w-7 rounded-full transition-transform ${
-                          newCourse.color === color
-                            ? "scale-125 ring-2 ring-offset-1 ring-gray-400"
-                            : "hover:scale-110"
-                        }`}
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
-                  </div>
+                  <ScheduleColorPicker
+                    value={newCourse.color}
+                    labelPrefix="수업"
+                    onChange={(color) => setNewCourse((prev) => ({ ...prev, color }))}
+                  />
                 </div>
                 <Button onClick={addCourse} className="w-full">
                   추가하기
@@ -1823,26 +1802,15 @@ export default function TimetablePage() {
                       </div>
                       <div className="space-y-2">
                         <Label>색상</Label>
-                        <div className="flex gap-2">
-                          {COURSE_COLORS.map((color) => (
-                            <button
-                              key={color}
-                              type="button"
-                              aria-label={`${color} 수업 색상 선택`}
-                              onClick={() =>
-                                setEditingCourse((prev) =>
-                                  prev ? { ...prev, color } : prev,
-                                )
-                              }
-                              className={`h-7 w-7 rounded-full transition-transform ${
-                                editingCourse.color === color
-                                  ? "scale-125 ring-2 ring-offset-1 ring-gray-400"
-                                  : "hover:scale-110"
-                              }`}
-                              style={{ backgroundColor: color }}
-                            />
-                          ))}
-                        </div>
+                        <ScheduleColorPicker
+                          value={editingCourse.color}
+                          labelPrefix="수업"
+                          onChange={(color) =>
+                            setEditingCourse((prev) =>
+                              prev ? { ...prev, color } : prev,
+                            )
+                          }
+                        />
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <Button size="sm" className="text-xs" onClick={saveEditedCourse}>
@@ -2274,24 +2242,13 @@ export default function TimetablePage() {
                         </div>
                         <div className="space-y-2">
                           <Label>색상</Label>
-                          <div className="flex gap-2">
-                            {PERSONAL_COLORS.map((color) => (
-                              <button
-                                key={color}
-                                type="button"
-                                aria-label={`${color} 색상 선택`}
-                                onClick={() =>
-                                  setNewPersonalStudy((prev) => ({ ...prev, color }))
-                                }
-                                className={`h-7 w-7 rounded-full transition-transform ${
-                                  newPersonalStudy.color === color
-                                    ? "scale-125 ring-2 ring-offset-1 ring-gray-400"
-                                    : "hover:scale-110"
-                                }`}
-                                style={{ backgroundColor: color }}
-                              />
-                            ))}
-                          </div>
+                          <ScheduleColorPicker
+                            value={newPersonalStudy.color}
+                            labelPrefix="개인 학습"
+                            onChange={(color) =>
+                              setNewPersonalStudy((prev) => ({ ...prev, color }))
+                            }
+                          />
                         </div>
                         <Button onClick={addPersonalStudy} className="w-full">
                           추가하기
