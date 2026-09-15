@@ -30,6 +30,12 @@ function minutesFromStart(time: string, startHour: number): number {
   return timeToMinutes(time) - startHour * 60;
 }
 
+function minutesToTime(minutes: number): string {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
 function addDays(date: Date, amount: number) {
   const next = new Date(date);
   next.setDate(next.getDate() + amount);
@@ -89,6 +95,12 @@ interface TimetableGridProps {
   weekStart: Date;
   onCourseClick?: (occurrence: CourseOccurrence) => void;
   onEventClick?: (event: MonthlyEvent) => void;
+  onTimeSlotClick?: (slot: {
+    day: DayOfWeek;
+    date: string;
+    startTime: string;
+    endTime: string;
+  }) => void;
 }
 
 export function TimetableGrid({
@@ -99,6 +111,7 @@ export function TimetableGrid({
   weekStart,
   onCourseClick,
   onEventClick,
+  onTimeSlotClick,
 }: TimetableGridProps) {
   const weekDates = WEEK_DAYS.map((day, index) => ({
     label: day,
@@ -187,6 +200,30 @@ export function TimetableGrid({
                     style={{ top: i * HOUR_HEIGHT + HOUR_HEIGHT / 2 }}
                   />
                 ))}
+
+                {Array.from({ length: (endHour - startHour) * 2 }, (_, index) => {
+                  const startMinutes = startHour * 60 + index * 30;
+                  const startTime = minutesToTime(startMinutes);
+                  const endTime = minutesToTime(Math.min(startMinutes + 60, endHour * 60));
+
+                  return (
+                    <button
+                      key={`slot-${index}`}
+                      type="button"
+                      aria-label={`${label}요일 ${startTime} 기타 일정 추가`}
+                      className="absolute inset-x-0 cursor-pointer transition-colors hover:bg-blue-50/70 focus-visible:z-20 focus-visible:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-500"
+                      style={{ top: index * (HOUR_HEIGHT / 2), height: HOUR_HEIGHT / 2 }}
+                      onClick={() =>
+                        onTimeSlotClick?.({
+                          day: label,
+                          date: dateKey,
+                          startTime,
+                          endTime,
+                        })
+                      }
+                    />
+                  );
+                })}
 
                 {dayCourses.map(({ course, schedule }) => {
                   const topMin = minutesFromStart(schedule.startTime, startHour);

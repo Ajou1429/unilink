@@ -7,15 +7,19 @@ import { join } from "node:path";
 import { readFileSync } from "node:fs";
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.AJOU_PLAYWRIGHT_MODULE || "playwright");
-const browser = await chromium.launch({ channel: "msedge", headless: true });
-const base = process.env.AJOU_TEST_URL || "http://127.0.0.1:3000";
+const browser = await chromium.launch({
+  channel: process.env.AJOU_BROWSER_CHANNEL || "chrome",
+  headless: true,
+});
+const base = process.env.AJOU_TEST_URL || "http://localhost:3000";
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 const page = await context.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 try {
   await page.goto(`${base}/timetable`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "아주대 과목 찾기" }).waitFor();
+  await page.getByRole("button", { name: "수업 추가", exact: true }).waitFor();
+  assert.equal(await page.getByText("아주대 2학기, 과목만 고르면 시간표 완성").count(), 0);
   await page.evaluate(() => {
     const common = { name: "기존 과목", professor: "테스트", location: "101", credits: 3, color: "#334155", days: ["월"], startTime: "07:00", endTime: "08:00", courseType: "major" };
     sessionStorage.setItem("unilink:private:guest:unilink:courses", JSON.stringify([
@@ -25,7 +29,7 @@ try {
   });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByText("2026년 2학기 · 총 3학점", { exact: false }).waitFor();
-  await page.getByRole("button", { name: "아주대 과목 찾기" }).click();
+  await page.getByRole("button", { name: "수업 추가", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByText(/전체 1,820개 강좌/).waitFor();
   const search = dialog.getByRole("textbox", { name: "과목 검색" });
@@ -48,14 +52,22 @@ try {
   assert.equal(saved.find((c) => c.registrationNumber === "F126").schedules[0].startTime, "13:30");
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByText("2026년 2학기 · 총 9학점", { exact: false }).waitFor();
-  await page.getByRole("button", { name: "아주대 과목 찾기" }).click();
+  await page.getByRole("button", { name: "수업 추가", exact: true }).click();
   await page.getByRole("textbox", { name: "과목 검색" }).fill("F126");
   assert.ok(await page.getByRole("button", { name: "F126 담기", exact: true }).isDisabled());
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });
 
+  await page.getByRole("button", { name: "화요일 10:30 기타 일정 추가", exact: true }).click();
+  const workDialog = page.getByRole("dialog");
+  await workDialog.getByText("주간 기타 일정 추가", { exact: true }).waitFor();
+  assert.match(await workDialog.getByRole("combobox").nth(0).textContent(), /10:30/);
+  assert.match(await workDialog.getByRole("combobox").nth(1).textContent(), /11:30/);
+  await workDialog.getByRole("button", { name: "Close", exact: true }).click();
+  await workDialog.waitFor({ state: "hidden" });
+
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "아주대 과목 찾기" }).click();
+  await page.getByRole("button", { name: "수업 추가", exact: true }).click();
   await page.getByRole("textbox", { name: "과목 검색" }).fill("F125");
   await page.getByRole("button", { name: "F125 담기", exact: true }).click();
   await page.screenshot({ path: join(tmpdir(), "ajou-picker-mobile.png"), fullPage: true });
@@ -68,7 +80,7 @@ try {
   await page.getByRole("combobox").first().click();
   await page.getByRole("option", { name: "2026년 1학기", exact: true }).click();
   await page.getByText("2026년 1학기 · 총 3학점", { exact: false }).waitFor();
-  await page.getByRole("button", { name: "아주대 과목 찾기" }).click();
+  await page.getByRole("button", { name: "수업 추가", exact: true }).click();
   await page.getByText("추가하면 2026년 2학기 시간표로 이동합니다.", { exact: false }).waitFor();
   const untimed = JSON.parse(readFileSync(new URL("../src/data/ajou-2026-2.json", import.meta.url))).courses.find((s) => !s.rawSchedule);
   await page.getByRole("textbox", { name: "과목 검색" }).fill(untimed.registrationNumber);
@@ -85,7 +97,7 @@ try {
   assert.equal(finalSaved.find((c) => c.registrationNumber === "F104").schedules.length, 3);
   assert.equal(finalSaved.find((c) => c.id === "other-term").term, "2026년 1학기");
   assert.deepEqual(errors, []);
-  console.log("PASS: search, section duplicate, conflict, apply, existing/other-term preservation, reload, mobile, untimed courses, free-day filter, term switch, multi-session courses, no page errors.");
+  console.log("PASS: course button, removed promo, grid slot preset, search, duplicate/conflict handling, apply, reload, mobile, term switch, and no page errors.");
   console.log(`Screenshots: ${join(tmpdir(), "ajou-picker-desktop.png")}, ${join(tmpdir(), "ajou-picker-mobile.png")}`);
 } finally {
   await context.close();

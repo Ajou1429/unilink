@@ -331,22 +331,10 @@ export default function TimetablePage() {
   });
   const [sessionFeedback, setSessionFeedback] = useState("");
   const [actionFeedback, setActionFeedback] = useState("");
-  const [addOpen, setAddOpen] = useState(false);
   const [ajouCourses, setAjouCourses] = useState<Course[]>([]);
   const [personalOpen, setPersonalOpen] = useState(false);
   const [eventOpen, setEventOpen] = useState(false);
   const [editingMonthlyEventId, setEditingMonthlyEventId] = useState<string | null>(null);
-  const [newCourse, setNewCourse] = useState({
-    name: "",
-    professor: "",
-    location: "",
-    days: [] as DayOfWeek[],
-    startTime: "09:00",
-    endTime: "10:30",
-    credits: 3,
-    courseType: "major" as Course["courseType"],
-    color: SCHEDULE_COLORS[0],
-  });
   const [newPersonalStudy, setNewPersonalStudy] = useState({
     title: "",
     category: "자격증",
@@ -354,9 +342,6 @@ export default function TimetablePage() {
     targetDate: "",
     color: SCHEDULE_COLORS[0],
   });
-  const [courseDayTimes, setCourseDayTimes] = useState<
-    Partial<Record<DayOfWeek, { startTime: string; endTime: string }>>
-  >({});
   const [workDayTimes, setWorkDayTimes] = useState<
     Partial<Record<DayOfWeek, { startTime: string; endTime: string }>>
   >({});
@@ -494,24 +479,6 @@ export default function TimetablePage() {
     setSelectedEvent(null);
     setEditingCourse(null);
     setCourseFilter("all");
-    setNewCourse((prev) => ({ ...prev, color: SCHEDULE_COLORS[0] }));
-  }
-
-  function toggleDay(day: DayOfWeek) {
-    setNewCourse((prev) => ({
-      ...prev,
-      days: prev.days.includes(day)
-        ? prev.days.filter((d) => d !== day)
-        : [...prev.days, day],
-    }));
-    setCourseDayTimes((prev) => {
-      if (prev[day]) {
-        const next = { ...prev };
-        delete next[day];
-        return next;
-      }
-      return { ...prev, [day]: { startTime: "09:00", endTime: "10:30" } };
-    });
   }
 
   function toggleEditingDay(day: DayOfWeek) {
@@ -525,38 +492,6 @@ export default function TimetablePage() {
           : [...prev.days, day],
       };
     });
-  }
-
-  function addCourse() {
-    if (!newCourse.name || newCourse.days.length === 0) return;
-    const schedules = newCourse.days.map((day) => ({
-      day,
-      startTime: courseDayTimes[day]?.startTime ?? newCourse.startTime,
-      endTime: courseDayTimes[day]?.endTime ?? newCourse.endTime,
-    }));
-    const course: Course = {
-      ...newCourse,
-      schedules,
-      startTime: schedules[0].startTime,
-      endTime: schedules[0].endTime,
-      id: Date.now().toString(),
-      term: selectedTerm,
-      courseType: newCourse.courseType ?? "major",
-    };
-    persistCourses([...courses, course]);
-    setAddOpen(false);
-    setNewCourse({
-      name: "",
-      professor: "",
-      location: "",
-      days: [],
-      startTime: "09:00",
-      endTime: "10:30",
-      credits: 3,
-      courseType: "major",
-      color: SCHEDULE_COLORS[courses.length % SCHEDULE_COLORS.length],
-    });
-    setActionFeedback(`${course.name} 수업이 ${selectedTerm} 시간표에 등록되었습니다.`);
   }
 
   function toggleWorkDay(day: DayOfWeek) {
@@ -574,6 +509,31 @@ export default function TimetablePage() {
       }
       return { ...prev, [day]: { startTime: "18:00", endTime: "22:00" } };
     });
+  }
+
+  function openNewWorkSchedule(preset?: {
+    day: DayOfWeek;
+    startTime: string;
+    endTime: string;
+  }) {
+    const startTime = preset?.startTime ?? "18:00";
+    const endTime = preset?.endTime ?? "22:00";
+
+    setEditingWorkScheduleId(null);
+    setNewWorkSchedule({
+      title: "기타 일정",
+      location: "",
+      days: preset ? [preset.day] : [],
+      startTime,
+      endTime,
+      color: SCHEDULE_COLORS[SCHEDULE_COLORS.length - 1],
+    });
+    setWorkDayTimes(
+      preset
+        ? { [preset.day]: { startTime: preset.startTime, endTime: preset.endTime } }
+        : {},
+    );
+    setWorkOpen(true);
   }
 
   function addWorkSchedule() {
@@ -891,7 +851,6 @@ export default function TimetablePage() {
     <div className="flex flex-col min-h-screen">
       <Header title="시간표" />
       <div className="flex-1 p-6 max-w-[1600px] mx-auto w-full">
-        <AjouCoursePicker selectedTerm={selectedTerm} existingCourses={selectedTerm === AJOU_TERM ? courses : ajouCourses} workSchedules={workSchedules} onApply={addCatalogCourses} />
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <div className="space-y-2">
             <p className="text-muted-foreground text-sm">
@@ -1038,9 +997,13 @@ export default function TimetablePage() {
                 if (!open) setEditingWorkScheduleId(null);
               }}
             >
-              <DialogTrigger render={<Button variant="outline" className="gap-2" />}>
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => openNewWorkSchedule()}
+              >
                 <Briefcase className="h-4 w-4" /> 기타 일정 추가
-              </DialogTrigger>
+              </Button>
               <DialogContent className="max-w-md">
                 <DialogHeader>
                   <DialogTitle>
@@ -1186,177 +1149,12 @@ export default function TimetablePage() {
               </DialogContent>
             </Dialog>
 
-            <Dialog open={addOpen} onOpenChange={setAddOpen}>
-              <DialogTrigger render={<Button className="gap-2" />}>
-                <Plus className="h-4 w-4" /> 수업 추가
-              </DialogTrigger>
-              <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>수업 추가</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 pt-2">
-                <div className="space-y-2">
-                  <Label>수업명</Label>
-                  <Input
-                    placeholder="예: 운영체제"
-                    value={newCourse.name}
-                    onChange={(e) =>
-                      setNewCourse((p) => ({ ...p, name: e.target.value }))
-                    }
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label>교수명</Label>
-                    <Input
-                      placeholder="예: 김철수"
-                      value={newCourse.professor}
-                      onChange={(e) =>
-                        setNewCourse((p) => ({ ...p, professor: e.target.value }))
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>학점</Label>
-                    <Select
-                      value={String(newCourse.credits)}
-                      onValueChange={(v) =>
-                        v != null &&
-                        setNewCourse((p) => ({ ...p, credits: Number(v) }))
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[1, 2, 3, 4].map((n) => (
-                          <SelectItem key={n} value={String(n)}>
-                            {n}학점
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>강의실</Label>
-                  <Input
-                    placeholder="예: 공학관 301"
-                    value={newCourse.location}
-                    onChange={(e) =>
-                      setNewCourse((p) => ({ ...p, location: e.target.value }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>구분</Label>
-                  <Select
-                    value={newCourse.courseType ?? "major"}
-                    onValueChange={(value) => {
-                      if (!value) return;
-                      setNewCourse((prev) => ({
-                        ...prev,
-                        courseType: value as Course["courseType"],
-                      }));
-                    }}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue>
-                        {COURSE_TYPE_LABELS[newCourse.courseType ?? "major"]}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(COURSE_TYPE_LABELS).map(([value, label]) => (
-                        <SelectItem key={value} value={value}>
-                          {label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>요일</Label>
-                  <div className="flex gap-2">
-                    {DAYS.map((day) => (
-                      <button
-                        key={day}
-                        type="button"
-                        onClick={() => toggleDay(day)}
-                        className={`h-9 w-9 rounded-full text-sm font-medium transition-colors ${
-                          newCourse.days.includes(day)
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted text-muted-foreground hover:bg-accent"
-                        }`}
-                      >
-                        {day}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {newCourse.days.length > 0 && (
-                  <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
-                    <Label>요일별 수업 시간</Label>
-                    {newCourse.days.map((day) => (
-                      <div key={day} className="grid grid-cols-[2rem_1fr_1fr] items-center gap-2">
-                        <span className="text-sm font-medium">{day}</span>
-                        <TimeField
-                          value={courseDayTimes[day]?.startTime ?? newCourse.startTime}
-                          onChange={(value) =>
-                            setCourseDayTimes((prev) => ({
-                              ...prev,
-                              [day]: {
-                                startTime: value,
-                                endTime: prev[day]?.endTime ?? newCourse.endTime,
-                              },
-                            }))
-                          }
-                        />
-                        <TimeField
-                          value={courseDayTimes[day]?.endTime ?? newCourse.endTime}
-                          onChange={(value) =>
-                            setCourseDayTimes((prev) => ({
-                              ...prev,
-                              [day]: {
-                                startTime: prev[day]?.startTime ?? newCourse.startTime,
-                                endTime: value,
-                              },
-                            }))
-                          }
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label>시작 시간</Label>
-                    <TimeField
-                      value={newCourse.startTime}
-                      onChange={(value) => setNewCourse((prev) => ({ ...prev, startTime: value }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>종료 시간</Label>
-                    <TimeField
-                      value={newCourse.endTime}
-                      onChange={(value) => setNewCourse((prev) => ({ ...prev, endTime: value }))}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>색상</Label>
-                  <ScheduleColorPicker
-                    value={newCourse.color}
-                    labelPrefix="수업"
-                    onChange={(color) => setNewCourse((prev) => ({ ...prev, color }))}
-                  />
-                </div>
-                <Button onClick={addCourse} className="w-full">
-                  추가하기
-                </Button>
-              </div>
-              </DialogContent>
-            </Dialog>
+            <AjouCoursePicker
+              selectedTerm={selectedTerm}
+              existingCourses={selectedTerm === AJOU_TERM ? courses : ajouCourses}
+              workSchedules={workSchedules}
+              onApply={addCatalogCourses}
+            />
           </div>
         </div>
 
@@ -1399,6 +1197,9 @@ export default function TimetablePage() {
               <TabsContent value="weekly">
                 <Card className="border-0 shadow-sm">
                   <CardContent className="p-4">
+                    <p className="mb-3 text-xs text-muted-foreground">
+                      빈 시간대를 누르면 해당 요일과 시간으로 기타 일정을 추가할 수 있습니다.
+                    </p>
                     <TimetableGrid
                       courses={filteredCourses}
                       workSchedules={workSchedules}
@@ -1407,6 +1208,9 @@ export default function TimetablePage() {
                       weekStart={weekStart}
                       onCourseClick={selectOccurrence}
                       onEventClick={openMonthlyEvent}
+                      onTimeSlotClick={({ day, startTime, endTime }) =>
+                        openNewWorkSchedule({ day, startTime, endTime })
+                      }
                     />
                   </CardContent>
                 </Card>

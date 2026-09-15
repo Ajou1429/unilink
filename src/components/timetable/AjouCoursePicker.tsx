@@ -173,10 +173,9 @@ function PickerBody({ selectedTerm, existingCourses, workSchedules, onApply, onC
 export function AjouCoursePicker(props: PickerProps) {
   const [open, setOpen] = useState(false);
   return <Dialog open={open} onOpenChange={setOpen}>
-    <div className="mb-5 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 px-5 py-4">
-      <div className="flex items-center gap-3"><div className="rounded-xl bg-white p-2.5 text-blue-700"><BookOpen className="h-5 w-5" /></div><div><p className="font-semibold text-slate-900">아주대 2학기, 과목만 고르면 시간표 완성</p><p className="mt-1 text-xs text-slate-600">2026-09-02 개설 자료 · 교수·분반 검색 · 공강 필터 · 겹치는 시간 확인</p></div></div>
-      <DialogTrigger render={<Button className="gap-2" />}><Search className="h-4 w-4" />아주대 과목 찾기</DialogTrigger>
-    </div>
+    <DialogTrigger render={<Button className="gap-2" />}>
+      <BookOpen className="h-4 w-4" /> 수업 추가
+    </DialogTrigger>
     <DialogContent className="flex h-[92dvh] max-h-[900px] flex-col overflow-hidden p-5 sm:max-w-6xl">
       {open && <PickerBody {...props} onClose={() => setOpen(false)} />}
     </DialogContent>
