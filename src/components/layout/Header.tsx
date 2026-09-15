@@ -1,7 +1,8 @@
 "use client";
 
+import { Sidebar } from "@/components/layout/Sidebar";
 import { useCurrentTime } from "@/lib/use-current-time";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -60,7 +61,8 @@ export function Header({ title }: HeaderProps) {
   }
 
   return (
-    <header className="h-16 border-b bg-white flex items-center gap-4 px-6">
+    <header className="h-16 border-b bg-white flex items-center gap-3 px-4 sm:gap-4 sm:px-6">
+      <Suspense fallback={<span className="size-9 shrink-0" />}><Sidebar /></Suspense>
       <h1 className="text-lg font-semibold">{title}</h1>
       <div className="flex-1 max-w-sm ml-4 hidden md:block">
         <div className="relative">

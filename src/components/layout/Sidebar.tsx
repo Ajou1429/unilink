@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   CalendarDays,
@@ -16,7 +16,11 @@ import {
   Target,
   Award,
   BookMarked,
+  Menu,
+  X,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetTrigger, SheetContent, SheetTitle, SheetClose } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +36,7 @@ import {
   PERSONAL_STUDIES_CHANGED_EVENT,
 } from "@/lib/personal-study-storage";
 import {
+  logout,
   AUTH_CHANGED_EVENT,
   getCurrentUser,
   type CurrentUser,
@@ -76,6 +81,9 @@ function useSidebarData() {
 }
 
 export function Sidebar() {
+  const [open, setOpen] = useState(false);
+  const router = useRouter();
+  const [logoutError, setLogoutError] = useState("");
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const activeCourseId = searchParams.get("courseId");
@@ -106,10 +114,19 @@ export function Sidebar() {
       : "로그인 후 학과가 표시됩니다";
 
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-60 bg-white border-r hidden lg:flex flex-col z-40">
-      <div className="h-16 flex items-center px-5 border-b">
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger render={<Button variant="ghost" size="icon" className="shrink-0" aria-label="메뉴 열기" />}>
+        <Menu className="h-5 w-5" />
+      </SheetTrigger>
+      <SheetContent side="left" showCloseButton={false} className="gap-0 data-[side=left]:w-72 max-w-[calc(100vw-2rem)] data-[side=left]:data-starting-style:-translate-x-full data-[side=left]:data-ending-style:-translate-x-full motion-reduce:transition-none">
+      <SheetTitle className="sr-only">전체 메뉴</SheetTitle>
+      <aside className="flex h-full min-h-0 flex-col bg-white">
+      <div className="h-16 shrink-0 flex items-center px-5 border-b">
         <GraduationCap className="h-6 w-6 text-primary mr-2" />
         <span className="text-lg font-bold text-primary">UniLink</span>
+        <SheetClose render={<Button variant="ghost" size="icon" className="ml-auto" aria-label="메뉴 닫기" />}>
+          <X className="h-5 w-5" />
+        </SheetClose>
       </div>
 
       <div className="px-4 py-4 border-b">
@@ -131,7 +148,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+      <nav aria-label="주 메뉴" className="min-h-0 flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {navItems.map(({ href, icon: Icon, label }) => {
           const active =
             pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
@@ -139,6 +156,7 @@ export function Sidebar() {
             <Link
               key={href}
               href={href}
+              onClick={() => setOpen(false)}
               className={cn(
                 "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
                 active
@@ -164,6 +182,7 @@ export function Sidebar() {
                 <Link
                   key={course.id}
                   href={href}
+              onClick={() => setOpen(false)}
                   className={cn(
                     "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors",
                     active
@@ -199,6 +218,7 @@ export function Sidebar() {
                 <Link
                   key={study.id}
                   href={href}
+              onClick={() => setOpen(false)}
                   className={cn(
                     "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors",
                     active
@@ -227,47 +247,27 @@ export function Sidebar() {
       <div className="px-3 py-3 border-t space-y-1">
         <Link
           href="/settings"
+          onClick={() => setOpen(false)}
           className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
         >
           <Settings className="h-4 w-4" />
           설정
         </Link>
-        <Link
-          href="/login"
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+        <button
+          type="button"
+          onClick={async () => {
+            try { await logout(); router.push("/login"); }
+            catch (error) { setLogoutError(error instanceof Error ? error.message : "로그아웃에 실패했습니다."); }
+          }}
+          className="flex w-full items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
         >
           <LogOut className="h-4 w-4" />
           로그아웃
-        </Link>
+        </button>
+        {logoutError && <p role="alert" className="px-3 text-xs text-destructive">{logoutError}</p>}
       </div>
     </aside>
-  );
-}
-
-export function MobileSidebar() {
-  const pathname = usePathname();
-
-  return (
-    <nav className="fixed bottom-0 inset-x-0 z-40 bg-white border-t lg:hidden">
-      <div className="flex">
-        {navItems.map(({ href, icon: Icon, label }) => {
-          const active =
-            pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "flex-1 flex flex-col items-center gap-1 py-3 text-xs font-medium transition-colors",
-                active ? "text-primary" : "text-muted-foreground",
-              )}
-            >
-              <Icon className={cn("h-5 w-5", active && "text-primary")} />
-              {label}
-            </Link>
-          );
-        })}
-      </div>
-    </nav>
+      </SheetContent>
+    </Sheet>
   );
 }
