@@ -1,3 +1,5 @@
+import { parseFolderIds } from "../_shared/driveInputs.ts";
+import { readSmallJson, RequestError } from "../_shared/requestLimits.ts";
 // POST /drive-sync
 // body: { folderId?: string, folderIds?: string[], folderNames?: string[] }
 // 인증된 사용자 본인의 Drive 연결을 사용해 지정 폴더의 PDF를 수동으로 pull한다.
@@ -12,26 +14,18 @@ import {
   refreshAccessToken,
 } from "../_shared/google.ts";
 
-function extractFolderId(input: string): string {
-  const match = input.match(/[-\w]{25,}/);
-  return match ? match[0] : input.trim();
-}
-
-function uniqueFolderIds(values: unknown): string[] {
-  if (!Array.isArray(values)) return [];
-  return [...new Set(values.filter((value): value is string => typeof value === "string").map(extractFolderId).filter(Boolean))];
-}
-
 Deno.serve(async (req) => {
   const optionsResponse = handleOptions(req);
   if (optionsResponse) return optionsResponse;
 
+  if (req.method !== "POST") return jsonResponse({ error: "method not allowed" }, { status: 405 });
+  try {
   const user = await getUserFromAuthHeader(req);
   if (!user) return jsonResponse({ error: "인증이 필요합니다." }, { status: 401 });
 
   const admin = getAdminClient();
-  const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
-  const requestedFolderIds = uniqueFolderIds(
+  const body = await readSmallJson(req);
+  const requestedFolderIds = parseFolderIds(
     Array.isArray(body?.folderIds) ? body.folderIds : body?.folderId ? [body.folderId] : [],
   );
   const requestedFolderNames = Array.isArray(body?.folderNames)
@@ -51,7 +45,7 @@ Deno.serve(async (req) => {
     );
   }
 
-  let folderIds = uniqueFolderIds(
+  let folderIds = parseFolderIds(
     Array.isArray(connection.folder_ids) && connection.folder_ids.length > 0
       ? connection.folder_ids
       : connection.folder_id
@@ -166,4 +160,9 @@ Deno.serve(async (req) => {
     { syncedAt: now, filesFound: files.length, upserted },
     { headers: corsHeaders },
   );
+  } catch (error) {
+    const status = error instanceof RequestError ? error.status : 502;
+    console.error("drive-sync failed", { status });
+    return jsonResponse({ error: error instanceof RequestError ? error.message : "Drive 요청을 처리하지 못했습니다." }, { status });
+  }
 });

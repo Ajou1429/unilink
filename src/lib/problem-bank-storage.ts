@@ -1,3 +1,4 @@
+import { privateStorage } from "./private-storage.ts";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { describeFunctionError } from "@/lib/supabase/function-error";
 
@@ -41,9 +42,9 @@ function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
 
   try {
-    const raw = window.localStorage.getItem(key);
+    const raw = privateStorage.getItem(key);
     if (!raw) {
-      window.localStorage.setItem(key, JSON.stringify(fallback));
+      privateStorage.setItem(key, JSON.stringify(fallback));
       return fallback;
     }
     return JSON.parse(raw) as T;
@@ -54,7 +55,7 @@ function readJson<T>(key: string, fallback: T): T {
 
 function writeJson<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(key, JSON.stringify(value));
+  privateStorage.setItem(key, JSON.stringify(value));
 }
 
 function getLocalSubjects(): LocalSubject[] {

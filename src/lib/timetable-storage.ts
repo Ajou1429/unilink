@@ -1,3 +1,4 @@
+import { privateStorage } from "./private-storage.ts";
 import { Course, CourseSchedule } from "./types";
 
 export const MONTHLY_EVENTS_STORAGE_KEY = "unilink:monthly-events";
@@ -65,7 +66,7 @@ function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
 
   try {
-    const raw = window.localStorage.getItem(key);
+    const raw = privateStorage.getItem(key);
     return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
     return fallback;
@@ -74,7 +75,7 @@ function readJson<T>(key: string, fallback: T): T {
 
 function writeJson<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(key, JSON.stringify(value));
+  privateStorage.setItem(key, JSON.stringify(value));
 }
 
 export function getMonthlyEvents(): MonthlyEvent[] {

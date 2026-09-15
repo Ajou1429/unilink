@@ -1,3 +1,4 @@
+import { getStorageUser } from "./private-storage.ts";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { describeFunctionError } from "@/lib/supabase/function-error";
 
@@ -31,53 +32,6 @@ interface DriveProfileResult {
   accountPhotoUrl: string | null;
 }
 
-const DRIVE_CONNECTION_CACHE_KEY = "unilink:drive-connection-cache";
-
-interface CachedDriveConnection {
-  userId: string | null;
-  status: DriveConnectionStatus;
-  updatedAt: string;
-}
-
-function readCachedDriveStatus(userId: string | null): DriveConnectionStatus | null {
-  if (typeof window === "undefined") return null;
-
-  try {
-    const raw = window.localStorage.getItem(DRIVE_CONNECTION_CACHE_KEY);
-    if (!raw) return null;
-
-    const cached = JSON.parse(raw) as CachedDriveConnection;
-    if (cached.userId && userId && cached.userId !== userId) return null;
-    if (!cached.status?.connected) return null;
-    return {
-      ...cached.status,
-      folderIds: cached.status.folderIds ?? (cached.status.folderId ? [cached.status.folderId] : []),
-      folderNames: cached.status.folderNames ?? [],
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedDriveStatus(
-  status: DriveConnectionStatus,
-  userId: string | null,
-) {
-  if (typeof window === "undefined" || !status.connected) return;
-
-  const cached: CachedDriveConnection = {
-    userId,
-    status,
-    updatedAt: new Date().toISOString(),
-  };
-  window.localStorage.setItem(DRIVE_CONNECTION_CACHE_KEY, JSON.stringify(cached));
-}
-
-function clearCachedDriveStatus() {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(DRIVE_CONNECTION_CACHE_KEY);
-}
-
 function makeConnectedStatus(
   partial: Partial<DriveConnectionStatus> = {},
 ): DriveConnectionStatus {
@@ -101,7 +55,6 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id ?? null;
   if (!userId) {
-    clearCachedDriveStatus();
     return disconnectedStatus;
   }
 
@@ -111,7 +64,8 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error || !data) return readCachedDriveStatus(userId) ?? disconnectedStatus;
+  if (error) throw new Error("Drive 연결 상태를 확인하지 못했습니다.");
+  if (!data) return disconnectedStatus;
 
   const channelActive =
     Boolean(data.channel_id) &&
@@ -161,52 +115,59 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
     channelActive,
     channelExpiration: data.channel_expiration ?? null,
   });
-  writeCachedDriveStatus(status, userId);
   return status;
 }
 
-export async function rememberDriveConnectionSucceeded(): Promise<DriveConnectionStatus> {
-  if (!isSupabaseConfigured) return disconnectedStatus;
+const DRIVE_PROOF_KEY = "unilink:drive-oauth-proof";
+let completion: Promise<boolean> | null = null;
+let completionOwner: string | null = null;
 
-  const supabase = getSupabaseClient();
-  const { data: userData } = supabase
-    ? await supabase.auth.getUser()
-    : { data: { user: null } };
-  const userId = userData.user?.id ?? null;
-  const previousStatus = readCachedDriveStatus(userId);
-  const cachedStatus = makeConnectedStatus({
-    folderId: previousStatus?.folderId ?? null,
-    folderIds: previousStatus?.folderIds ?? [],
-    folderNames: previousStatus?.folderNames ?? [],
-    channelActive: previousStatus?.channelActive ?? false,
-    channelExpiration: previousStatus?.channelExpiration ?? null,
-  });
-  writeCachedDriveStatus(cachedStatus, userId);
-
-  for (const delay of [0, 500, 1500]) {
-    if (delay > 0) {
-      await new Promise((resolve) => window.setTimeout(resolve, delay));
-    }
-
-    const status = await getDriveConnectionStatus();
-    if (status.connected) return status;
-  }
-
-  return cachedStatus;
-}
-
-/** Google 동의 화면 URL을 받아와 그 자리에서 이동시킨다. */
+/** The verifier never leaves the initiating tab until authenticated completion. */
 export async function startDriveConnection(): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error("Supabase가 설정되지 않았습니다.");
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) throw new Error("로그인이 필요합니다.");
+  const verifier = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, "0")).join("");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  const { data, error } = await supabase.functions.invoke<{ url: string; state: string }>("google-auth/start", {
+    body: { codeChallenge: challenge },
+  });
+  if (error || !data?.url || !data.state) throw new Error("Google 연결을 시작하지 못했습니다.");
+  const target = new URL(data.url);
+  if (target.origin !== "https://accounts.google.com") throw new Error("유효하지 않은 Google 인증 주소입니다.");
+  window.sessionStorage.setItem(DRIVE_PROOF_KEY, JSON.stringify({ verifier, state: data.state, userId: user.id, createdAt: Date.now() }));
+  completion = null;
+  window.location.assign(target.toString());
+}
 
-  const { data, error } = await supabase.functions.invoke<{ url: string }>(
-    "google-auth/start",
-  );
-  if (error || !data?.url) {
-    throw new Error(await describeFunctionError(error, "Google 인증 URL을 가져오지 못했습니다."));
-  }
-  window.location.href = data.url;
+export function completeDriveConnection(): Promise<boolean> {
+  // React StrictMode may mount an effect twice. Redeem a code only once.
+  if (completion && completionOwner === getStorageUser()) return completion;
+  completionOwner = getStorageUser();
+  completion = null;
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  if (!params.has("drive_code") && !params.has("drive_error")) return Promise.resolve(false);
+  const raw = window.sessionStorage.getItem(DRIVE_PROOF_KEY);
+  window.sessionStorage.removeItem(DRIVE_PROOF_KEY);
+  window.history.replaceState({}, "", window.location.pathname + window.location.search);
+  completion = (async () => {
+    if (params.has("drive_error") || !raw) throw new Error("연결을 시작한 브라우저에서 다시 시도해주세요.");
+    const proof = JSON.parse(raw);
+    const supabase = getSupabaseClient();
+    const { data: { user } } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
+    if (!supabase || !user || proof.userId !== user.id || proof.state !== params.get("drive_state") ||
+        !Number.isFinite(proof.createdAt) || Date.now() - proof.createdAt > 600_000) {
+      throw new Error("연결 요청이 만료되었거나 로그인 계정이 변경되었습니다.");
+    }
+    const { error } = await supabase.functions.invoke("google-auth/complete", {
+      body: { code: params.get("drive_code"), state: proof.state, verifier: proof.verifier },
+    });
+    if (error) throw new Error("Google 연결을 확인하지 못했습니다. 연결을 다시 시작해주세요.");
+    return true;
+  })();
+  return completion;
 }
 
 export async function disconnectDrive(): Promise<void> {
@@ -214,7 +175,6 @@ export async function disconnectDrive(): Promise<void> {
   if (!supabase) return;
   const { error } = await supabase.functions.invoke("drive-disconnect");
   if (error) throw new Error(await describeFunctionError(error, "연결 해제에 실패했습니다."));
-  clearCachedDriveStatus();
 }
 
 export interface DriveSyncResult {
@@ -276,6 +236,9 @@ export async function fetchDrivePdf(fileId: string): Promise<Blob> {
   });
   if (error || !(data instanceof Blob)) {
     throw new Error(await describeFunctionError(error, "Google Drive PDF를 불러오지 못했습니다."));
+  }
+  if (data.type !== "application/pdf" || data.size > 20 * 1024 * 1024 || await data.slice(0, 5).text() !== "%PDF-") {
+    throw new Error("미리보기는 20MB 이하의 유효한 PDF만 지원합니다.");
   }
   return data;
 }

@@ -19,8 +19,8 @@ try {
   await page.getByRole("heading", { name: "같은 과목, 같은 분반과 함께" }).waitFor();
   await page.getByRole("button", { name: "내 수업 0", exact: true }).waitFor();
   await page.evaluate((items) => {
-    localStorage.setItem("unilink:courses", JSON.stringify(items));
-    localStorage.setItem("unilink:posts", JSON.stringify([{ id: "old-general", title: "이전 일반 글", content: "보존", category: "자유", authorId: "old", authorName: "익명", isAnonymous: true, likes: 0, commentCount: 0, createdAt: "2026-09-01T00:00:00Z" }]));
+    sessionStorage.setItem("unilink:private:guest:unilink:courses", JSON.stringify(items));
+    sessionStorage.setItem("unilink:private:guest:unilink:posts", JSON.stringify([{ id: "old-general", title: "이전 일반 글", content: "보존", category: "자유", authorId: "old", authorName: "익명", isAnonymous: true, likes: 0, commentCount: 0, createdAt: "2026-09-01T00:00:00Z" }]));
     window.dispatchEvent(new Event("storage"));
   }, courses);
   await page.getByRole("button", { name: "내 수업 2", exact: true }).waitFor();
@@ -65,7 +65,9 @@ try {
 
   const peer = await context.newPage();
   await peer.goto(base + "/community");
-  await peer.evaluate((id) => localStorage.setItem("unilink:courses", JSON.stringify(JSON.parse(localStorage.getItem("unilink:courses")).filter((c) => c.id !== id))), courses[0].id);
+  await peer.getByRole("button", { name: "내 수업 0", exact: true }).waitFor();
+  await page.evaluate((id) => sessionStorage.setItem("unilink:private:guest:unilink:courses", JSON.stringify(JSON.parse(sessionStorage.getItem("unilink:private:guest:unilink:courses")).filter((c) => c.id !== id))), courses[0].id);
+  await page.evaluate(() => window.dispatchEvent(new Event("storage")));
   await page.getByRole("button", { name: "내 수업 1", exact: true }).waitFor();
   await page.getByRole("button", { name: "개설 과목 탐색", exact: true }).click();
   await page.getByRole("textbox", { name: "수업 게시판 검색" }).fill("X024");
@@ -81,9 +83,9 @@ try {
   assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 391);
   await dialog.getByRole("button", { name: "게시하기", exact: true }).click();
   await page.getByRole("heading", { name: "모바일 확인", exact: true }).waitFor();
-  assert.ok(await page.evaluate(() => JSON.parse(localStorage.getItem("unilink:community-v2")).posts.some((p) => p.id === "old-general")));
+  assert.ok(await page.evaluate(() => JSON.parse(sessionStorage.getItem("unilink:private:guest:unilink:community-v2")).posts.some((p) => p.id === "old-general")));
   assert.deepEqual(errors, []);
-  console.log("PASS: timetable auto-link, course/section isolation, common posts, publishing, comments, likes/reload, deep links, cross-tab changes, removal preservation, mobile, legacy preservation.");
+  console.log("PASS: timetable auto-link, course/section isolation, common posts, publishing, comments, likes/reload, deep links, guest tab isolation, removal preservation, mobile, legacy preservation.");
 } catch (error) {
   await page.screenshot({ path: join(tmpdir(), "community-error.png"), fullPage: true });
   throw error;

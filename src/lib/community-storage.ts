@@ -1,3 +1,4 @@
+import { privateStorage } from "./private-storage.ts";
 import type { Comment, Post } from "./types";
 
 export const COMMUNITY_POSTS_CHANGED_EVENT = "unilink:communityPostsChanged";
@@ -10,15 +11,15 @@ export interface CommunityState {
 
 function readState(): CommunityState {
   if (typeof window === "undefined") return { posts: [], comments: [], likes: {} };
-  const raw = window.localStorage.getItem(COMMUNITY_STORAGE_KEY);
+  const raw = privateStorage.getItem(COMMUNITY_STORAGE_KEY);
   if (raw) {
     const state = JSON.parse(raw) as CommunityState;
     if (!Array.isArray(state.posts) || !Array.isArray(state.comments) || !state.likes || typeof state.likes !== "object") throw new Error("커뮤니티 저장 데이터를 읽을 수 없습니다. 브라우저 데이터를 지우지 말고 백업을 확인해주세요.");
     return state;
   }
   // Preserve legacy keys as a backup. Never seed new boards with sample posts.
-  const posts = JSON.parse(window.localStorage.getItem("unilink:posts") || "[]") as Post[];
-  const comments = JSON.parse(window.localStorage.getItem("unilink:comments") || "[]") as Comment[];
+  const posts = JSON.parse(privateStorage.getItem("unilink:posts") || "[]") as Post[];
+  const comments = JSON.parse(privateStorage.getItem("unilink:comments") || "[]") as Comment[];
   if (!Array.isArray(posts) || !Array.isArray(comments)) throw new Error("기존 커뮤니티 데이터를 확인해주세요.");
   return { posts, comments, likes: {} };
 }
@@ -26,7 +27,7 @@ function readState(): CommunityState {
 function writeState(state: CommunityState) {
   if (typeof window === "undefined") return;
   // One storage write commits posts, comments and reactions together.
-  window.localStorage.setItem(COMMUNITY_STORAGE_KEY, JSON.stringify(state));
+  privateStorage.setItem(COMMUNITY_STORAGE_KEY, JSON.stringify(state));
   window.dispatchEvent(new Event(COMMUNITY_POSTS_CHANGED_EVENT));
 }
 

@@ -1,3 +1,4 @@
+import { privateStorage } from "./private-storage.ts";
 export const GRADE_RECORDS_STORAGE_KEY = "unilink:grade-records";
 export const SPEC_RECORDS_STORAGE_KEY = "unilink:spec-records";
 export const RECORDS_CHANGED_EVENT = "unilink:recordsChanged";
@@ -34,7 +35,7 @@ function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
 
   try {
-    const raw = window.localStorage.getItem(key);
+    const raw = privateStorage.getItem(key);
     return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
     return fallback;
@@ -43,7 +44,7 @@ function readJson<T>(key: string, fallback: T): T {
 
 function writeJson<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(key, JSON.stringify(value));
+  privateStorage.setItem(key, JSON.stringify(value));
 }
 
 function normalizeCourseType(value: unknown): GradeRecord["courseType"] {

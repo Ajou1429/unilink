@@ -1,0 +1,24 @@
+name: Security regression checks
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+permissions:
+  contents: read
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.6"
+      - run: npm ci
+      - run: npm run lint -- --max-warnings 0
+      - run: npm test
+      - run: npm run check:edge
+      - run: npm run test:edge

@@ -1,3 +1,4 @@
+import { privateStorage } from "./private-storage.ts";
 export const PERSONAL_STUDIES_STORAGE_KEY = "unilink:personal-studies";
 export const PERSONAL_STUDY_NOTES_STORAGE_KEY = "unilink:personal-study-notes";
 export const PERSONAL_STUDY_PLANS_STORAGE_KEY = "unilink:personal-study-plans";
@@ -49,7 +50,7 @@ function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
 
   try {
-    const raw = window.localStorage.getItem(key);
+    const raw = privateStorage.getItem(key);
     return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
     return fallback;
@@ -58,7 +59,7 @@ function readJson<T>(key: string, fallback: T): T {
 
 function writeJson<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(key, JSON.stringify(value));
+  privateStorage.setItem(key, JSON.stringify(value));
 }
 
 export function getPersonalStudies(): PersonalStudy[] {

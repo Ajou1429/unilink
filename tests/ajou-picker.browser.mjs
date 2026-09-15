@@ -18,7 +18,7 @@ try {
   await page.getByRole("button", { name: "아주대 과목 찾기" }).waitFor();
   await page.evaluate(() => {
     const common = { name: "기존 과목", professor: "테스트", location: "101", credits: 3, color: "#334155", days: ["월"], startTime: "07:00", endTime: "08:00", courseType: "major" };
-    localStorage.setItem("unilink:courses", JSON.stringify([
+    sessionStorage.setItem("unilink:private:guest:unilink:courses", JSON.stringify([
       { ...common, id: "existing", term: "2026년 2학기" },
       { ...common, id: "other-term", term: "2026년 1학기" },
     ]));
@@ -41,7 +41,7 @@ try {
   await page.screenshot({ path: join(tmpdir(), "ajou-picker-desktop.png"), fullPage: true });
   await dialog.getByRole("button", { name: "2개 과목 시간표에 추가", exact: true }).click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });
-  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("unilink:courses")));
+  const saved = await page.evaluate(() => JSON.parse(sessionStorage.getItem("unilink:private:guest:unilink:courses")));
   assert.equal(saved.length, 4);
   assert.ok(saved.some((c) => c.id === "other-term"));
   assert.ok(saved.some((c) => c.id === "existing"));
@@ -62,7 +62,7 @@ try {
   const bounds = await page.getByRole("dialog").boundingBox();
   assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 391, "mobile dialog must fit viewport");
   await page.getByRole("button", { name: "1개 과목 시간표에 추가", exact: true }).click();
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("unilink:courses")).length), 5);
+  assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem("unilink:private:guest:unilink:courses")).length), 5);
   await page.getByRole("dialog").waitFor({ state: "hidden" });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("combobox").first().click();
@@ -80,7 +80,7 @@ try {
   await page.getByRole("button", { name: "F104 담기", exact: true }).click();
   await page.getByRole("button", { name: "1개 과목 시간표에 추가", exact: true }).click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });
-  const finalSaved = await page.evaluate(() => JSON.parse(localStorage.getItem("unilink:courses")));
+  const finalSaved = await page.evaluate(() => JSON.parse(sessionStorage.getItem("unilink:private:guest:unilink:courses")));
   assert.equal(finalSaved.find((c) => c.registrationNumber === "F104").term, "2026년 2학기");
   assert.equal(finalSaved.find((c) => c.registrationNumber === "F104").schedules.length, 3);
   assert.equal(finalSaved.find((c) => c.id === "other-term").term, "2026년 1학기");

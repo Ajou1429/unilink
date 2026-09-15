@@ -1,5 +1,8 @@
 project_id = "unilink"
 
+[auth]
+minimum_password_length = 12
+
 [functions.google-auth]
 verify_jwt = false
 

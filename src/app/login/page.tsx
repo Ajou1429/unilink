@@ -1,5 +1,7 @@
 "use client";
 
+import { isSupabaseConfigured } from "@/lib/supabase-client";
+
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -77,6 +79,7 @@ export default function LoginPage() {
             </Link>
           </p>
 
+          {!isSupabaseConfigured() && <p role="status" className="mb-4 text-sm text-destructive">계정 서비스가 설정되지 않았습니다. 데모에서는 가입·로그인을 사용할 수 없으며 실제 비밀번호를 입력하지 마세요.</p>}
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-2">
               <Label htmlFor="username">아이디</Label>
@@ -109,7 +112,7 @@ export default function LoginPage() {
                 {message}
               </p>
             )}
-            <Button className="mt-2 h-11 w-full" type="submit" disabled={isSubmitting}>
+            <Button className="mt-2 h-11 w-full" type="submit" disabled={isSubmitting || !isSupabaseConfigured()}>
               {isSubmitting ? "로그인 중..." : "로그인"}
             </Button>
           </form>

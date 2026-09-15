@@ -1,3 +1,4 @@
+import { validateDriveId } from "./driveInputs.ts";
 // Deno 런타임에서 googleapis 없이 fetch로 직접 Google OAuth / Drive REST API를 호출한다.
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -20,7 +21,7 @@ export function getGoogleEnv(): GoogleEnv {
   };
 }
 
-export function buildConsentUrl(state: string): string {
+export function buildConsentUrl(state: string, challenge: string): string {
   const { clientId, redirectUri } = getGoogleEnv();
   const params = new URLSearchParams({
     client_id: clientId,
@@ -31,11 +32,13 @@ export function buildConsentUrl(state: string): string {
     include_granted_scopes: "true",
     scope: "https://www.googleapis.com/auth/drive.readonly",
     state,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }
 
-export async function exchangeCodeForTokens(code: string) {
+export async function exchangeCodeForTokens(code: string, verifier: string) {
   const { clientId, clientSecret, redirectUri } = getGoogleEnv();
   const res = await fetch(TOKEN_URL, {
     method: "POST",
@@ -46,6 +49,7 @@ export async function exchangeCodeForTokens(code: string) {
       client_secret: clientSecret,
       redirect_uri: redirectUri,
       grant_type: "authorization_code",
+      code_verifier: verifier,
     }),
   });
   if (!res.ok) {
@@ -173,7 +177,7 @@ export async function getDriveFolder(
   const params = new URLSearchParams({
     fields: "id,name,mimeType,modifiedTime,parents",
   });
-  const res = await driveFetch(accessToken, `/files/${folderId}?${params.toString()}`);
+  const res = await driveFetch(accessToken, `/files/${validateDriveId(folderId)}?${params.toString()}`);
   return (await res.json()) as DriveFolder;
 }
 
@@ -184,7 +188,7 @@ export async function listDriveFolders(
   const qParts = [
     "mimeType = 'application/vnd.google-apps.folder'",
     "trashed = false",
-    `'${parentId || "root"}' in parents`,
+    `'${validateDriveId(parentId || "root")}' in parents`,
   ];
   const folders: DriveFolder[] = [];
   let pageToken: string | undefined;
@@ -244,7 +248,7 @@ export async function listPdfFilesInFolder(
   modifiedAfter?: string,
 ): Promise<DriveChangeFile[]> {
   const qParts = [
-    `'${folderId}' in parents`,
+    `'${validateDriveId(folderId)}' in parents`,
     "mimeType = 'application/pdf'",
     "trashed = false",
   ];

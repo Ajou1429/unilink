@@ -1,3 +1,5 @@
+import { validateDriveId } from "../_shared/driveInputs.ts";
+import { readSmallJson, RequestError } from "../_shared/requestLimits.ts";
 // POST /drive-folders
 // Lists Google Drive folders for the authenticated user's connected account.
 
@@ -10,11 +12,13 @@ Deno.serve(async (req) => {
   const optionsResponse = handleOptions(req);
   if (optionsResponse) return optionsResponse;
 
+  if (req.method !== "POST") return jsonResponse({ error: "method not allowed" }, { status: 405 });
+  try {
   const user = await getUserFromAuthHeader(req);
   if (!user) return jsonResponse({ error: "인증이 필요합니다." }, { status: 401 });
 
-  const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
-  const parentId = typeof body?.parentId === "string" ? body.parentId : null;
+  const body = await readSmallJson(req);
+  const parentId = body.parentId == null ? null : validateDriveId(body.parentId);
   const admin = getAdminClient();
 
   const { data: connection, error } = await admin
@@ -39,4 +43,9 @@ Deno.serve(async (req) => {
   const folders = await listDriveFolders(access_token, parentId);
 
   return jsonResponse({ folders }, { headers: corsHeaders });
+  } catch (error) {
+    const status = error instanceof RequestError ? error.status : 502;
+    console.error("drive-folders failed", { status });
+    return jsonResponse({ error: error instanceof RequestError ? error.message : "Drive 요청을 처리하지 못했습니다." }, { status });
+  }
 });

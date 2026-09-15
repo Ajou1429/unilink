@@ -1,0 +1,8 @@
+{
+  "nodeModulesDir": "auto",
+  "lock": true,
+  "tasks": {
+    "check": "deno check functions/*/index.ts",
+    "test": "deno test --allow-env tests/*.test.ts"
+  }
+}

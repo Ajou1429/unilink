@@ -1,12 +1,14 @@
 // refresh_token을 DB에 평문으로 저장하지 않기 위한 AES-256-GCM 암복호화.
 // 키는 DRIVE_TOKEN_ENC_KEY (base64, 32바이트) 시크릿에서 가져온다.
 
-function getKeyBytes(): Uint8Array {
+function getKeyBytes(): Uint8Array<ArrayBuffer> {
   const base64Key = Deno.env.get("DRIVE_TOKEN_ENC_KEY");
   if (!base64Key) {
     throw new Error("DRIVE_TOKEN_ENC_KEY secret이 설정되지 않았습니다.");
   }
-  return Uint8Array.from(atob(base64Key), (c) => c.charCodeAt(0));
+  const bytes = Uint8Array.from(atob(base64Key), (c) => c.charCodeAt(0));
+  if (bytes.length !== 32) throw new Error("DRIVE_TOKEN_ENC_KEY must contain 32 bytes");
+  return bytes;
 }
 
 async function getCryptoKey(): Promise<CryptoKey> {
@@ -20,7 +22,7 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes));
 }
 
-function fromBase64(value: string): Uint8Array {
+function fromBase64(value: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
 }
 

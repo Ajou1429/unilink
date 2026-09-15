@@ -1,21 +1,10 @@
+import { setStorageUser } from "./private-storage";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "./supabase-client";
 
 export const USERS_STORAGE_KEY = "unilink:users";
 export const CURRENT_USER_STORAGE_KEY = "unilink:current-user";
 export const AUTH_CHANGED_EVENT = "unilink:authChanged";
-
-export interface StoredUser {
-  id: string;
-  username: string;
-  displayName: string;
-  passwordHash: string;
-  salt: string;
-  university: string;
-  department: string;
-  birthday: string;
-  createdAt: string;
-}
 
 export interface CurrentUser {
   id: string;
@@ -33,22 +22,6 @@ export interface SignupInput {
   university: string;
   department: string;
   birthday: string;
-}
-
-function readUsers(): StoredUser[] {
-  if (typeof window === "undefined") return [];
-
-  try {
-    const raw = window.localStorage.getItem(USERS_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as StoredUser[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeUsers(users: StoredUser[]) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
 }
 
 function normalizeUsername(username: string) {
@@ -73,8 +46,8 @@ function validateInput(input: SignupInput) {
     return "대학교, 학과, 생일을 모두 입력해주세요.";
   }
 
-  if (input.password.length < 6) {
-    return "비밀번호는 6자 이상으로 입력해주세요.";
+  if (input.password.length < 12) {
+    return "비밀번호는 12자 이상으로 입력해주세요.";
   }
 
   if (input.password !== input.passwordConfirm) {
@@ -84,40 +57,19 @@ function validateInput(input: SignupInput) {
   return null;
 }
 
-function toHex(buffer: ArrayBuffer) {
-  return Array.from(new Uint8Array(buffer))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+let currentUser: CurrentUser | null = null;
+function setCurrentUser(user: CurrentUser | null) {
+  currentUser = user;
+  setStorageUser(user?.id ?? null);
+  if (typeof window !== "undefined") {
+    try { window.localStorage.removeItem(CURRENT_USER_STORAGE_KEY); } catch { /* Storage may be disabled. */ }
+    window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+  }
 }
 
-function createSalt() {
-  const bytes = new Uint8Array(16);
-  window.crypto.getRandomValues(bytes);
-  return Array.from(bytes)
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-async function hashPassword(password: string, salt: string) {
-  const data = new TextEncoder().encode(`${salt}:${password}`);
-  const digest = await window.crypto.subtle.digest("SHA-256", data);
-  return toHex(digest);
-}
-
-function setCurrentUser(user: CurrentUser) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(user));
-  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
-}
-
-function setCurrentStoredUser(user: StoredUser) {
-  setCurrentUser({
-    id: user.id,
-    username: user.username,
-    displayName: user.displayName || user.username,
-    university: user.university,
-    department: user.department,
-  });
+export function applyAuthenticatedUser(user: User | null) {
+  if (user) setCurrentSupabaseUser(user);
+  else setCurrentUser(null);
 }
 
 function setCurrentSupabaseUser(user: User) {
@@ -170,27 +122,16 @@ async function saveSupabaseProfile(input: SignupInput, userId: string) {
   );
 }
 
-export function getCurrentUser(): CurrentUser | null {
-  if (typeof window === "undefined") return null;
+export function getCurrentUser(): CurrentUser | null { return currentUser; }
 
-  try {
-    const raw = window.localStorage.getItem(CURRENT_USER_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as CurrentUser) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function logout() {
-  if (typeof window === "undefined") return;
-
+export async function logout() {
   const supabase = getSupabaseBrowserClient();
   if (supabase) {
-    void supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut({ scope: "local" });
+    if (error) throw new Error("서버 로그아웃에 실패했습니다. 다시 시도해주세요.");
   }
-
-  window.localStorage.removeItem(CURRENT_USER_STORAGE_KEY);
-  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+  setCurrentUser(null);
+  if (typeof window !== "undefined") window.sessionStorage.removeItem("unilink:drive-oauth-proof");
 }
 
 export async function updateDisplayName(displayNameInput: string) {
@@ -239,15 +180,7 @@ export async function updateDisplayName(displayNameInput: string) {
     return { ok: true, message: "사용자 이름이 변경되었습니다." };
   }
 
-  const users = readUsers().map((user) =>
-    user.id === currentUser.id || user.username === currentUser.username
-      ? { ...user, displayName }
-      : user,
-  );
-
-  writeUsers(users);
-  setCurrentUser({ ...currentUser, displayName });
-  return { ok: true, message: "사용자 이름이 변경되었습니다." };
+  return { ok: false, message: "계정 서비스가 설정되지 않았습니다." };
 }
 
 export async function signupWithPassword(input: SignupInput) {
@@ -286,35 +219,15 @@ export async function signupWithPassword(input: SignupInput) {
       return { ok: false, message: error.message };
     }
 
-    if (data.user) {
+    if (data.user && data.session) {
       setCurrentSupabaseUser(data.user);
       await saveSupabaseProfile(input, data.user.id);
+      return { ok: true, message: "회원가입이 완료되었습니다." };
     }
-
-    return { ok: true, message: "회원가입이 완료되었습니다." };
+    return { ok: false, message: "가입 요청이 접수되었습니다. 인증을 완료한 뒤 로그인해주세요." };
   }
 
-  const users = readUsers();
-  if (users.some((user) => user.username === username)) {
-    return { ok: false, message: "이미 사용 중인 아이디입니다." };
-  }
-
-  const salt = createSalt();
-  const user: StoredUser = {
-    id: `user-${Date.now()}`,
-    username,
-    displayName,
-    passwordHash: await hashPassword(input.password, salt),
-    salt,
-    university,
-    department,
-    birthday: input.birthday,
-    createdAt: new Date().toISOString(),
-  };
-
-  writeUsers([user, ...users]);
-  setCurrentStoredUser(user);
-  return { ok: true, message: "회원가입이 완료되었습니다." };
+  return { ok: false, message: "계정 서비스가 설정되지 않아 회원가입할 수 없습니다. 데모에는 개인정보를 입력하지 마세요." };
 }
 
 export async function loginWithPassword(usernameInput: string, password: string) {
@@ -343,16 +256,5 @@ export async function loginWithPassword(usernameInput: string, password: string)
     return { ok: true, message: "로그인되었습니다." };
   }
 
-  const user = readUsers().find((item) => item.username === username);
-  if (!user) {
-    return { ok: false, message: "아이디 또는 비밀번호가 올바르지 않습니다." };
-  }
-
-  const passwordHash = await hashPassword(password, user.salt);
-  if (passwordHash !== user.passwordHash) {
-    return { ok: false, message: "아이디 또는 비밀번호가 올바르지 않습니다." };
-  }
-
-  setCurrentStoredUser(user);
-  return { ok: true, message: "로그인되었습니다." };
+  return { ok: false, message: "계정 서비스가 설정되지 않아 로그인할 수 없습니다." };
 }

@@ -1,3 +1,4 @@
+import { privateStorageKey, setStorageUser } from "../src/lib/private-storage.ts";
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -9,6 +10,7 @@ const makeCourse = (id = "custom-id", term = catalog.term) => ({ id, term, catal
 const post = (id = "post", extra = {}) => ({ id, authorId: "a", authorName: "익명", isAnonymous: true, category: "질문", title: "과제 질문", content: "내용", likes: 0, commentCount: 0, createdAt: "2026-09-10T00:00:00Z", ...extra });
 let data;
 beforeEach(() => {
+  setStorageUser("test-user");
   data = new Map();
   globalThis.window = { localStorage: { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => data.set(k, v) }, dispatchEvent: () => {} };
 });
@@ -65,10 +67,10 @@ test("manual board posts remain archived after deleting the course; catalog sear
 test("new storage starts empty, migrates legacy posts/comments on write and keeps originals", () => {
   assert.deepEqual(getCommunityPosts(), []);
   const original = JSON.stringify([post("legacy")]);
-  data.set("unilink:posts", original);
-  data.set("unilink:comments", JSON.stringify([{ id: "c", postId: "legacy", content: "기존 댓글", createdAt: "2026-09-01" }]));
+  data.set(privateStorageKey("unilink:posts"), original);
+  data.set(privateStorageKey("unilink:comments"), JSON.stringify([{ id: "c", postId: "legacy", content: "기존 댓글", createdAt: "2026-09-01" }]));
   publishCommunityPost(post("new"));
-  assert.equal(data.get("unilink:posts"), original);
+  assert.equal(data.get(privateStorageKey("unilink:posts")), original);
   assert.equal(getCommunityPosts().length, 2);
   assert.equal(getCommunityPosts().find((p) => p.id === "legacy").commentCount, 1);
 });
@@ -89,11 +91,11 @@ test("comments and per-actor likes persist together, unlike never makes negative
 
 test("failed writes and corrupt data are not silently replaced", () => {
   publishCommunityPost(post());
-  const before = data.get(COMMUNITY_STORAGE_KEY);
+  const before = data.get(privateStorageKey(COMMUNITY_STORAGE_KEY));
   window.localStorage.setItem = () => { throw new Error("quota"); };
   assert.throws(() => publishCommunityPost(post("second")));
-  assert.equal(data.get(COMMUNITY_STORAGE_KEY), before);
-  data.set(COMMUNITY_STORAGE_KEY, "broken");
+  assert.equal(data.get(privateStorageKey(COMMUNITY_STORAGE_KEY)), before);
+  data.set(privateStorageKey(COMMUNITY_STORAGE_KEY), "broken");
   assert.throws(() => publishCommunityPost(post("third")));
-  assert.equal(data.get(COMMUNITY_STORAGE_KEY), "broken");
+  assert.equal(data.get(privateStorageKey(COMMUNITY_STORAGE_KEY)), "broken");
 });

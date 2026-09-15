@@ -1,5 +1,8 @@
 "use client";
 
+import { privateStorage } from "@/lib/private-storage";
+
+
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -54,7 +57,7 @@ function formatDateKey(date: Date) {
 
 function getNotificationHistory() {
   try {
-    const raw = window.localStorage.getItem(NOTIFICATION_HISTORY_STORAGE_KEY);
+    const raw = privateStorage.getItem(NOTIFICATION_HISTORY_STORAGE_KEY);
     return raw ? (JSON.parse(raw) as string[]) : [];
   } catch {
     return [];
@@ -62,7 +65,7 @@ function getNotificationHistory() {
 }
 
 function saveNotificationHistory(history: string[]) {
-  window.localStorage.setItem(
+  privateStorage.setItem(
     NOTIFICATION_HISTORY_STORAGE_KEY,
     JSON.stringify(history.slice(-200)),
   );

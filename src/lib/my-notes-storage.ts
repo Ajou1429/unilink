@@ -1,3 +1,4 @@
+import { getStorageUser, privateStorage } from "./private-storage.ts";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 export const MY_NOTES_STORAGE_KEY = "unilink:my-notes";
@@ -119,9 +120,9 @@ function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
 
   try {
-    const raw = window.localStorage.getItem(key);
+    const raw = privateStorage.getItem(key);
     if (!raw) {
-      window.localStorage.setItem(key, JSON.stringify(fallback));
+      privateStorage.setItem(key, JSON.stringify(fallback));
       return fallback;
     }
     return JSON.parse(raw) as T;
@@ -132,7 +133,7 @@ function readJson<T>(key: string, fallback: T): T {
 
 function writeJson<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(key, JSON.stringify(value));
+  privateStorage.setItem(key, JSON.stringify(value));
 }
 
 function getLocalNotes(): MyNote[] {
@@ -164,6 +165,7 @@ async function fileToDataUrl(file: File): Promise<string> {
 }
 
 async function addLocalNote(input: NewNoteInput): Promise<MyNote> {
+  const owner = getStorageUser();
   const now = new Date().toISOString();
   const fileDataUrl = input.file ? await fileToDataUrl(input.file) : undefined;
   const note: MyNote = {
@@ -194,6 +196,7 @@ async function addLocalNote(input: NewNoteInput): Promise<MyNote> {
     updatedAt: now,
   };
 
+  if (owner !== getStorageUser()) throw new Error("계정이 변경되었습니다. 다시 시도해주세요.");
   saveLocalNotes([note, ...getLocalNotes()]);
   return note;
 }
@@ -517,6 +520,17 @@ export async function getMyNotes(): Promise<MyNote[]> {
 }
 
 export async function addNote(input: NewNoteInput): Promise<MyNote> {
+  const owner = getStorageUser();
+  if (input.file) {
+    const allowed = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif", "text/plain"];
+    if (input.file.size > 20 * 1024 * 1024 || !allowed.includes(input.file.type)) {
+      throw new Error("20MB 이하의 PDF, 이미지 또는 텍스트 파일만 업로드할 수 있습니다.");
+    }
+    if (input.file.type === "application/pdf" && await input.file.slice(0, 5).text() !== "%PDF-") {
+      throw new Error("유효한 PDF 파일이 필요합니다.");
+    }
+  }
+  if (owner !== getStorageUser()) throw new Error("계정이 변경되었습니다. 다시 시도해주세요.");
   if (isSupabaseConfigured) return addSupabaseNote(input);
   return addLocalNote(input);
 }

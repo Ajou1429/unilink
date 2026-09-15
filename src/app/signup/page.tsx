@@ -1,5 +1,7 @@
 "use client";
 
+import { isSupabaseConfigured } from "@/lib/supabase-client";
+
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -87,6 +89,7 @@ export default function SignupPage() {
             </Link>
           </p>
 
+          {!isSupabaseConfigured() && <p role="status" className="mb-4 text-sm text-destructive">계정 서비스가 설정되지 않았습니다. 데모에서는 가입·로그인을 사용할 수 없으며 실제 비밀번호를 입력하지 마세요.</p>}
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-2">
               <Label htmlFor="username">아이디</Label>
@@ -121,7 +124,7 @@ export default function SignupPage() {
                   id="password"
                   type="password"
                   autoComplete="new-password"
-                  placeholder="6자 이상"
+                  placeholder="12자 이상"
                   className="h-11"
                   value={form.password}
                   onChange={(event) => updateField("password", event.target.value)}
@@ -187,7 +190,7 @@ export default function SignupPage() {
                 현재는 학교 이메일 인증 없이 기본 정보만 저장합니다. 실제 인증과
                 약관 동의는 추후 추가 예정입니다.
               </p>
-              <Button className="h-11 w-full" type="submit" disabled={isSubmitting}>
+              <Button className="h-11 w-full" type="submit" disabled={isSubmitting || !isSupabaseConfigured()}>
                 {isSubmitting ? "가입 중..." : "회원가입"}
               </Button>
             </div>

@@ -1,4 +1,4 @@
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import { createClient } from "jsr:@supabase/supabase-js@2.116.0";
 
 // Edge Function 안에서만 사용하는 service_role 클라이언트. RLS를 우회하므로
 // 사용자 입력을 직접 SQL에 넣지 말고 항상 supabase-js 쿼리 빌더를 통해서만 사용한다.
@@ -12,6 +12,7 @@ export function getAdminClient() {
 
 export async function getUserFromAuthHeader(req: Request) {
   const authHeader = req.headers.get("Authorization") ?? "";
+  if (!/^Bearer\s+\S+$/i.test(authHeader)) return null;
   const token = authHeader.replace(/^Bearer\s+/i, "");
   if (!token) return null;
 
@@ -20,7 +21,7 @@ export async function getUserFromAuthHeader(req: Request) {
   const client = createClient(url, anonKey, {
     global: { headers: { Authorization: `Bearer ${token}` } },
   });
-  const { data, error } = await client.auth.getUser();
+  const { data, error } = await client.auth.getUser(token);
   if (error || !data.user) return null;
   return data.user;
 }

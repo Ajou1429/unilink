@@ -17,6 +17,8 @@ export function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
       ...corsHeaders,
       ...(init.headers ?? {}),
     },

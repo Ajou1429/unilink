@@ -1,3 +1,4 @@
+import { privateStorage } from "./private-storage.ts";
 export const APP_NOTIFICATIONS_STORAGE_KEY = "unilink:app-notifications";
 export const APP_NOTIFICATIONS_CHANGED_EVENT = "unilink:appNotificationsChanged";
 
@@ -15,7 +16,7 @@ function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
 
   try {
-    const raw = window.localStorage.getItem(key);
+    const raw = privateStorage.getItem(key);
     return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
     return fallback;
@@ -25,7 +26,7 @@ function readJson<T>(key: string, fallback: T): T {
 function writeNotifications(notifications: AppNotification[]) {
   if (typeof window === "undefined") return;
 
-  window.localStorage.setItem(
+  privateStorage.setItem(
     APP_NOTIFICATIONS_STORAGE_KEY,
     JSON.stringify(notifications.slice(0, 80)),
   );

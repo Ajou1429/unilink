@@ -1,3 +1,4 @@
+import { privateStorage } from "./private-storage.ts";
 export const NOTIFICATION_SETTINGS_STORAGE_KEY = "unilink:notification-settings";
 export const NOTIFICATION_SETTINGS_CHANGED_EVENT =
   "unilink:notificationSettingsChanged";
@@ -16,7 +17,7 @@ export function getNotificationSettings(): NotificationSettings {
   if (typeof window === "undefined") return defaultSettings;
 
   try {
-    const raw = window.localStorage.getItem(NOTIFICATION_SETTINGS_STORAGE_KEY);
+    const raw = privateStorage.getItem(NOTIFICATION_SETTINGS_STORAGE_KEY);
     if (!raw) return defaultSettings;
     const parsed = JSON.parse(raw) as Partial<NotificationSettings>;
 
@@ -32,7 +33,7 @@ export function getNotificationSettings(): NotificationSettings {
 export function saveNotificationSettings(settings: NotificationSettings) {
   if (typeof window === "undefined") return;
 
-  window.localStorage.setItem(
+  privateStorage.setItem(
     NOTIFICATION_SETTINGS_STORAGE_KEY,
     JSON.stringify(settings),
   );

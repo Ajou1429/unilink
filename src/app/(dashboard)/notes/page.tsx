@@ -1,5 +1,8 @@
 "use client";
 
+import { privateStorage } from "@/lib/private-storage";
+
+
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
@@ -65,7 +68,7 @@ import {
   enableRealtimeWatch,
   getDriveConnectionStatus,
   listDriveFolders,
-  rememberDriveConnectionSucceeded,
+  completeDriveConnection,
   startDriveConnection,
   syncDriveFolders,
 } from "@/lib/drive-connection";
@@ -314,7 +317,7 @@ export default function NotesPage() {
   const [hiddenDriveFolderIds, setHiddenDriveFolderIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     try {
-      const saved = JSON.parse(window.localStorage.getItem(HIDDEN_DRIVE_FOLDERS_KEY) ?? "[]");
+      const saved = JSON.parse(privateStorage.getItem(HIDDEN_DRIVE_FOLDERS_KEY) ?? "[]");
       return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : [];
     } catch {
       return [];
@@ -366,9 +369,8 @@ export default function NotesPage() {
 
       try {
         // On an OAuth return, confirm the connection before applying its status.
-        const status = await (driveParam === "connected"
-          ? rememberDriveConnectionSucceeded()
-          : getDriveConnectionStatus());
+        const completed = await completeDriveConnection();
+        const status = await getDriveConnectionStatus();
         if (cancelled) return;
         setDriveStatus(status);
         setSelectedDriveFolders(status.folderIds.map((id, index) => ({
@@ -376,7 +378,7 @@ export default function NotesPage() {
           name: status.folderNames[index] ?? id,
         })));
         setDriveFolderInput(status.folderId ?? status.folderIds[0] ?? "");
-        if (driveParam === "connected") {
+        if (completed) {
           setDriveMessage("Google Drive 연결에 성공했습니다.");
         } else if (driveParam === "error") {
           setDriveMessage(
@@ -391,8 +393,8 @@ export default function NotesPage() {
             {}, "", window.location.pathname + (query ? `?${query}` : "") + window.location.hash,
           );
         }
-      } catch {
-        if (!cancelled) setDriveMessage("Google Drive 연결 상태를 불러오지 못했습니다.");
+      } catch (error) {
+        if (!cancelled) setDriveMessage(error instanceof Error ? error.message : "Google Drive 연결 상태를 불러오지 못했습니다.");
       }
     }
 
@@ -845,7 +847,7 @@ export default function NotesPage() {
     setHiddenDriveFolderIds((previous) => {
       if (previous.includes(folderId)) return previous;
       const next = [...previous, folderId];
-      window.localStorage.setItem(HIDDEN_DRIVE_FOLDERS_KEY, JSON.stringify(next));
+      privateStorage.setItem(HIDDEN_DRIVE_FOLDERS_KEY, JSON.stringify(next));
       return next;
     });
   }

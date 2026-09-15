@@ -252,6 +252,8 @@ export function NoteViewerDialog({
                 )}
                 {isPdf && (
                   <iframe
+                    sandbox=""
+                    referrerPolicy="no-referrer"
                     src={fileUrl}
                     title={note.fileName ?? note.title}
                     className="w-full rounded-lg border"
