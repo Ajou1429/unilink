@@ -13,6 +13,7 @@ import {
 import { MyNote } from "@/lib/my-notes-storage";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { fetchDrivePdf } from "@/lib/drive-connection";
+import { PdfPreview } from "@/components/notes/PdfPreview";
 import {
   CalendarClock,
   ExternalLink,
@@ -251,16 +252,7 @@ export function NoteViewerDialog({
                   />
                 )}
                 {isPdf && (
-                  <iframe
-                    // Chrome's built-in PDF viewer needs its own script and origin access.
-                    // The source is a bounded, validated PDF Blob from the authenticated Drive function.
-                    sandbox="allow-scripts allow-same-origin allow-downloads"
-                    referrerPolicy="no-referrer"
-                    src={fileUrl}
-                    title={note.fileName ?? note.title}
-                    className="w-full rounded-lg border"
-                    style={{ height: "max(280px, calc(100cqh - 240px))" }}
-                  />
+                  <PdfPreview fileUrl={fileUrl} title={note.fileName ?? note.title} />
                 )}
               </div>
             )}
