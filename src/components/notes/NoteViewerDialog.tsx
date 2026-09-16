@@ -252,7 +252,9 @@ export function NoteViewerDialog({
                 )}
                 {isPdf && (
                   <iframe
-                    sandbox=""
+                    // Chrome's built-in PDF viewer needs its own script and origin access.
+                    // The source is a bounded, validated PDF Blob from the authenticated Drive function.
+                    sandbox="allow-scripts allow-same-origin allow-downloads"
                     referrerPolicy="no-referrer"
                     src={fileUrl}
                     title={note.fileName ?? note.title}
