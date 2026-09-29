@@ -1,351 +1,848 @@
 "use client";
 
-import { useCurrentTime } from "@/lib/use-current-time";
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Header } from "@/components/layout/Header";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import Link from "next/link";
 import {
-  ArrowRight,
+  ArrowUpRight,
   BookOpen,
   CalendarDays,
-  CheckCircle2,
-  Clock,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Cloud,
+  FileText,
+  ListChecks,
+  RefreshCw,
+  Save,
   Sparkles,
   Target,
-  TrendingUp,
 } from "lucide-react";
+import { Header } from "@/components/layout/Header";
+import { getStoredCourses } from "@/lib/course-storage";
+import { getWeeklyStudyPlans } from "@/lib/study-storage";
 import {
-  COURSES_CHANGED_EVENT,
-  getStoredCourses,
-} from "@/lib/course-storage";
-import {
-  getWeeklyStudyPlans,
-  STUDY_PLANS_CHANGED_EVENT,
-} from "@/lib/study-storage";
-import {
-  CourseSessionProgress,
   getCourseSessions,
-  TIMETABLE_CHANGED_EVENT,
+  getMonthlyEvents,
+  getWorkSchedules,
 } from "@/lib/timetable-storage";
-import { Course, StudyPlan } from "@/lib/types";
+import {
+  getPersonalStudies,
+  getAllPersonalStudyPlans,
+} from "@/lib/personal-study-storage";
+import { getMyNotes, type MyNote } from "@/lib/my-notes-storage";
+import {
+  listSubjects,
+  type ProblemBankSubject,
+} from "@/lib/problem-bank-storage";
+import {
+  getDriveConnectionStatus,
+  type DriveConnectionStatus,
+} from "@/lib/drive-connection";
+import {
+  privateStorage,
+  PRIVATE_STORAGE_CHANGED_EVENT,
+} from "@/lib/private-storage";
+import { useCurrentTime } from "@/lib/use-current-time";
+import {
+  coachingWeek,
+  orderCoachingTasks,
+  type CoachingTask,
+} from "@/lib/coaching-view";
+import styles from "./workspace.module.css";
 
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-
-function addDays(date: Date, amount: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + amount);
-  return next;
+const DRAFT_KEY = "unilink:coaching-request-draft-v1";
+const intents = [
+  "이번 주 계획",
+  "오늘 계획",
+  "시험 대비",
+  "단원 복습",
+  "학습 상태 점검",
+];
+type Draft = {
+  schema_version: 1;
+  target: string;
+  intent: string;
+  dailyMinutes: number;
+  outcome: string;
+  constraints: string;
+  startDate: string;
+  endDate: string;
+};
+const initialDraft: Draft = {
+  schema_version: 1,
+  target: "all",
+  intent: intents[0],
+  dailyMinutes: 60,
+  outcome: "",
+  constraints: "",
+  startDate: "",
+  endDate: "",
+};
+function readLearning() {
+  return {
+    courses: getStoredCourses(),
+    plans: getWeeklyStudyPlans(),
+    sessions: getCourseSessions(),
+    goals: getPersonalStudies(),
+    personalPlans: getAllPersonalStudyPlans(),
+    events: getMonthlyEvents(),
+    commitments: getWorkSchedules(),
+  };
 }
-
-function formatDateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function getSundayWeekStart(date: Date) {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  return addDays(next, -next.getDay());
-}
-
-function formatProgress(session: CourseSessionProgress) {
-  if (session.noteTitle && session.pageStart && session.pageEnd) {
-    return `${session.noteTitle} ${session.pageStart}-${session.pageEnd}p`;
-  }
-
-  if (session.progressTitle) return session.progressTitle;
-  return "진도 내용 미입력";
+type Learning = ReturnType<typeof readLearning>;
+const emptyLearning: Learning = {
+  courses: [],
+  plans: [],
+  sessions: [],
+  goals: [],
+  personalPlans: [],
+  events: [],
+  commitments: [],
+};
+function Jump({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link className={styles.jump} href={href}>
+      {children}
+      <ArrowUpRight size={15} aria-hidden="true" />
+    </Link>
+  );
 }
 
 export default function AiCoachingPage() {
   const now = useCurrentTime();
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [plans, setPlans] = useState<StudyPlan[]>([]);
-  const [courseSessions, setCourseSessions] = useState<CourseSessionProgress[]>([]);
-
+  const [data, setData] = useState<Learning>(emptyLearning);
+  const [draft, setDraft] = useState<Draft>(initialDraft);
+  const [selected, setSelected] = useState("all");
+  const [tab, setTab] = useState("현황");
+  const [offset, setOffset] = useState(0);
+  const [filter, setFilter] = useState("전체");
+  const [notice, setNotice] = useState("");
+  const [notes, setNotes] = useState<MyNote[]>([]);
+  const [subjects, setSubjects] = useState<ProblemBankSubject[]>([]);
+  const [drive, setDrive] = useState<DriveConnectionStatus | null>(null);
+  const [resourceErrors, setResourceErrors] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [revision, setRevision] = useState(0);
+  const [search, setSearch] = useState("");
+  const [noteLimit, setNoteLimit] = useState(20);
   useEffect(() => {
-    function syncData() {
-      setCourses(getStoredCourses());
-      setPlans(getWeeklyStudyPlans());
-      setCourseSessions(getCourseSessions());
+    const sync = () => setData(readLearning());
+    sync();
+    function restoreDraft() {
+      try {
+        const saved = JSON.parse(privateStorage.getItem(DRAFT_KEY) || "null");
+        if (
+          saved?.schema_version === 1 &&
+          typeof saved.target === "string" &&
+          intents.includes(saved.intent) &&
+          Number.isInteger(saved.dailyMinutes) &&
+          saved.dailyMinutes >= 15 &&
+          saved.dailyMinutes <= 480 &&
+          typeof saved.outcome === "string" &&
+          typeof saved.constraints === "string"
+        )
+          setDraft({
+            ...saved,
+            startDate:
+              typeof saved.startDate === "string" ? saved.startDate : "",
+            endDate: typeof saved.endDate === "string" ? saved.endDate : "",
+          });
+      } catch {
+        /* An invalid draft does not block the learning workspace. */
+      }
     }
-
-    syncData();
-    window.addEventListener(COURSES_CHANGED_EVENT, syncData);
-    window.addEventListener(STUDY_PLANS_CHANGED_EVENT, syncData);
-    window.addEventListener(TIMETABLE_CHANGED_EVENT, syncData);
-    window.addEventListener("storage", syncData);
-
+    restoreDraft();
+    window.addEventListener(PRIVATE_STORAGE_CHANGED_EVENT, sync);
+    window.addEventListener("storage", sync);
     return () => {
-      window.removeEventListener(COURSES_CHANGED_EVENT, syncData);
-      window.removeEventListener(STUDY_PLANS_CHANGED_EVENT, syncData);
-      window.removeEventListener(TIMETABLE_CHANGED_EVENT, syncData);
-      window.removeEventListener("storage", syncData);
+      window.removeEventListener(PRIVATE_STORAGE_CHANGED_EVENT, sync);
+      window.removeEventListener("storage", sync);
     };
   }, []);
-
-  const currentWeekStartKey = formatDateKey(getSundayWeekStart(new Date(now)));
-  const weeklyPlans = plans.filter(
-    (plan) => (plan.weekStart ?? currentWeekStartKey) === currentWeekStartKey,
-  );
-  const pendingPlans = weeklyPlans.filter((plan) => !plan.isCompleted);
-  const completedPlans = weeklyPlans.length - pendingPlans.length;
-  const recentSessions = useMemo(
-    () =>
-      [...courseSessions]
-        .sort(
-          (a, b) =>
-            new Date(b.updatedAt || b.createdAt).getTime() -
-            new Date(a.updatedAt || a.createdAt).getTime(),
-        )
-        .slice(0, 5),
-    [courseSessions],
-  );
-  const latestSessionByCourse = useMemo(() => {
-    const latest = new Map<string, CourseSessionProgress>();
-
-    [...courseSessions]
-      .sort(
-        (a, b) =>
-          new Date(b.updatedAt || b.createdAt).getTime() -
-          new Date(a.updatedAt || a.createdAt).getTime(),
-      )
-      .forEach((session) => {
-        if (!latest.has(session.courseId)) {
-          latest.set(session.courseId, session);
-        }
-      });
-
-    return latest;
-  }, [courseSessions]);
-  const courseCoaching = courses.map((course) => {
-    const latestSession = latestSessionByCourse.get(course.id);
-    const coursePendingPlans = pendingPlans.filter(
-      (plan) => plan.courseId === course.id,
-    );
-    const updatedAt = latestSession
-      ? new Date(latestSession.updatedAt || latestSession.createdAt).getTime()
-      : 0;
-    const isStale = !updatedAt || now - updatedAt > WEEK_MS;
-
-    return {
-      course,
-      latestSession,
-      pendingPlanCount: coursePendingPlans.length,
-      isStale,
+  useEffect(() => {
+    let active = true;
+    void Promise.allSettled([
+      getMyNotes(),
+      listSubjects(),
+      getDriveConnectionStatus(),
+    ]).then(([n, s, d]) => {
+      if (!active) return;
+      setNotes(n.status === "fulfilled" ? n.value : []);
+      setSubjects(s.status === "fulfilled" ? s.value : []);
+      setDrive(d.status === "fulfilled" ? d.value : null);
+      setResourceErrors(
+        [
+          n.status === "rejected" ? "노트" : "",
+          s.status === "rejected" ? "문제은행" : "",
+          d.status === "rejected" ? "Drive" : "",
+        ].filter(Boolean),
+      );
+      setLoading(false);
+    });
+    return () => {
+      active = false;
     };
-  });
-  const priorityCourses = courseCoaching
-    .filter((item) => item.isStale || item.pendingPlanCount > 0)
-    .slice(0, 4);
-
+  }, [revision]);
+  const week = coachingWeek(new Date(now), offset);
+  const goals = data.goals.filter((g) => !g.status || g.status === "active");
+  const targets = [
+    ...data.courses.map((c) => ({
+      id: `course:${c.id}`,
+      name: c.name,
+      color: c.color,
+      href: "/course",
+      type: "수업",
+    })),
+    ...goals.map((g) => ({
+      id: `personal:${g.id}`,
+      name: g.title,
+      color: g.color,
+      href: "/personal-study",
+      type: "개인 목표",
+    })),
+  ];
+  const allTasks: CoachingTask[] = [
+    ...data.plans
+      .filter((p) => data.courses.some((c) => c.id === p.courseId))
+      .map((p) => ({
+        id: `course:${p.id}`,
+        target: `course:${p.courseId}`,
+        name: p.courseName,
+        title: p.title,
+        dueDate: p.dueDate,
+        weekStart: p.weekStart,
+        completed: p.isCompleted,
+        href: "/study",
+      })),
+    ...data.personalPlans
+      .filter((p) => goals.some((g) => g.id === p.studyId))
+      .map((p) => ({
+        id: `personal:${p.id}`,
+        target: `personal:${p.studyId}`,
+        name: goals.find((g) => g.id === p.studyId)!.title,
+        title: p.title,
+        dueDate: p.dueDate,
+        completed: p.isCompleted,
+        href: "/personal-study",
+      })),
+  ];
+  const tasks = orderCoachingTasks(
+    allTasks.filter((p) => selected === "all" || p.target === selected),
+  );
+  const weekTasks = tasks.filter(
+    (p) =>
+      p.weekStart === week.start ||
+      (!p.weekStart &&
+        !!p.dueDate &&
+        p.dueDate >= week.start &&
+        p.dueDate <= week.end),
+  );
+  const overdue = tasks.filter(
+    (p) => !p.completed && !!p.dueDate && p.dueDate < week.today,
+  );
+  const pending = weekTasks.filter((p) => !p.completed);
+  const finished = weekTasks.filter((p) => p.completed).length;
+  const visibleTasks =
+    filter === "지연"
+      ? overdue
+      : filter === "완료"
+        ? weekTasks.filter((p) => p.completed)
+        : filter === "미완료"
+          ? pending
+          : weekTasks;
+  const latest = useMemo(() => {
+    const result = new Map<string, Learning["sessions"][number]>();
+    [...data.sessions]
+      .sort((a, b) =>
+        `${b.date} ${b.startTime}`.localeCompare(`${a.date} ${a.startTime}`),
+      )
+      .forEach((s) => {
+        if (!result.has(s.courseId)) result.set(s.courseId, s);
+      });
+    return result;
+  }, [data.sessions]);
+  const scopedNotes = notes.filter(
+    (n) =>
+      (selected === "all" || `${n.linkedType}:${n.linkedId}` === selected) &&
+      `${n.title} ${n.courseName}`
+        .toLocaleLowerCase()
+        .includes(search.toLocaleLowerCase()),
+  );
+  const selectedTargets = targets.filter(
+    (t) => selected === "all" || t.id === selected,
+  );
+  const agenda = data.events
+    .filter((e) => e.date >= week.start && e.date <= week.end)
+    .sort((a, b) =>
+      `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`),
+    );
+  function changeDraft(patch: Partial<Draft>) {
+    setDraft((d) => ({ ...d, ...patch }));
+    setNotice("");
+  }
+  function saveDraft() {
+    if (draft.startDate && draft.endDate && draft.endDate < draft.startDate) {
+      setNotice("종료일은 시작일 이후로 선택해 주세요.");
+      return;
+    }
+    try {
+      privateStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({
+          ...draft,
+          schema_version: 1,
+          saved_at: new Date().toISOString(),
+        }),
+      );
+      setNotice("이 브라우저의 계정별 요청 초안을 저장했습니다.");
+    } catch {
+      setNotice(
+        "초안을 저장하지 못했습니다. 브라우저 저장 공간을 확인해 주세요.",
+      );
+    }
+  }
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className={styles.page}>
       <Header title="AI 진도 코칭" />
-
-      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 p-6">
-        <section className="grid gap-4 md:grid-cols-3">
-          <Card className="border-0 shadow-sm">
-            <CardContent className="p-5">
-              <div className="mb-4 inline-flex rounded-lg bg-primary/10 p-2 text-primary">
-                <Sparkles className="h-5 w-5" />
-              </div>
-              <p className="text-2xl font-bold">{priorityCourses.length}개</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                우선 확인할 과목
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-0 shadow-sm">
-            <CardContent className="p-5">
-              <div className="mb-4 inline-flex rounded-lg bg-green-50 p-2 text-green-600">
-                <CheckCircle2 className="h-5 w-5" />
-              </div>
-              <p className="text-2xl font-bold">
-                {completedPlans}/{weeklyPlans.length}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                이번 주 학습 계획 이행
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-0 shadow-sm">
-            <CardContent className="p-5">
-              <div className="mb-4 inline-flex rounded-lg bg-violet-50 p-2 text-violet-600">
-                <TrendingUp className="h-5 w-5" />
-              </div>
-              <p className="text-2xl font-bold">{courseSessions.length}개</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                저장된 강의 진도
-              </p>
-            </CardContent>
-          </Card>
-        </section>
-
-        <section className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-          <Card className="border-0 shadow-sm">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between gap-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Target className="h-4 w-4 text-primary" />
-                  우선 코칭 과목
-                </CardTitle>
-                <Button
-                  render={<Link href="/timetable" />}
-                  nativeButton={false}
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 gap-1 text-xs text-primary"
+      <main className={styles.workspace}>
+        <div className={styles.heading}>
+          <div>
+            <p className={styles.eyebrow}>LEARNING WORKSPACE</p>
+            <h1>학습의 다음 단계</h1>
+            <p className={styles.subtle}>
+              수업부터 개인 목표까지, 이번 주의 진행 상황
+            </p>
+          </div>
+          <Jump href="/study">학습 계획 열기</Jump>
+        </div>
+        <div className={styles.toolbar}>
+          <div className={styles.week}>
+            <button
+              aria-label="이전 주"
+              onClick={() => setOffset((o) => o - 1)}
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <span>
+              {week.start.slice(5).replace("-", ".")} –{" "}
+              {week.end.slice(5).replace("-", ".")}{" "}
+              <small>{week.start.slice(0, 4)}</small>
+            </span>
+            <button
+              aria-label="다음 주"
+              onClick={() => setOffset((o) => o + 1)}
+            >
+              <ChevronRight size={18} />
+            </button>
+            <button className={styles.today} onClick={() => setOffset(0)}>
+              이번 주
+            </button>
+          </div>
+          <label className={styles.scope}>
+            학습 대상
+            <select
+              value={selected}
+              onChange={(e) => setSelected(e.target.value)}
+            >
+              <option value="all">전체 목표</option>
+              {targets.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} · {t.type}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className={styles.metrics}>
+          <div>
+            <span>계획 완료</span>
+            <strong>
+              {finished}
+              <small> / {weekTasks.length}건</small>
+            </strong>
+            <progress
+              aria-label="선택 주 계획 완료율"
+              value={finished}
+              max={weekTasks.length || 1}
+            />
+          </div>
+          <div>
+            <span>남은 계획</span>
+            <strong>
+              {pending.length}
+              <small>건</small>
+            </strong>
+            <span>
+              {weekTasks.length ? "선택한 주 기준" : "등록된 계획 없음"}
+            </span>
+          </div>
+          <div>
+            <span>기한 지난 계획</span>
+            <strong className={overdue.length ? styles.warning : ""}>
+              {overdue.length}
+              <small>건</small>
+            </strong>
+            <span>오늘 기준 · 이전 주 포함</span>
+          </div>
+          <div>
+            <span>학습 대상</span>
+            <strong>
+              {selectedTargets.length}
+              <small>개</small>
+            </strong>
+            <span>현재 학기 수업 · 진행 중 목표</span>
+          </div>
+        </div>
+        <div className={styles.columns}>
+          <section className={styles.content}>
+            <nav className={styles.tabs} aria-label="코칭 보기">
+              {["현황", "실행 계획", "자료·문제"].map((name) => (
+                <button
+                  key={name}
+                  aria-current={tab === name ? "page" : undefined}
+                  onClick={() => setTab(name)}
                 >
-                  시간표 보기 <ArrowRight className="h-3 w-3" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {priorityCourses.length > 0 ? (
-                priorityCourses.map(
-                  ({ course, latestSession, pendingPlanCount, isStale }) => (
-                    <div
-                      key={course.id}
-                      className="rounded-lg border bg-white p-4"
+                  {name}
+                </button>
+              ))}
+            </nav>
+            {tab === "현황" && (
+              <>
+                <div className={styles.sectionTitle}>
+                  <h2>
+                    <Target size={18} /> 목표별 진행 상황
+                  </h2>
+                  <Jump href="/personal-study">목표 관리</Jump>
+                </div>
+                {selectedTargets.length === 0 && (
+                  <div className={styles.empty}>
+                    <BookOpen size={28} />
+                    <h3>첫 학습 목표를 등록하세요</h3>
+                    <div className={styles.links}>
+                      <Jump href="/timetable">수업 추가</Jump>
+                      <Jump href="/personal-study">개인 목표 추가</Jump>
+                    </div>
+                  </div>
+                )}
+                {selectedTargets.map((t) => {
+                  const course = data.courses.find(
+                    (c) => `course:${c.id}` === t.id,
+                  );
+                  const session = course ? latest.get(course.id) : undefined;
+                  const goal = goals.find((g) => `personal:${g.id}` === t.id);
+                  const targetTasks = tasks.filter(
+                    (p) => p.target === t.id && !p.completed,
+                  );
+                  const late = targetTasks.filter(
+                    (p) => p.dueDate && p.dueDate < week.today,
+                  ).length;
+                  return (
+                    <article key={t.id} className={styles.targetRow}>
+                      <div className={styles.targetTitle}>
+                        <span
+                          className={styles.swatch}
+                          style={{ background: t.color }}
+                        />
+                        <h3>{t.name}</h3>
+                        <span className={styles.pill}>{t.type}</span>
+                      </div>
+                      <p>
+                        {session
+                          ? session.progressTitle ||
+                            session.noteTitle ||
+                            "진도 내용 미입력"
+                          : goal?.goal || "아직 진도 기록이 없습니다"}
+                      </p>
+                      <div className={styles.facts}>
+                        {session && (
+                          <>
+                            <span>{session.date} 수업</span>
+                            <span>
+                              체감 난이도 {session.difficulty || "미입력"}
+                            </span>
+                            <span>수업 속도 {session.pace || "미입력"}</span>
+                            {session.pageStart && (
+                              <span>
+                                {session.pageStart}
+                                {session.pageEnd ? `–${session.pageEnd}` : ""}p
+                              </span>
+                            )}
+                          </>
+                        )}
+                        {goal?.targetDate && (
+                          <span>목표 기한 {goal.targetDate}</span>
+                        )}
+                        <span>미완료 {targetTasks.length}건</span>
+                        {late > 0 && (
+                          <span className={styles.warning}>
+                            기한 경과 {late}건
+                          </span>
+                        )}
+                      </div>
+                      <div className={styles.rowActions}>
+                        <Jump href={course ? "/timetable" : t.href}>
+                          {course ? "진도 기록" : "목표 확인"}
+                        </Jump>
+                        <button
+                          onClick={() => {
+                            changeDraft({ target: t.id });
+                            document
+                              .getElementById("coaching-outcome")
+                              ?.focus();
+                          }}
+                        >
+                          코칭 대상으로 선택 <ArrowUpRight size={14} />
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+                <div className={styles.sectionTitle}>
+                  <h2>
+                    <CalendarDays size={18} /> 선택한 주 일정
+                  </h2>
+                  <Jump href="/timetable">시간표</Jump>
+                </div>
+                <div className={styles.scheduleSummary}>
+                  <span>
+                    수업{" "}
+                    {data.courses.reduce(
+                      (sum, c) => sum + (c.schedules?.length || c.days.length),
+                      0,
+                    )}
+                    회 / 주
+                  </span>
+                  <span>고정 일정 {data.commitments.length}개</span>
+                  <span>개인 일정 {agenda.length}건</span>
+                </div>
+                {agenda.slice(0, 5).map((e) => (
+                  <div className={styles.agenda} key={e.id}>
+                    <span>{e.date.slice(5)}</span>
+                    <strong>{e.title}</strong>
+                    <span>
+                      {e.startTime || "시간 미지정"}
+                      {e.endTime ? `–${e.endTime}` : ""}
+                    </span>
+                  </div>
+                ))}
+                {!agenda.length && (
+                  <p className={styles.emptyLine}>
+                    선택한 주에 등록된 개인 일정이 없습니다.
+                  </p>
+                )}
+                {agenda.length > 5 && (
+                  <Jump href="/timetable">
+                    일정 {agenda.length}건 전체 보기
+                  </Jump>
+                )}
+              </>
+            )}
+            {tab === "실행 계획" && (
+              <>
+                <div className={styles.sectionTitle}>
+                  <h2>
+                    <ListChecks size={18} /> 실행할 계획
+                  </h2>
+                  <Jump href="/study">계획 관리</Jump>
+                </div>
+                <div className={styles.filters}>
+                  {["전체", "미완료", "지연", "완료"].map((f) => (
+                    <button
+                      key={f}
+                      aria-pressed={filter === f}
+                      onClick={() => setFilter(f)}
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="h-2.5 w-2.5 shrink-0 rounded-full"
-                              style={{ backgroundColor: course.color }}
-                            />
-                            <p className="font-semibold">{course.name}</p>
-                          </div>
-                          <p className="mt-2 text-sm text-muted-foreground">
-                            {latestSession
-                              ? `최근 진도: ${formatProgress(latestSession)}`
-                              : "아직 저장된 강의 진도가 없습니다."}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {isStale && (
-                            <Badge variant="secondary">진도 확인 필요</Badge>
-                          )}
-                          {pendingPlanCount > 0 && (
-                            <Badge variant="outline">
-                              미완료 계획 {pendingPlanCount}개
-                            </Badge>
-                          )}
-                        </div>
+                      {f}
+                    </button>
+                  ))}
+                </div>
+                {visibleTasks.map((p) => (
+                  <div className={styles.task} key={p.id}>
+                    <span
+                      className={p.completed ? styles.done : styles.taskDot}
+                    >
+                      {p.completed ? (
+                        <Check size={16} />
+                      ) : (
+                        <ListChecks size={16} />
+                      )}
+                    </span>
+                    <div>
+                      <h3>{p.title}</h3>
+                      <p>
+                        {p.name} · {p.dueDate || "기한 미지정"}
+                      </p>
+                    </div>
+                    <Jump href={p.href}>
+                      {p.completed ? "기록 보기" : "실행·수정"}
+                    </Jump>
+                  </div>
+                ))}
+                {!visibleTasks.length && (
+                  <div className={styles.empty}>
+                    <ListChecks size={28} />
+                    <h3>해당하는 계획이 없습니다</h3>
+                    <Jump href="/study">학습 계획 추가</Jump>
+                  </div>
+                )}
+                {tasks.some((p) => !p.weekStart && !p.dueDate) && (
+                  <p className={styles.emptyLine}>
+                    기간 미지정 계획{" "}
+                    {tasks.filter((p) => !p.weekStart && !p.dueDate).length}건은{" "}
+                    <Link href="/study">계획 관리</Link>에서 확인하세요.
+                  </p>
+                )}
+              </>
+            )}
+            {tab === "자료·문제" && (
+              <>
+                <div className={styles.sectionTitle}>
+                  <h2>
+                    <Cloud size={18} /> Google Drive
+                  </h2>
+                  <button
+                    className={styles.iconButton}
+                    title="연동 상태 새로고침"
+                    aria-label="연동 상태 새로고침"
+                    disabled={loading}
+                    onClick={() => {
+                      setLoading(true);
+                      setRevision((r) => r + 1);
+                    }}
+                  >
+                    <RefreshCw size={17} />
+                  </button>
+                </div>
+                <div className={styles.connection}>
+                  <span>
+                    {loading
+                      ? "연동 확인 중"
+                      : resourceErrors.includes("Drive")
+                        ? "상태 확인 실패"
+                        : drive?.requiresReconnect
+                          ? "재연결 필요"
+                          : drive?.connected
+                            ? "연결됨"
+                            : "연결 안 됨"}
+                  </span>
+                  <Jump href="/notes">연동 관리</Jump>
+                </div>
+                {resourceErrors.length > 0 && (
+                  <p role="alert" className={styles.error}>
+                    {resourceErrors.join(", ")} 정보를 불러오지 못했습니다.
+                    새로고침으로 다시 시도하세요.
+                  </p>
+                )}
+                <div className={styles.sectionTitle}>
+                  <h2>
+                    <FileText size={18} /> 연결된 학습 자료
+                  </h2>
+                  <Jump href="/notes">노트 열기</Jump>
+                </div>
+                <input
+                  className={styles.search}
+                  type="search"
+                  aria-label="학습 자료 검색"
+                  placeholder="자료명·과목 검색"
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setNoteLimit(20);
+                  }}
+                />
+                {loading ? (
+                  <p role="status">자료 불러오는 중…</p>
+                ) : scopedNotes.length ? (
+                  scopedNotes.slice(0, noteLimit).map((n) => (
+                    <div className={styles.resource} key={n.id}>
+                      <FileText size={18} />
+                      <div>
+                        <h3>{n.title}</h3>
+                        <p>
+                          {n.linkedTitle || n.courseName || "미분류"} ·{" "}
+                          {n.source}
+                        </p>
                       </div>
                     </div>
-                  ),
-                )
-              ) : (
-                <div className="rounded-lg border border-dashed p-8 text-center">
-                  <p className="text-sm font-medium">우선 코칭할 과목이 없습니다.</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    시간표에서 강의 진도를 저장하거나 학습 계획을 추가하면 이곳에
-                    표시됩니다.
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="border-0 shadow-sm">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between gap-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <BookOpen className="h-4 w-4 text-primary" />
-                  이번 주 미완료 계획
-                </CardTitle>
-                <Button
-                  render={<Link href="/study" />}
-                  nativeButton={false}
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 gap-1 text-xs text-primary"
-                >
-                  학습 계획 <ArrowRight className="h-3 w-3" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {pendingPlans.length > 0 ? (
-                pendingPlans.slice(0, 5).map((plan) => (
-                  <div key={plan.id} className="rounded-lg border bg-white p-3">
-                    <p className="text-sm font-semibold">{plan.title}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <Badge variant="secondary" className="text-[10px]">
-                        {plan.courseName}
-                      </Badge>
-                      {plan.dueDate && (
-                        <span className="inline-flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          {plan.dueDate}
-                        </span>
-                      )}
-                    </div>
+                  ))
+                ) : (
+                  <div className={styles.empty}>
+                    <h3>
+                      {search
+                        ? "검색 결과가 없습니다"
+                        : "연결된 자료가 없습니다"}
+                    </h3>
+                    <Jump href="/notes">자료 연결</Jump>
                   </div>
-                ))
-              ) : (
-                <div className="rounded-lg border border-dashed p-8 text-center">
-                  <p className="text-sm font-medium">
-                    이번 주 미완료 계획이 없습니다.
-                  </p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    새 계획을 넣으면 코칭 기준으로 함께 반영됩니다.
-                  </p>
+                )}
+                {scopedNotes.length > noteLimit && (
+                  <button
+                    className={styles.loadMore}
+                    onClick={() => setNoteLimit((n) => n + 20)}
+                  >
+                    자료 더 보기 ({noteLimit}/{scopedNotes.length})
+                  </button>
+                )}
+                <div className={styles.sectionTitle}>
+                  <h2>
+                    <BookOpen size={18} /> 문제은행
+                  </h2>
+                  <Jump href="/problem-bank">문제 풀기</Jump>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </section>
-
-        <Card className="border-0 shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <CalendarDays className="h-4 w-4 text-primary" />
-              최근 반영된 강의 진도
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {recentSessions.length > 0 ? (
-              recentSessions.map((session) => (
-                <div
-                  key={session.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-white p-4"
-                >
-                  <div className="min-w-0">
-                    <p className="font-semibold">{session.courseName}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {formatProgress(session)}
-                    </p>
-                  </div>
-                  <div className="text-right text-xs text-muted-foreground">
-                    <p>{session.date}</p>
-                    <p>
-                      {session.startTime} - {session.endTime}
-                    </p>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="rounded-lg border border-dashed p-8 text-center">
-                <p className="text-sm font-medium">저장된 강의 진도가 없습니다.</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  주간 시간표에서 수업 칸을 눌러 진도를 저장해 주세요.
+                <p className={styles.subtle}>
+                  전체 문제은행 · 목표별 연결 미설정
                 </p>
-              </div>
+                {subjects.map((s) => (
+                  <div className={styles.agenda} key={s.id}>
+                    <strong>{s.name}</strong>
+                    <span>{s.count}문제</span>
+                  </div>
+                ))}
+                {!loading && !subjects.length && (
+                  <p className={styles.emptyLine}>
+                    등록된 문제은행 자료가 없습니다.
+                  </p>
+                )}
+              </>
             )}
-          </CardContent>
-        </Card>
-      </div>
+          </section>
+          <aside className={styles.request} aria-label="코칭 요청">
+            <div className={styles.requestTitle}>
+              <Sparkles size={20} />
+              <h2>코칭 요청</h2>
+              <span className={styles.pill}>초안</span>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                saveDraft();
+              }}
+            >
+              <label>
+                학습 대상
+                <select
+                  value={draft.target}
+                  onChange={(e) => changeDraft({ target: e.target.value })}
+                >
+                  <option value="all">전체 목표</option>
+                  {targets.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                  {draft.target !== "all" &&
+                    !targets.some((t) => t.id === draft.target) && (
+                      <option value={draft.target}>
+                        사용할 수 없는 목표 · 다시 선택
+                      </option>
+                    )}
+                </select>
+              </label>
+              <label>
+                요청 종류
+                <select
+                  value={draft.intent}
+                  onChange={(e) => changeDraft({ intent: e.target.value })}
+                >
+                  {intents.map((i) => (
+                    <option key={i}>{i}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                시작일
+                <input
+                  required
+                  type="date"
+                  value={draft.startDate}
+                  onChange={(e) => changeDraft({ startDate: e.target.value })}
+                />
+              </label>
+              <label>
+                종료일
+                <input
+                  required
+                  type="date"
+                  min={draft.startDate || undefined}
+                  value={draft.endDate}
+                  onChange={(e) => changeDraft({ endDate: e.target.value })}
+                />
+              </label>
+              <label htmlFor="coaching-outcome">달성하고 싶은 목표</label>
+              <textarea
+                id="coaching-outcome"
+                maxLength={2000}
+                rows={3}
+                value={draft.outcome}
+                placeholder="예: 정규화 단원 문제 20개, 정답률 80%"
+                onChange={(e) => changeDraft({ outcome: e.target.value })}
+              />
+              <label>
+                하루 학습 가능 시간{" "}
+                <div className={styles.minutes}>
+                  <input
+                    aria-label="하루 학습 가능 시간(분)"
+                    required
+                    type="number"
+                    min={15}
+                    max={480}
+                    step={15}
+                    value={draft.dailyMinutes}
+                    onChange={(e) =>
+                      changeDraft({ dailyMinutes: Number(e.target.value) })
+                    }
+                  />
+                  <span>분</span>
+                </div>
+              </label>
+              <label>
+                추가 조건
+                <textarea
+                  maxLength={2000}
+                  rows={3}
+                  value={draft.constraints}
+                  placeholder="예: 화요일 저녁 제외, 어려운 단원 우선"
+                  onChange={(e) => changeDraft({ constraints: e.target.value })}
+                />
+              </label>
+              <button
+                type="submit"
+                className={styles.save}
+                disabled={
+                  draft.target !== "all" &&
+                  !targets.some((t) => t.id === draft.target)
+                }
+              >
+                <Save size={16} /> 요청 초안 저장
+              </button>
+              <p role="status" className={styles.notice}>
+                {notice || "초안은 현재 브라우저에 저장됩니다."}
+              </p>
+            </form>
+            <div className={styles.agentState}>
+              <span className={styles.statusDot} /> AI 에이전트 미연결
+            </div>
+            <button
+              className={styles.generate}
+              disabled
+              title="AI 에이전트 연결 후 사용 가능"
+            >
+              <Sparkles size={16} /> 계획 제안 받기
+            </button>
+            <div className={styles.approval}>
+              <span>제안</span>
+              <ChevronRight size={14} />
+              <span>검토·수정</span>
+              <ChevronRight size={14} />
+              <span>승인 후 적용</span>
+            </div>
+            <div className={styles.related}>
+              <Jump href="/records">성적·성과 기록</Jump>
+              <Jump href="/course">과목별 학습</Jump>
+            </div>
+          </aside>
+        </div>
+      </main>
     </div>
   );
 }
