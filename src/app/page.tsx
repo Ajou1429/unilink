@@ -304,13 +304,13 @@ export default function LandingPage() {
             © 2024 UniLink. All rights reserved.
           </p>
           <div className="flex gap-6 text-sm text-muted-foreground">
-            <a href="#" className="hover:text-foreground">
+            <Link href="/terms" className="hover:text-foreground">
               이용약관
-            </a>
-            <a href="#" className="hover:text-foreground">
+            </Link>
+            <Link href="/privacy" className="hover:text-foreground">
               개인정보처리방침
-            </a>
-            <a href="#" className="hover:text-foreground">
+            </Link>
+            <a href="mailto:aunj1429@gmail.com" className="hover:text-foreground">
               문의
             </a>
           </div>
