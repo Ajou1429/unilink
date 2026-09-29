@@ -5,7 +5,10 @@
 
 import { jsonResponse } from "../_shared/cors.ts";
 import { getAdminClient } from "../_shared/supabaseAdmin.ts";
-import { registerWatchForConnection } from "../_shared/driveWatch.ts";
+import {
+  DriveWatchRenewalError,
+  registerWatchForConnection,
+} from "../_shared/driveWatch.ts";
 
 Deno.serve(async (req) => {
   const cronSecret = req.headers.get("X-Cron-Secret");
@@ -27,14 +30,54 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: error.message }, { status: 500 });
   }
 
-  const results = await Promise.allSettled(
-    (connections ?? []).map((connection) =>
-      registerWatchForConnection(admin, connection),
-    ),
+  const results = await Promise.all(
+    (connections ?? []).map(async (connection) => {
+      try {
+        await registerWatchForConnection(admin, connection);
+        return { ok: true as const };
+      } catch (error) {
+        const stage = error instanceof DriveWatchRenewalError
+          ? error.stage
+          : "unknown";
+        const code = error instanceof DriveWatchRenewalError
+          ? error.code
+          : null;
+        const message = error instanceof Error
+          ? error.message.slice(0, 300)
+          : String(error).slice(0, 300);
+        const userRef = connection.user_id.slice(-8);
+        if (code === "invalid_grant") {
+          const { error: statusError } = await admin
+            .from("drive_connections")
+            .update({
+              connection_status: "reconnect_required",
+              last_error_code: code,
+              last_error_at: new Date().toISOString(),
+              channel_id: null,
+              resource_id: null,
+              channel_expiration: null,
+            })
+            .eq("user_id", connection.user_id);
+          if (statusError) {
+            console.error("failed to save Drive connection health", {
+              userRef,
+              message: statusError.message,
+            });
+          }
+        }
+        console.error("drive channel renewal failed", { userRef, stage, code, message });
+        return { ok: false as const, userRef, stage, code, message };
+      }
+    }),
   );
 
-  const renewed = results.filter((r) => r.status === "fulfilled").length;
-  const failed = results.length - renewed;
+  const renewed = results.filter((result) => result.ok).length;
+  const failures = results.filter((result) => !result.ok);
 
-  return jsonResponse({ total: results.length, renewed, failed });
+  return jsonResponse({
+    total: results.length,
+    renewed,
+    failed: failures.length,
+    failures,
+  });
 });

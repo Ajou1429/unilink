@@ -1,7 +1,7 @@
 import { FunctionsHttpError } from "@supabase/supabase-js";
 
 const GOOGLE_DRIVE_RECONNECT_MESSAGE =
-  "Google Drive 연결 인증이 만료되었습니다. 연결 해제 후 다시 Google Drive를 연결해주세요.";
+  "Google Drive 연결 인증이 만료되었습니다. Google Drive를 다시 연결해주세요.";
 
 function normalizeFunctionErrorMessage(message: string): string {
   if (

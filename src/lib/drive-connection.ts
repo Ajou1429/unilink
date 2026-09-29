@@ -12,6 +12,8 @@ export interface DriveConnectionStatus {
   accountPhotoUrl: string | null;
   channelActive: boolean;
   channelExpiration: string | null;
+  requiresReconnect: boolean;
+  lastErrorAt: string | null;
 }
 
 const disconnectedStatus: DriveConnectionStatus = {
@@ -24,6 +26,8 @@ const disconnectedStatus: DriveConnectionStatus = {
   accountPhotoUrl: null,
   channelActive: false,
   channelExpiration: null,
+  requiresReconnect: false,
+  lastErrorAt: null,
 };
 
 interface DriveProfileResult {
@@ -45,6 +49,8 @@ function makeConnectedStatus(
     accountPhotoUrl: partial.accountPhotoUrl ?? null,
     channelActive: partial.channelActive ?? false,
     channelExpiration: partial.channelExpiration ?? null,
+    requiresReconnect: partial.requiresReconnect ?? false,
+    lastErrorAt: partial.lastErrorAt ?? null,
   };
 }
 
@@ -60,7 +66,7 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
 
   const { data, error } = await supabase
     .from("drive_connections")
-    .select("folder_id, folder_ids, folder_names, channel_id, channel_expiration")
+    .select("folder_id, folder_ids, folder_names, channel_id, channel_expiration, connection_status, last_error_at")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -114,6 +120,8 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
     accountPhotoUrl,
     channelActive,
     channelExpiration: data.channel_expiration ?? null,
+    requiresReconnect: data.connection_status === "reconnect_required",
+    lastErrorAt: data.last_error_at ?? null,
   });
   return status;
 }

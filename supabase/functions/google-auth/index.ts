@@ -73,6 +73,7 @@ export async function handleGoogleAuth(req: Request): Promise<Response> {
       // A reconnected Google account must never inherit another account's folders/cursors.
       folder_id: null, folder_ids: [], folder_names: [], page_token: null,
       channel_id: null, resource_id: null, channel_expiration: null,
+      connection_status: "active", last_error_code: null, last_error_at: null,
     });
     if (saveError) throw saveError;
     return jsonResponse({ connected: true });
