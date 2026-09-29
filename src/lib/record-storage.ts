@@ -122,11 +122,7 @@ export function addCompletedPersonalStudySpec(study: {
       id: `spec-study-${study.id}`,
       personalStudyId: study.id,
       title: study.title,
-      category: study.category.includes("먭꺽")
-        ? "certificate"
-        : study.category.includes("怨듬")
-          ? "competition"
-          : "experience",
+      category: normalizeSpecCategory(study.category),
       status: "done",
       awardStatus: "not-applicable",
       awardRank: "",

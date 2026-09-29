@@ -9,10 +9,10 @@ import { corsHeaders, handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.ts";
 import { decryptSecret } from "../_shared/crypto.ts";
 import {
-  buildMetadataSummary,
   listPdfFilesInFolderTree,
   refreshAccessToken,
 } from "../_shared/google.ts";
+import { saveDriveNote } from "../_shared/driveNotes.ts";
 
 Deno.serve(async (req) => {
   const optionsResponse = handleOptions(req);
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
   if (requestedFolderIds.length > 0) {
     folderIds = requestedFolderIds;
     folderNames = requestedFolderNames;
-    await admin
+    const { error: folderError } = await admin
       .from("drive_connections")
       .update({
         folder_id: folderIds[0] ?? null,
@@ -64,6 +64,7 @@ Deno.serve(async (req) => {
         folder_names: folderNames,
       })
       .eq("user_id", user.id);
+    if (folderError) throw new Error("Cannot save selected Drive folders");
   }
 
   if (folderIds.length === 0) {
@@ -88,72 +89,11 @@ Deno.serve(async (req) => {
     (b.modifiedTime ?? "").localeCompare(a.modifiedTime ?? ""),
   );
 
-  const { data: existingNotes } = await admin
-    .from("notes")
-    .select("drive_file_id")
-    .eq("user_id", user.id)
-    .not("drive_file_id", "is", null);
-  const existingIds = new Set(
-    (existingNotes ?? []).map((n) => n.drive_file_id as string),
-  );
-
   const now = new Date().toISOString();
   let upserted = 0;
 
   for (const file of files) {
-    const isNew = !existingIds.has(file.id);
-    const contentSummary = buildMetadataSummary(file, isNew);
-
-    if (isNew) {
-      const { error } = await admin.from("notes").insert({
-        user_id: user.id,
-        title: file.name.replace(/\.[^.]+$/, ""),
-        course_name: "미분류",
-        linked_type: "unassigned",
-        source: "GoodNotes",
-        sync_status: "synced",
-        content: contentSummary,
-        file_name: file.name,
-        file_size: file.size ? Number(file.size) : null,
-        drive_file_id: file.id,
-        drive_folder_id: file.driveFolderId ?? null,
-        drive_folder_name: file.driveFolderName ?? null,
-        drive_folder_path: file.driveFolderPath ?? [],
-        drive_folder_path_ids: file.driveFolderPathIds ?? [],
-        drive_modified_time: file.modifiedTime,
-        version: 1,
-        tags: ["GoodNotes"],
-      });
-      if (!error) upserted += 1;
-    } else {
-      const { data: existing } = await admin
-        .from("notes")
-        .select("version")
-        .eq("user_id", user.id)
-        .eq("drive_file_id", file.id)
-        .maybeSingle();
-
-      const { error } = await admin
-        .from("notes")
-        .update({
-          title: file.name.replace(/\.[^.]+$/, ""),
-          source: "GoodNotes",
-          sync_status: "synced",
-          content: contentSummary,
-          file_name: file.name,
-          file_size: file.size ? Number(file.size) : null,
-          drive_folder_id: file.driveFolderId ?? null,
-          drive_folder_name: file.driveFolderName ?? null,
-          drive_folder_path: file.driveFolderPath ?? [],
-          drive_folder_path_ids: file.driveFolderPathIds ?? [],
-          drive_modified_time: file.modifiedTime,
-          version: (existing?.version ?? 1) + 1,
-          updated_at: now,
-        })
-        .eq("user_id", user.id)
-        .eq("drive_file_id", file.id);
-      if (!error) upserted += 1;
-    }
+    if (await saveDriveNote(admin, user.id, file)) upserted += 1;
   }
 
   return jsonResponse(

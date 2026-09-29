@@ -13,9 +13,18 @@ A Git branch does not create a separate Supabase database: applying these migrat
 | 0012_p0_planning_execution | study_plans, study_plan_items, study_sessions |
 
 Existing notes, Drive OAuth data, Storage and Problem Bank tables and policies are retained.
-This delivery creates the database foundation. The current course/planner UI still uses privateStorage.
-Automatic localStorage import and UI persistence conversion are separate follow-up work. Browser data is not accessible to a DB migration.
-No existing browser records are silently attributed to an account or assigned fabricated durations, deadlines or identifiers.
+This delivery creates the database foundation and an account-scoped synchronization bridge from the existing privateStorage UI.
+On a verified sign-in, the bridge saves an account-scoped pre-import browser snapshot, replays pending writes, hydrates remote records, then imports remaining local records using stable per-user UUIDs. Subsequent UI changes are synchronized by storage key.
+Browser data is not accessible to a DB migration, so the bridge performs the import in the signed-in browser. Initial imports do not overwrite existing remote rows with the same stable ID.
+Legacy plan items without a duration use a 30-minute placeholder marked `estimated_minutes: true` in metadata; it is not observed study time or an agent-confirmed target. Legacy records without an explicit due date remain undated.
+The fallback study method is also marked `estimated_method: true`; unknown completion timestamps use the import time with `completed_at_estimated: true`. These values must not be treated as observed facts by a future agent. Legacy pace labels are retained without inventing a numerical scale.
+The cache remains the current UI write path; this bridge is persistence synchronization, not a full conversion of each screen to direct database queries.
+Notes, Drive file contents, and browser-only attachment data are outside P0 and are not copied by this bridge.
+
+The durable account-scoped `unilink:p0-outbox-v1` queue retries on reconnect, new writes and initialization. The initial browser snapshot uses `unilink:p0-before-import-v1`. These are browser recovery aids, not database backups.
+Remote reads are paginated. Archive/cancel markers (and versioned metadata tombstones for recurring commitments and class-session records) prevent stale browser caches from restoring deletions. Reconciliation only touches IDs explicitly changed in that browser.
+Course and weekly copies of a plan share one DB plan/item; monthly `weekly-*` entries are derived UI mirrors. Free-standing planner tasks use a dedicated personal goal.
+This bridge is not a transactional planner API: related writes can be temporarily partial after a network failure and are replayed idempotently. Concurrent edits of the same record from separate devices do not yet have conflict resolution.
 
 ## Implementation decisions
 
@@ -61,6 +70,7 @@ Problem Bank goal/topic extensions and owner-verified imports are follow-up migr
 ## Validation and deployment
 
 Run `node --test tests/p0-db.test.mjs tests/security-db.test.mjs` for PostgreSQL-backed checks using PGlite and the actual migration files.
+Run `node --test tests/p0-sync.test.mjs` for the actual browser persistence modules against the migrated PGlite database through a simulated Supabase transport. This covers import, restore, update, deletion, retry, account switching and pagination, but not hosted Auth/HTTP behavior.
 Run `node scripts/export-p0-dictionary.mjs` to regenerate the full column dictionary from the migrated database catalog.
 PGlite supplies a minimal Supabase auth/role fixture; hosted gateway behavior is not covered by those tests.
 
@@ -79,4 +89,8 @@ Local and remote migration histories match through 0012. All 13 new tables have 
 The local PostgreSQL tests passed (18 tests including parent suites). Existing table columns, constraints, indexes and policies match the pre-deployment inventory.
 Counts before and after: notes 363, Drive connections 3, Problem Bank subjects 3, problems 0.
 Local ignored structural inventories are at supabase/.temp/p0-before-inventory.json and supabase/.temp/p0-after-inventory.json.
-No complete data backup was created in this step. No browser data was imported and no application storage code was switched.
+No complete data backup was created during schema deployment. Application sync imports browser data on the next verified sign-in; no browser cache is cleared by the bridge.
+
+See [P0 verification, 2026-09-27](p0-verification-2026-09-27.md) for the latest audit, findings and remaining release gates.
+
+See [Service simulation database](simulation.md) for seeded fictional users, persistent isolated PostgreSQL fixtures, actual service-code scenarios, and the boundary between simulated and live integrations.
