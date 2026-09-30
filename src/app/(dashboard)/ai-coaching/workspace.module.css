@@ -379,6 +379,40 @@
   flex-direction: column;
   gap: 12px;
 }
+.coachingForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.coachingForm label,
+.goalChoices label,
+.methodRules label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.goalChoices {
+  border: 1px solid #dce2e6;
+  border-radius: 6px;
+  padding: 10px;
+  max-height: 185px;
+  overflow-y: auto;
+}
+.goalChoices legend { font-size: 12px; font-weight: 650; }
+.goalChoices label { flex-direction: row; align-items: center; margin: 6px 0; }
+.coachingGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.dayBudgets { border: 1px solid #dce2e6; border-radius: 6px; padding: 10px; }
+.dayBudgets > strong { font-size: 12px; }
+.dayBudgets > p { font-size: 11px; color: #68747b; }
+.dayRow { display: grid; grid-template-columns: 1.3fr 1fr 1fr 0.8fr; gap: 5px; align-items: center; margin-top: 8px; }
+.dayRow strong { font-size: 11px; }
+.dayRow input { width: 100%; padding: 7px 4px; }
+.methodRules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.proposal { border-top: 1px solid #dce2e6; margin-top: 18px; padding-top: 14px; font-size: 12px; line-height: 1.5; }
+.proposal h3, .proposal h4 { margin: 10px 0 6px; }
+.proposal ul { padding-left: 19px; }
+.proposal li { margin: 8px 0; }
 .request label {
   display: flex;
   flex-direction: column;

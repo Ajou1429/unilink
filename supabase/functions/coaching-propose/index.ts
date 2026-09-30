@@ -28,7 +28,7 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
       const proposal = validateProposal(await generateProposal(request, context), request, context);
       resultCode = "validated";
       itemCount = proposal.items.length;
-      return jsonResponse({ schema_version: 1, status: "proposal", proposal, proposal_run_id: jobId,
+      return jsonResponse({ schema_version: 2, status: "proposal", proposal, proposal_run_id: jobId,
         prompt_version: COACHING_PROMPT_VERSION, policy_version: COACHING_POLICY_VERSION, persisted: false });
     } catch (error) {
       if (error instanceof CoachingError && error.status === 502) resultCode = "rejected";

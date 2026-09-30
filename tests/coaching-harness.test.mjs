@@ -9,8 +9,11 @@ const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const goal = id(1), topic = id(2), otherGoal = id(3);
 const body = {
   goal_ids: [goal], intent: "weekly_plan", period_start: "2026-10-01", period_end: "2026-10-02",
-  day_budgets: [{ date: "2026-10-01", minutes: 60 }, { date: "2026-10-02", minutes: 0 }],
+  day_budgets: [{ date: "2026-10-01", minutes: 60, windows: [{ start: "09:00", end: "12:00" }] },
+    { date: "2026-10-02", minutes: 0, windows: [{ start: "09:00", end: "10:00" }] }],
   desired_outcome: "Review chapter 1", constraints: "",
+  rules: { transition_minutes: 10, break_minutes: 10, break_after_minutes: 60,
+    method_minimums: { note_review: 20 }, max_focus_goals: 1, carryover: true },
 };
 const context = {
   timezone: "Asia/Seoul", goals: [{ id: goal, title: "A", goal_type: "course", target_date: null, importance: 3, metadata: {} }],
@@ -18,7 +21,7 @@ const context = {
   methods: [{ code: "note_review", display_name: "Review", active: true }],
   deadlines: [], sessions: [], existing_items: [],
 };
-const item = { goal_id: goal, topic_id: topic, method_code: "note_review", title: "Review", planned_date: "2026-10-01", planned_minutes: 30, reason: "Exam preparation" };
+const item = { goal_id: goal, topic_id: topic, method_code: "note_review", title: "Review", planned_date: "2026-10-01", start_time: "09:00", planned_minutes: 30, reason: "Exam preparation" };
 const rejects = (fn, status) => assert.throws(fn, (error) => error instanceof CoachingError && error.status === status);
 
 test("request requires explicit daily capacity and bounded valid goals/dates", () => {
@@ -27,16 +30,33 @@ test("request requires explicit daily capacity and bounded valid goals/dates", (
   rejects(() => parseCoachingRequest({ ...body, goal_ids: [goal, goal] }), 400);
   rejects(() => parseCoachingRequest({ ...body, period_end: "2026-02-30" }), 400);
   rejects(() => parseCoachingRequest({ ...body, day_budgets: body.day_budgets.map((d) => ({ ...d, minutes: 0 })) }), 400);
+  rejects(() => parseCoachingRequest({ ...body, day_budgets: [{ ...body.day_budgets[0], windows: [{ start: "11:00", end: "10:00" }] }, body.day_budgets[1]] }), 400);
+  rejects(() => parseCoachingRequest({ ...body, rules: { ...body.rules, method_minimums: { note_review: 90 } } }), 400);
 });
 
 test("proposal rejects foreign IDs, unconfirmed topics, invalid methods and overbooked dates", () => {
   const request = parseCoachingRequest(body);
-  assert.equal(validateProposal({ summary: "Plan", items: [item] }, request, context).items.length, 1);
-  rejects(() => validateProposal({ summary: "Plan", items: [{ ...item, goal_id: otherGoal }] }, request, context), 502);
-  rejects(() => validateProposal({ summary: "Plan", items: [{ ...item, topic_id: otherGoal }] }, request, context), 502);
-  rejects(() => validateProposal({ summary: "Plan", items: [{ ...item, method_code: "unknown" }] }, request, context), 502);
-  rejects(() => validateProposal({ summary: "Plan", items: [item, { ...item, planned_minutes: 45 }] }, request, context), 502);
-  rejects(() => validateProposal({ summary: "Plan", items: [{ ...item, planned_date: "2026-10-02" }] }, request, context), 502);
+  const proposal = (items, deferred_goals = []) => ({ summary: "Plan", items, deferred_goals });
+  assert.equal(validateProposal(proposal([item]), request, context).items.length, 1);
+  rejects(() => validateProposal(proposal([{ ...item, goal_id: otherGoal }]), request, context), 502);
+  rejects(() => validateProposal(proposal([{ ...item, topic_id: otherGoal }]), request, context), 502);
+  rejects(() => validateProposal(proposal([{ ...item, method_code: "unknown" }]), request, context), 502);
+  rejects(() => validateProposal(proposal([item, { ...item, start_time: "09:30", planned_minutes: 45 }]), request, context), 502);
+  rejects(() => validateProposal(proposal([{ ...item, planned_date: "2026-10-02" }]), request, context), 502);
+  rejects(() => validateProposal(proposal([{ ...item, planned_minutes: 15 }]), request, context), 502);
+  rejects(() => validateProposal(proposal([{ ...item, planned_minutes: 61 }]), request, context), 502);
+  rejects(() => validateProposal(proposal([{ ...item, start_time: "11:45" }]), request, context), 502);
+  rejects(() => validateProposal(proposal([item]), request, { ...context, recurring_blocks: [{ day_of_week: 4, start_time: "09:00", end_time: "10:00", effective_from: null, effective_to: null, label: "Class" }] }), 502);
+  rejects(() => validateProposal(proposal([item]), request, { ...context, blocked_events: [{ start: "2026-10-01T08:45", end: "2026-10-01T09:10", label: "Travel" }] }), 502);
+  rejects(() => validateProposal(proposal([item]), request, { ...context, blocked_events: [{ start: "2026-09-30T23:00", end: "2026-10-01T09:10", label: "Overnight" }] }), 502);
+  const longDay = parseCoachingRequest({ ...body, day_budgets: [{ ...body.day_budgets[0], minutes: 120 }, body.day_budgets[1]] });
+  rejects(() => validateProposal(proposal([{ ...item, planned_minutes: 60 }, { ...item, start_time: "10:00", planned_minutes: 30 }]), longDay, context), 502);
+  assert.equal(validateProposal(proposal([{ ...item, planned_minutes: 60 }, { ...item, start_time: "10:10", planned_minutes: 30 }]), longDay, context).items.length, 2);
+  const withSecondGoal = parseCoachingRequest({ ...body, goal_ids: [goal, otherGoal], rules: { ...body.rules, max_focus_goals: 2 } });
+  const twoGoalsContext = { ...context, goals: [...context.goals, { ...context.goals[0], id: otherGoal }] };
+  rejects(() => validateProposal(proposal([item]), withSecondGoal, twoGoalsContext), 502);
+  rejects(() => validateProposal(proposal([item], [{ goal_id: otherGoal, reason: "시간 부족", reconsider_on: "invalid" }]), withSecondGoal, twoGoalsContext), 502);
+  assert.equal(validateProposal(proposal([item], [{ goal_id: otherGoal, reason: "시간 부족", reconsider_on: "2026-10-02" }]), withSecondGoal, twoGoalsContext).deferred_goals.length, 1);
 });
 
 test("model context excludes raw metadata and estimated legacy observations", () => {

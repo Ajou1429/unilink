@@ -13,8 +13,6 @@ import {
   FileText,
   ListChecks,
   RefreshCw,
-  Save,
-  Sparkles,
   Target,
 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
@@ -39,10 +37,10 @@ import {
   type DriveConnectionStatus,
 } from "@/lib/drive-connection";
 import {
-  privateStorage,
   PRIVATE_STORAGE_CHANGED_EVENT,
 } from "@/lib/private-storage";
 import { useCurrentTime } from "@/lib/use-current-time";
+import { CoachingRequestPanel } from "@/components/coaching/CoachingRequestPanel";
 import {
   coachingWeek,
   orderCoachingTasks,
@@ -50,34 +48,6 @@ import {
 } from "@/lib/coaching-view";
 import styles from "./workspace.module.css";
 
-const DRAFT_KEY = "unilink:coaching-request-draft-v1";
-const intents = [
-  "이번 주 계획",
-  "오늘 계획",
-  "시험 대비",
-  "단원 복습",
-  "학습 상태 점검",
-];
-type Draft = {
-  schema_version: 1;
-  target: string;
-  intent: string;
-  dailyMinutes: number;
-  outcome: string;
-  constraints: string;
-  startDate: string;
-  endDate: string;
-};
-const initialDraft: Draft = {
-  schema_version: 1,
-  target: "all",
-  intent: intents[0],
-  dailyMinutes: 60,
-  outcome: "",
-  constraints: "",
-  startDate: "",
-  endDate: "",
-};
 function readLearning() {
   return {
     courses: getStoredCourses(),
@@ -111,12 +81,10 @@ function Jump({ href, children }: { href: string; children: React.ReactNode }) {
 export default function AiCoachingPage() {
   const now = useCurrentTime();
   const [data, setData] = useState<Learning>(emptyLearning);
-  const [draft, setDraft] = useState<Draft>(initialDraft);
   const [selected, setSelected] = useState("all");
   const [tab, setTab] = useState("현황");
   const [offset, setOffset] = useState(0);
   const [filter, setFilter] = useState("전체");
-  const [notice, setNotice] = useState("");
   const [notes, setNotes] = useState<MyNote[]>([]);
   const [subjects, setSubjects] = useState<ProblemBankSubject[]>([]);
   const [drive, setDrive] = useState<DriveConnectionStatus | null>(null);
@@ -128,30 +96,6 @@ export default function AiCoachingPage() {
   useEffect(() => {
     const sync = () => setData(readLearning());
     sync();
-    function restoreDraft() {
-      try {
-        const saved = JSON.parse(privateStorage.getItem(DRAFT_KEY) || "null");
-        if (
-          saved?.schema_version === 1 &&
-          typeof saved.target === "string" &&
-          intents.includes(saved.intent) &&
-          Number.isInteger(saved.dailyMinutes) &&
-          saved.dailyMinutes >= 15 &&
-          saved.dailyMinutes <= 480 &&
-          typeof saved.outcome === "string" &&
-          typeof saved.constraints === "string"
-        )
-          setDraft({
-            ...saved,
-            startDate:
-              typeof saved.startDate === "string" ? saved.startDate : "",
-            endDate: typeof saved.endDate === "string" ? saved.endDate : "",
-          });
-      } catch {
-        /* An invalid draft does not block the learning workspace. */
-      }
-    }
-    restoreDraft();
     window.addEventListener(PRIVATE_STORAGE_CHANGED_EVENT, sync);
     window.addEventListener("storage", sync);
     return () => {
@@ -276,31 +220,6 @@ export default function AiCoachingPage() {
     .sort((a, b) =>
       `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`),
     );
-  function changeDraft(patch: Partial<Draft>) {
-    setDraft((d) => ({ ...d, ...patch }));
-    setNotice("");
-  }
-  function saveDraft() {
-    if (draft.startDate && draft.endDate && draft.endDate < draft.startDate) {
-      setNotice("종료일은 시작일 이후로 선택해 주세요.");
-      return;
-    }
-    try {
-      privateStorage.setItem(
-        DRAFT_KEY,
-        JSON.stringify({
-          ...draft,
-          schema_version: 1,
-          saved_at: new Date().toISOString(),
-        }),
-      );
-      setNotice("이 브라우저의 계정별 요청 초안을 저장했습니다.");
-    } catch {
-      setNotice(
-        "초안을 저장하지 못했습니다. 브라우저 저장 공간을 확인해 주세요.",
-      );
-    }
-  }
   return (
     <div className={styles.page}>
       <Header title="AI 진도 코칭" />
@@ -483,16 +402,7 @@ export default function AiCoachingPage() {
                         <Jump href={course ? "/timetable" : t.href}>
                           {course ? "진도 기록" : "목표 확인"}
                         </Jump>
-                        <button
-                          onClick={() => {
-                            changeDraft({ target: t.id });
-                            document
-                              .getElementById("coaching-outcome")
-                              ?.focus();
-                          }}
-                        >
-                          코칭 대상으로 선택 <ArrowUpRight size={14} />
-                        </button>
+                        <a href="#coaching-request">코칭 요청으로 이동 <ArrowUpRight size={14} /></a>
                       </div>
                     </article>
                   );
@@ -706,141 +616,7 @@ export default function AiCoachingPage() {
               </>
             )}
           </section>
-          <aside className={styles.request} aria-label="코칭 요청">
-            <div className={styles.requestTitle}>
-              <Sparkles size={20} />
-              <h2>코칭 요청</h2>
-              <span className={styles.pill}>초안</span>
-            </div>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                saveDraft();
-              }}
-            >
-              <label>
-                학습 대상
-                <select
-                  value={draft.target}
-                  onChange={(e) => changeDraft({ target: e.target.value })}
-                >
-                  <option value="all">전체 목표</option>
-                  {targets.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                  {draft.target !== "all" &&
-                    !targets.some((t) => t.id === draft.target) && (
-                      <option value={draft.target}>
-                        사용할 수 없는 목표 · 다시 선택
-                      </option>
-                    )}
-                </select>
-              </label>
-              <label>
-                요청 종류
-                <select
-                  value={draft.intent}
-                  onChange={(e) => changeDraft({ intent: e.target.value })}
-                >
-                  {intents.map((i) => (
-                    <option key={i}>{i}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                시작일
-                <input
-                  required
-                  type="date"
-                  value={draft.startDate}
-                  onChange={(e) => changeDraft({ startDate: e.target.value })}
-                />
-              </label>
-              <label>
-                종료일
-                <input
-                  required
-                  type="date"
-                  min={draft.startDate || undefined}
-                  value={draft.endDate}
-                  onChange={(e) => changeDraft({ endDate: e.target.value })}
-                />
-              </label>
-              <label htmlFor="coaching-outcome">달성하고 싶은 목표</label>
-              <textarea
-                id="coaching-outcome"
-                maxLength={2000}
-                rows={3}
-                value={draft.outcome}
-                placeholder="예: 정규화 단원 문제 20개, 정답률 80%"
-                onChange={(e) => changeDraft({ outcome: e.target.value })}
-              />
-              <label>
-                하루 학습 가능 시간{" "}
-                <div className={styles.minutes}>
-                  <input
-                    aria-label="하루 학습 가능 시간(분)"
-                    required
-                    type="number"
-                    min={15}
-                    max={480}
-                    step={15}
-                    value={draft.dailyMinutes}
-                    onChange={(e) =>
-                      changeDraft({ dailyMinutes: Number(e.target.value) })
-                    }
-                  />
-                  <span>분</span>
-                </div>
-              </label>
-              <label>
-                추가 조건
-                <textarea
-                  maxLength={2000}
-                  rows={3}
-                  value={draft.constraints}
-                  placeholder="예: 화요일 저녁 제외, 어려운 단원 우선"
-                  onChange={(e) => changeDraft({ constraints: e.target.value })}
-                />
-              </label>
-              <button
-                type="submit"
-                className={styles.save}
-                disabled={
-                  draft.target !== "all" &&
-                  !targets.some((t) => t.id === draft.target)
-                }
-              >
-                <Save size={16} /> 요청 초안 저장
-              </button>
-              <p role="status" className={styles.notice}>
-                {notice || "초안은 현재 브라우저에 저장됩니다."}
-              </p>
-            </form>
-            <div className={styles.agentState}>
-              <span className={styles.statusDot} /> AI 에이전트 미연결
-            </div>
-            <button
-              className={styles.generate}
-              disabled
-              title="AI 에이전트 연결 후 사용 가능"
-            >
-              <Sparkles size={16} /> 계획 제안 받기
-            </button>
-            <div className={styles.approval}>
-              <span>제안</span>
-              <ChevronRight size={14} />
-              <span>검토·수정</span>
-              <ChevronRight size={14} />
-              <span>승인 후 적용</span>
-            </div>
-            <div className={styles.related}>
-              <Jump href="/records">성적·성과 기록</Jump>
-              <Jump href="/course">과목별 학습</Jump>
-            </div>
-          </aside>
+          <CoachingRequestPanel />
         </div>
       </main>
     </div>
