@@ -32,3 +32,6 @@ verify_jwt = true
 
 [functions.problem-bank-upload]
 verify_jwt = true
+
+[functions.coaching-propose]
+verify_jwt = true
