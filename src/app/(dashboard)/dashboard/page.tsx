@@ -334,12 +334,11 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="bg-white rounded-lg p-3 shadow-sm">
-                <p className="text-sm font-medium">중간고사 D-7 준비 플랜</p>
+                <p className="text-sm font-medium">학습 계획 제안 받기</p>
                 <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                  운영체제 교착상태와 데이터베이스 정규화를 우선 복습하는 것을
-                  추천합니다.
+                  목표와 학습 가능 시간을 입력하면 GPT가 계획을 제안합니다.
                 </p>
-                <Button size="sm" className="mt-3 h-7 text-xs w-full gap-1">
+                <Button size="sm" className="mt-3 h-7 text-xs w-full gap-1" nativeButton={false} render={<Link href="/ai-coaching" />}>
                   학습 계획 생성 <Sparkles className="h-3 w-3" />
                 </Button>
               </div>
