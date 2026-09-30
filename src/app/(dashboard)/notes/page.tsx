@@ -1217,7 +1217,7 @@ export default function NotesPage() {
                   disabled={
                     driveBusy ||
                     (isSupabaseConfigured &&
-                      (!driveStatus?.connected || !driveFolderInput))
+                      (!driveStatus?.connected || driveStatus.requiresReconnect || !driveFolderInput))
                   }
                 >
                   {driveBusy ? (
@@ -1265,7 +1265,9 @@ export default function NotesPage() {
                       <p className="text-sm font-medium">Google Drive</p>
                       <p className="text-xs text-muted-foreground">
                         {driveStatus?.connected
-                          ? "계정이 연결되어 있습니다"
+                          ? driveStatus.requiresReconnect
+                            ? "Google 인증이 만료되어 다시 연결해야 합니다"
+                            : "계정이 연결되어 있습니다"
                           : "아직 연결되지 않았습니다"}
                       </p>
                       {driveStatus?.connected && (
@@ -1284,7 +1286,9 @@ export default function NotesPage() {
                         </div>
                       )}
                     </div>
-                    {driveStatus?.connected ? (
+                    {driveStatus?.connected && driveStatus.requiresReconnect ? (
+                      <Badge variant="destructive">재연결 필요</Badge>
+                    ) : driveStatus?.connected ? (
                       <Badge variant="secondary" className="gap-1">
                         <CheckCircle2 className="h-3 w-3" />
                         연결됨
@@ -1294,7 +1298,21 @@ export default function NotesPage() {
                     )}
                   </div>
 
-                  {driveStatus?.connected ? (
+                  {driveStatus?.connected && driveStatus.requiresReconnect ? (
+                    <div className="space-y-2">
+                      <Button
+                        className="w-full gap-2"
+                        onClick={handleConnectDrive}
+                        disabled={driveBusy}
+                      >
+                        <Link2 className="h-4 w-4" />
+                        Google Drive 다시 연결
+                      </Button>
+                      <p className="text-xs text-muted-foreground">
+                        기존 노트와 분류 정보는 유지됩니다. Google 계정 권한만 다시 승인합니다.
+                      </p>
+                    </div>
+                  ) : driveStatus?.connected ? (
                     <div className="space-y-2">
                       <Label className="text-xs">GoodNotes 백업 폴더</Label>
                       <div className="rounded-lg border bg-muted/30 p-3">

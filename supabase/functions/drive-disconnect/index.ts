@@ -11,15 +11,19 @@ Deno.serve(async (req) => {
   const optionsResponse = handleOptions(req);
   if (optionsResponse) return optionsResponse;
 
+  if (req.method !== "POST") return jsonResponse({ error: "method not allowed" }, { status: 405 });
+
   const user = await getUserFromAuthHeader(req);
   if (!user) return jsonResponse({ error: "인증이 필요합니다." }, { status: 401 });
 
   const admin = getAdminClient();
-  const { data: connection } = await admin
+  const { data: connection, error: readError } = await admin
     .from("drive_connections")
     .select("*")
     .eq("user_id", user.id)
     .maybeSingle();
+
+  if (readError) return jsonResponse({ error: "연결 정보를 조회하지 못했습니다." }, { status: 500 });
 
   if (connection) {
     try {
@@ -38,7 +42,8 @@ Deno.serve(async (req) => {
     }
   }
 
-  await admin.from("drive_connections").delete().eq("user_id", user.id);
+  const { error: deleteError } = await admin.from("drive_connections").delete().eq("user_id", user.id);
+  if (deleteError) return jsonResponse({ error: "연결을 해제하지 못했습니다." }, { status: 500 });
 
   return jsonResponse({ ok: true }, { headers: corsHeaders });
 });

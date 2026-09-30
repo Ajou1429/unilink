@@ -47,6 +47,10 @@ test("security migration enforces RLS, ownership, secret columns and durable bud
     await t.test("safe connection status is readable; credentials and quotas are service-only", async () => {
       await role("authenticated");
       assert.equal((await db.query("select account_email from drive_connections")).rows.length, 1);
+      assert.equal(
+        (await db.query("select connection_status from drive_connections")).rows[0].connection_status,
+        "active",
+      );
       await assert.rejects(db.query("select refresh_token_encrypted from drive_connections"), /permission denied/);
       await assert.rejects(db.query("select * from drive_connections"), /permission denied/);
       await assert.rejects(db.query(`select reserve_problem_bank_upload('${A}')`), /permission denied/);

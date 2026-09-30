@@ -31,9 +31,11 @@ conditions as versioned metadata. Confirm actual availability; recurring schedul
 counts and an empty calendar do not imply free study time. P0 sync's inferred
 legacy durations must not be treated as observed study time.
 
-The generation control remains disabled until a real endpoint exists. The next
-increment needs structured proposals, constraint validation, selected/deferred
-items with reasons, atomic approval/application, revision history and run logs.
+The generation control remains disabled while the proposal harness is tested.
+The [proposal harness](coaching-harness.md) now provides an authenticated Edge
+boundary, bounded P0 context, structured proposal validation and quota/status
+records. The next increment needs UI preview, atomic approval/application,
+revision history and outcome feedback.
 Google-derived content requires the appropriate data-use policy review before
 being included in model requests.
 
@@ -46,5 +48,6 @@ being included in model requests.
 - No horizontal document overflow or uncaught page errors in those scenarios.
 - OAuth/live signed-in Drive access and LLM generation were not tested by this UI test.
 
-Only DB-ver receives this UI release; pushing the branch does not publish it to
-the main GitHub Pages deployment.
+The coaching workspace UI is published from `main`. The proposal harness is
+included in the repository, but its Edge Function and quota migration require
+separate Supabase deployment before it can serve requests.

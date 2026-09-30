@@ -8,11 +8,11 @@ import { jsonResponse } from "../_shared/cors.ts";
 import { getAdminClient } from "../_shared/supabaseAdmin.ts";
 import { decryptSecret } from "../_shared/crypto.ts";
 import {
-  buildMetadataSummary,
   listChanges,
   listDriveFolderTree,
   refreshAccessToken,
 } from "../_shared/google.ts";
+import { saveDriveNote } from "../_shared/driveNotes.ts";
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
@@ -118,64 +118,13 @@ async function processChanges(
       };
     });
 
-  const { data: existingNotes } = await admin
-    .from("notes")
-    .select("drive_file_id, version")
-    .eq("user_id", connection.user_id)
-    .not("drive_file_id", "is", null);
-  const existingById = new Map(
-    (existingNotes ?? []).map((n) => [n.drive_file_id as string, n.version as number]),
-  );
-
   for (const file of pdfFiles) {
-    const existingVersion = existingById.get(file.id);
-    const isNew = existingVersion === undefined;
-    const contentSummary = buildMetadataSummary(file, isNew);
-
-    if (isNew) {
-      await admin.from("notes").insert({
-        user_id: connection.user_id,
-        title: file.name.replace(/\.[^.]+$/, ""),
-        course_name: "미분류",
-        linked_type: "unassigned",
-        source: "GoodNotes",
-        sync_status: "synced",
-        content: contentSummary,
-        file_name: file.name,
-        file_size: file.size ? Number(file.size) : null,
-        drive_file_id: file.id,
-        drive_folder_id: file.driveFolderId ?? null,
-        drive_folder_name: file.driveFolderName ?? null,
-        drive_folder_path: file.driveFolderPath ?? [],
-        drive_folder_path_ids: file.driveFolderPathIds ?? [],
-        drive_modified_time: file.modifiedTime,
-        version: 1,
-        tags: ["GoodNotes"],
-      });
-    } else {
-      await admin
-        .from("notes")
-        .update({
-          title: file.name.replace(/\.[^.]+$/, ""),
-          source: "GoodNotes",
-          sync_status: "synced",
-          content: contentSummary,
-          file_name: file.name,
-          file_size: file.size ? Number(file.size) : null,
-          drive_folder_id: file.driveFolderId ?? null,
-          drive_folder_name: file.driveFolderName ?? null,
-          drive_folder_path: file.driveFolderPath ?? [],
-          drive_folder_path_ids: file.driveFolderPathIds ?? [],
-          drive_modified_time: file.modifiedTime,
-          version: existingVersion + 1,
-        })
-        .eq("user_id", connection.user_id)
-        .eq("drive_file_id", file.id);
-    }
+    await saveDriveNote(admin, connection.user_id, file);
   }
 
-  await admin
+  const { error: cursorError } = await admin
     .from("drive_connections")
     .update({ page_token: newStartPageToken })
     .eq("user_id", connection.user_id);
+  if (cursorError) throw new Error("Cannot save Drive change cursor");
 }
