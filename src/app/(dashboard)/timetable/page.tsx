@@ -87,6 +87,9 @@ import {
   getCurrentAcademicTermLabel,
 } from "@/lib/academic-term";
 
+import { flushP0Changes } from "@/lib/p0-sync";
+import { getStorageUser } from "@/lib/private-storage";
+
 const DAYS: DayOfWeek[] = ["월", "화", "수", "목", "금", "토", "일"];
 const COURSE_TYPE_LABELS = {
   major: "전공",
@@ -436,11 +439,14 @@ export default function TimetablePage() {
     saveStoredCourses(nextCourses, selectedTerm);
   }
 
-  function addCatalogCourses(additions: Course[]) {
+  async function addCatalogCourses(additions: Course[]) {
+    const owner = getStorageUser();
     // Re-read at commit time: another tab may have edited the timetable while the picker was open.
     const next = [...getStoredCourses(AJOU_TERM)];
     const currentWork = getWorkSchedules();
     for (const course of additions) {
+      // A failed sync keeps the local record queued. Retry the queue without duplicating it.
+      if (next.some(item => item.id === course.id)) continue;
       if (next.some((item) => item.id === course.id || sameCatalogSubject({ registrationNumber: course.registrationNumber ?? "", subjectId: course.catalogSubjectId ?? "", courseCode: course.courseCode ?? "" }, item))) {
         throw new Error(`${course.name} 과목이 이미 편성되어 있습니다. 선택을 확인해주세요.`);
       }
@@ -450,11 +456,22 @@ export default function TimetablePage() {
       next.push(course);
     }
     saveStoredCourses(next, AJOU_TERM);
+    if (owner) {
+      try {
+        await flushP0Changes();
+      } catch {
+        throw new Error("DB 저장을 완료하지 못했습니다. 과목은 이 기기에 임시 저장되어 있으며, 연결이 복구되면 다시 동기화됩니다. 다시 시도해주세요.");
+      }
+      if (getStorageUser() !== owner) throw new Error("계정이 변경되었습니다. 현재 계정의 시간표를 다시 확인해주세요.");
+      window.dispatchEvent(new Event("unilink:p0SyncSuccess"));
+    }
     setAjouCourses(next);
     changeSelectedTerm(AJOU_TERM);
     setTermOptions((previous) => [...new Set([...previous, AJOU_TERM])]);
     setCourses(next);
-    setActionFeedback(`${additions.length}개 과목을 ${AJOU_TERM} 시간표에 추가했습니다.`);
+    setActionFeedback(owner
+      ? `${additions.length}개 과목·학습 목표·수업시간을 DB에 저장했습니다.`
+      : `${additions.length}개 과목을 ${AJOU_TERM} 데모 시간표에 추가했습니다.`);
   }
 
   function persistPersonalStudies(nextStudies: PersonalStudy[]) {
@@ -1815,7 +1832,7 @@ export default function TimetablePage() {
                     >
                       수업 삭제
                     </Button>
-                    <Button size="sm" variant="outline" className="w-full" render={<Link href={"/community?courseId=" + encodeURIComponent(selectedCourse.id)} />}>이 수업 커뮤니티</Button>
+                    <Button size="sm" variant="outline" className="w-full" nativeButton={false} render={<Link href={"/community?courseId=" + encodeURIComponent(selectedCourse.id)} />}>이 수업 커뮤니티</Button>
                   </div>
                 </CardContent>
               </Card>

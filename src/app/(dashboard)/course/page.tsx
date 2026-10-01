@@ -410,7 +410,7 @@ function CourseContent() {
                   <h2 className="text-2xl font-bold">{course.name}</h2>
                   <Badge variant="secondary">{course.credits}학점</Badge>
                 </div>
-                <Button size="sm" variant="outline" render={<Link href={"/community?courseId=" + encodeURIComponent(course.id)} />}>이 수업 커뮤니티</Button>
+                <Button size="sm" variant="outline" nativeButton={false} render={<Link href={"/community?courseId=" + encodeURIComponent(course.id)} />}>이 수업 커뮤니티</Button>
                 <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
                   <span className="flex items-center gap-1.5">
                     <BookOpen className="h-4 w-4" />

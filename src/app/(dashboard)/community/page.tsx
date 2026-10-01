@@ -212,7 +212,7 @@ function CommunityContent() {
     <div className="mx-auto w-full max-w-[1500px] space-y-5 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 p-5">
         <div><p className="text-xs font-semibold text-blue-700">시간표에서 이어지는 수업 이야기</p><h1 className="mt-1 text-xl font-bold text-slate-900">같은 과목, 같은 분반과 함께</h1><p className="mt-2 text-sm text-slate-600">내 시간표의 과목을 자동으로 연결하고, 분반별 질문과 정보를 모아보세요.</p></div>
-        <Button variant="outline" render={<Link href="/timetable" />}><CalendarDays className="h-4 w-4" />시간표 편성하기</Button>
+        <Button variant="outline" nativeButton={false} render={<Link href="/timetable" />}><CalendarDays className="h-4 w-4" />시간표 편성하기</Button>
       </div>
       <p className="text-xs text-slate-500">현재 글·댓글은 이 브라우저에만 저장됩니다. 다른 기기·사용자와의 온라인 공유는 아직 연결되지 않았습니다.</p>
       {(error || catalogError) && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error || catalogError}</p>}

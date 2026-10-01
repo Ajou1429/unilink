@@ -203,7 +203,7 @@ export default function SettingsPage() {
                 <p className="text-sm text-muted-foreground">
                   로그인 후 프로필을 수정할 수 있습니다.
                 </p>
-                <Button render={<Link href="/login" />}>로그인</Button>
+                <Button nativeButton={false} render={<Link href="/login" />}>로그인</Button>
               </div>
             )}
           </CardContent>

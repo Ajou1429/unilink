@@ -123,6 +123,12 @@ test("browser P0 persistence against the real PostgreSQL schema", async (t) => {
       await sync.initializeP0Account(A);
       assert.equal((await query("courses")).length, 1);
       assert.equal((await query("course_schedules")).length, 2);
+      const savedCourse = (await query("courses"))[0];
+      const courseGoals = (await query("learning_goals")).filter(goal => goal.course_id === savedCourse.id);
+      assert.equal(courseGoals.length, 1);
+      assert.equal(courseGoals[0].goal_type, "course");
+      assert.equal(courseGoals[0].user_id, A);
+      assert.ok((await query("course_schedules")).every(slot => slot.course_id === savedCourse.id));
       assert.equal((await query("study_plans")).length, 3);
       assert.equal((await query("study_plan_items")).length, 3);
       assert.equal((await query("calendar_events"))[0].is_blocking, false);

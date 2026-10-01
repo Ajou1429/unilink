@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, Check, Plus, Search, ShoppingBag, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,10 +44,11 @@ interface PickerProps {
   selectedTerm: string;
   existingCourses: Course[];
   workSchedules: WorkSchedule[];
-  onApply: (courses: Course[]) => void;
+  onApply: (courses: Course[]) => void | Promise<void>;
+  disabled?: boolean;
 }
 
-function PickerBody({ selectedTerm, existingCourses, workSchedules, onApply, onClose }: PickerProps & { onClose: () => void }) {
+function PickerBody({ selectedTerm, existingCourses, workSchedules, onApply, onClose, saving, setSaving }: PickerProps & { onClose: () => void; saving: boolean; setSaving: (value: boolean) => void }) {
   const [catalog, setCatalog] = useState<ParsedSection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -95,19 +96,25 @@ function PickerBody({ selectedTerm, existingCourses, workSchedules, onApply, onC
   const visible = filtered.slice(0, limit);
 
   function toggle(section: ParsedSection) {
+    if (saving) return;
     setError("");
     if (basket.some((s) => s.registrationNumber === section.registrationNumber)) {
       setBasket((prev) => prev.filter((s) => s.registrationNumber !== section.registrationNumber));
     } else if (!availability(section)) setBasket((prev) => [...prev, section]);
   }
 
-  function apply() {
+  const applying = useRef(false);
+  async function apply() {
+    if (applying.current) return;
+    applying.current = true;
+    setSaving(true);
+    setError("");
     try {
-      onApply(additions);
+      await onApply(additions);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "저장하지 못했습니다. 다시 시도해주세요.");
-    }
+    } finally { applying.current = false; setSaving(false); }
   }
 
   const selectStyle = "h-10 min-w-0 rounded-lg border bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500";
@@ -165,19 +172,20 @@ function PickerBody({ selectedTerm, existingCourses, workSchedules, onApply, onC
     </div>
     <div className="flex shrink-0 items-center justify-between gap-3 border-t pt-3">
       <span className="text-xs text-slate-500">선택한 과목만 추가 · 기존 시간표 유지</span>
-      <Button disabled={!basket.length} onClick={apply}>{basket.length}개 과목 시간표에 추가</Button>
+      <Button disabled={!basket.length || saving} onClick={apply}>{saving ? "저장 중…" : `${basket.length}개 과목 시간표에 추가`}</Button>
     </div>
   </>;
 }
 
 export function AjouCoursePicker(props: PickerProps) {
   const [open, setOpen] = useState(false);
-  return <Dialog open={open} onOpenChange={setOpen}>
-    <DialogTrigger render={<Button className="gap-2" />}>
+  const [saving, setSaving] = useState(false);
+  return <Dialog open={open} onOpenChange={(value) => { if (!saving) setOpen(value); }}>
+    <DialogTrigger render={<Button className="gap-2" disabled={props.disabled} />}>
       <BookOpen className="h-4 w-4" /> 수업 추가
     </DialogTrigger>
     <DialogContent className="flex h-[92dvh] max-h-[900px] flex-col overflow-hidden p-5 sm:max-w-6xl">
-      {open && <PickerBody {...props} onClose={() => setOpen(false)} />}
+      {open && <PickerBody {...props} saving={saving} setSaving={setSaving} onClose={() => setOpen(false)} />}
     </DialogContent>
   </Dialog>;
 }
