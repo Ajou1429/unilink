@@ -12,6 +12,7 @@ export async function handleGoogleAuth(req: Request): Promise<Response> {
   if (options) return options;
   const url = new URL(req.url);
   const action = url.pathname.split("/").filter(Boolean).pop();
+  let stage = "request";
   try {
     if (action === "callback" && req.method === "GET") {
       const target = new URL(Deno.env.get("FRONTEND_URL")!);
@@ -55,6 +56,7 @@ export async function handleGoogleAuth(req: Request): Promise<Response> {
       throw new RequestError("유효한 연결 요청이 아닙니다.");
     }
     const challenge = await codeChallenge(verifier as string);
+    stage = "verify_state";
     // DELETE ... RETURNING is atomic: wrong users/proofs do not consume a state;
     // concurrent completions cannot both exchange codes.
     const { data: pending, error } = await admin.from("oauth_states").delete()
@@ -63,10 +65,14 @@ export async function handleGoogleAuth(req: Request): Promise<Response> {
       .select("user_id").maybeSingle();
     if (error) throw error;
     if (!pending) throw new RequestError("연결 요청이 만료되었거나 시작한 계정/브라우저와 다릅니다.", 403);
+    stage = "exchange_token";
     const tokens = await exchangeCodeForTokens(code, verifier as string);
     if (!tokens.refresh_token) throw new RequestError("Google Drive 연결 동의를 다시 진행해주세요.");
+    stage = "encrypt_token";
     const encrypted = await encryptSecret(tokens.refresh_token);
+    stage = "read_drive_profile";
     const profile = await getDriveAccountProfile(tokens.access_token);
+    stage = "save_connection";
     const { error: saveError } = await admin.from("drive_connections").upsert({
       user_id: user.id, refresh_token_encrypted: encrypted.ciphertext, refresh_token_iv: encrypted.iv,
       account_email: profile.email, account_name: profile.name, account_photo_url: profile.photoUrl,
@@ -80,7 +86,10 @@ export async function handleGoogleAuth(req: Request): Promise<Response> {
   } catch (error) {
     // Never return OAuth token responses or internal database errors to clients.
     const status = error instanceof RequestError ? error.status : 500;
-    console.error("google-auth failed", { action, status });
+    // Do not log error messages: providers may include credentials or user data.
+    const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
+    const safeCode = ["invalid_client", "invalid_grant", "redirect_uri_mismatch", "access_denied", "23502", "23503", "23505", "42501", "42703", "42P01", "PGRST204"].includes(code) ? code : "unknown";
+    console.error("google-auth failed", { action, status, stage, code: safeCode });
     return jsonResponse({ error: error instanceof RequestError ? error.message : "Google 연결을 완료하지 못했습니다." }, { status });
   }
 }

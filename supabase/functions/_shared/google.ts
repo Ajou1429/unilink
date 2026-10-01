@@ -63,7 +63,9 @@ export async function exchangeCodeForTokens(code: string, verifier: string) {
     }),
   });
   if (!res.ok) {
-    throw new Error(`Google token 교환 실패: ${res.status} ${await res.text()}`);
+    const body = await res.json().catch(() => ({}));
+    const code = ["invalid_client", "invalid_grant", "redirect_uri_mismatch", "access_denied"].includes(body.error) ? body.error : "token_exchange_failed";
+    throw Object.assign(new Error("Google token 교환 실패"), { code });
   }
   return (await res.json()) as {
     access_token: string;

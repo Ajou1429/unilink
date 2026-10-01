@@ -172,7 +172,7 @@ export function completeDriveConnection(): Promise<boolean> {
     const { error } = await supabase.functions.invoke("google-auth/complete", {
       body: { code: params.get("drive_code"), state: proof.state, verifier: proof.verifier },
     });
-    if (error) throw new Error("Google 연결을 확인하지 못했습니다. 연결을 다시 시작해주세요.");
+    if (error) throw new Error(await describeFunctionError(error, "Google 연결을 확인하지 못했습니다. 연결을 다시 시작해주세요."));
     return true;
   })();
   return completion;
