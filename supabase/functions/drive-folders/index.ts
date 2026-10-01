@@ -5,7 +5,7 @@ import { readSmallJson, RequestError } from "../_shared/requestLimits.ts";
 
 import { corsHeaders, handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { decryptSecret } from "../_shared/crypto.ts";
-import { listDriveFolders, refreshAccessToken } from "../_shared/google.ts";
+import { listDriveFolders, listPdfFilesInFolder, refreshAccessToken } from "../_shared/google.ts";
 import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
@@ -19,6 +19,7 @@ Deno.serve(async (req) => {
 
   const body = await readSmallJson(req);
   const parentId = body.parentId == null ? null : validateDriveId(body.parentId);
+  const includePdfs = body.includePdfs === true;
   const admin = getAdminClient();
 
   const { data: connection, error } = await admin
@@ -40,9 +41,15 @@ Deno.serve(async (req) => {
     connection.refresh_token_iv,
   );
   const { access_token } = await refreshAccessToken(refreshToken);
-  const folders = await listDriveFolders(access_token, parentId);
+  const [folders, pdfs] = await Promise.all([
+    listDriveFolders(access_token, parentId),
+    includePdfs ? listPdfFilesInFolder(access_token, parentId ?? "root") : Promise.resolve([]),
+  ]);
 
-  return jsonResponse({ folders }, { headers: corsHeaders });
+  return jsonResponse({
+    folders,
+    pdfs: pdfs.map(({ id, name, modifiedTime, size }) => ({ id, name, modifiedTime, size })),
+  }, { headers: corsHeaders });
   } catch (error) {
     const status = error instanceof RequestError ? error.status : 502;
     console.error("drive-folders failed", { status });

@@ -199,20 +199,37 @@ export interface DriveFolder {
   parents?: string[];
 }
 
-export async function listDriveFolders(parentId?: string | null): Promise<DriveFolder[]> {
+export interface DrivePdfFile {
+  id: string;
+  name: string;
+  modifiedTime?: string;
+  size?: string;
+}
+
+export async function listDriveFolderContents(parentId?: string | null, includePdfs = true): Promise<{
+  folders: DriveFolder[];
+  pdfs: DrivePdfFile[];
+}> {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error("Supabase가 설정되지 않았습니다.");
 
-  const { data, error } = await supabase.functions.invoke<{ folders: DriveFolder[] }>(
+  const { data, error } = await supabase.functions.invoke<{
+    folders: DriveFolder[];
+    pdfs: DrivePdfFile[];
+  }>(
     "drive-folders",
     {
-      body: parentId ? { parentId } : {},
+      body: { ...(parentId ? { parentId } : {}), includePdfs },
     },
   );
   if (error || !data) {
     throw new Error(await describeFunctionError(error, "Drive 폴더 목록을 불러오지 못했습니다."));
   }
-  return data.folders ?? [];
+  return { folders: data.folders ?? [], pdfs: data.pdfs ?? [] };
+}
+
+export async function listDriveFolders(parentId?: string | null): Promise<DriveFolder[]> {
+  return (await listDriveFolderContents(parentId, false)).folders;
 }
 
 export async function syncDriveFolders(

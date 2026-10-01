@@ -3,7 +3,7 @@
 import { privateStorage } from "@/lib/private-storage";
 
 
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
 import { Badge } from "@/components/ui/badge";
@@ -63,10 +63,12 @@ import { Course } from "@/lib/types";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
   DriveFolder,
+  DrivePdfFile,
   DriveConnectionStatus,
   disconnectDrive,
   enableRealtimeWatch,
   getDriveConnectionStatus,
+  listDriveFolderContents,
   listDriveFolders,
   completeDriveConnection,
   startDriveConnection,
@@ -313,6 +315,8 @@ export default function NotesPage() {
   const [folderPickerBusy, setFolderPickerBusy] = useState(false);
   const [folderPickerError, setFolderPickerError] = useState<string | null>(null);
   const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([]);
+  const [drivePdfFiles, setDrivePdfFiles] = useState<DrivePdfFile[]>([]);
+  const folderLoadRequest = useRef(0);
   const [driveFolderPaths, setDriveFolderPaths] = useState<DriveFolderPath[]>([]);
   const [hiddenDriveFolderIds, setHiddenDriveFolderIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
@@ -656,8 +660,13 @@ export default function NotesPage() {
           folderSelection.map((folder) => folder.name),
         );
         setLastSyncAt(result.syncedAt);
+        setSearch("");
+        setClassificationFilter({ linkedType: "all", linkedId: "" });
+        setActiveNoteFolderPath([folderSelection[0].id]);
         setDriveMessage(
-          `동기화 완료: PDF ${result.filesFound}개 중 ${result.upserted}개 반영`,
+          result.filesFound === 0
+            ? "선택한 폴더와 하위 폴더에서 PDF를 찾지 못했습니다. Google 문서나 바로가기는 PDF로 가져오지 않습니다."
+            : `동기화 완료: PDF ${result.filesFound}개 중 ${result.upserted}개 반영`,
         );
         await loadNotes();
         await loadDriveStatus();
@@ -692,16 +701,23 @@ export default function NotesPage() {
   }
 
   async function loadDriveFolders(parentId?: string | null) {
+    const requestId = ++folderLoadRequest.current;
     setFolderPickerBusy(true);
     setFolderPickerError(null);
+    setDriveFolders([]);
+    setDrivePdfFiles([]);
     try {
-      setDriveFolders(await listDriveFolders(parentId));
+      const { folders, pdfs } = await listDriveFolderContents(parentId);
+      if (requestId !== folderLoadRequest.current) return;
+      setDriveFolders(folders);
+      setDrivePdfFiles(pdfs);
     } catch (error) {
+      if (requestId !== folderLoadRequest.current) return;
       setFolderPickerError(
         error instanceof Error ? error.message : "Drive 폴더를 불러오지 못했습니다.",
       );
     } finally {
-      setFolderPickerBusy(false);
+      if (requestId === folderLoadRequest.current) setFolderPickerBusy(false);
     }
   }
 
@@ -739,21 +755,27 @@ export default function NotesPage() {
     });
   }
 
-  async function syncSelectedDriveFolders() {
-    if (selectedDriveFolders.length === 0) return;
+  async function syncSelectedDriveFolders(folders = selectedDriveFolders) {
+    if (folders.length === 0) return;
 
     setDriveBusy(true);
     setDriveMessage(null);
     try {
       const result = await syncDriveFolders(
-        selectedDriveFolders.map((folder) => folder.id),
-        selectedDriveFolders.map((folder) => folder.name),
+        folders.map((folder) => folder.id),
+        folders.map((folder) => folder.name),
       );
-      setDriveFolderInput(selectedDriveFolders[0].id);
+      setDriveFolderInput(folders[0].id);
       setLastSyncAt(result.syncedAt);
       setFolderPickerOpen(false);
+      setSelectedDriveFolders(folders);
+      setSearch("");
+      setClassificationFilter({ linkedType: "all", linkedId: "" });
+      setActiveNoteFolderPath([folders[0].id]);
       setDriveMessage(
-        `선택한 폴더 ${selectedDriveFolders.length}개를 동기화했습니다. PDF ${result.filesFound}개 중 ${result.upserted}개를 반영했습니다.`,
+        result.filesFound === 0
+          ? "선택한 폴더와 하위 폴더에서 PDF를 찾지 못했습니다. Google 문서나 바로가기는 PDF로 가져오지 않습니다."
+          : `선택한 폴더 ${folders.length}개를 동기화했습니다. PDF ${result.filesFound}개 중 ${result.upserted}개를 반영했습니다.`,
       );
       await loadNotes();
       await loadDriveStatus();
@@ -1353,7 +1375,7 @@ export default function NotesPage() {
                                   {currentPickerFolder.name}
                                 </p>
                                 <p className="text-xs text-muted-foreground">
-                                  GoodNotes 자동 백업 PDF가 들어있는 폴더를 선택하세요.
+                                  폴더와 PDF를 확인한 뒤 동기화하세요. PDF는 동기화 후 나의 노트에서 열 수 있습니다.
                                 </p>
                               </div>
                               <Button
@@ -1372,13 +1394,18 @@ export default function NotesPage() {
                               <Button
                                 size="sm"
                                 className="w-full gap-1.5"
-                                onClick={() =>
-                                  toggleDriveFolderSelection({
+                                onClick={() => {
+                                  const currentFolder = {
                                     id: currentPickerFolder.id!,
                                     name: currentPickerFolder.name,
-                                    mimeType: "application/vnd.google-apps.folder",
-                                  })
-                                }
+                                    pathNames: folderPath.slice(1).map((item) => item.name),
+                                  };
+                                  const folders = [
+                                    currentFolder,
+                                    ...selectedDriveFolders.filter((item) => item.id !== currentFolder.id),
+                                  ];
+                                  void syncSelectedDriveFolders(folders);
+                                }}
                                 disabled={driveBusy}
                               >
                                 <CheckCircle2 className="h-3.5 w-3.5" />
@@ -1388,7 +1415,7 @@ export default function NotesPage() {
 
                             <Button
                               className="w-full gap-1.5"
-                              onClick={syncSelectedDriveFolders}
+                              onClick={() => void syncSelectedDriveFolders()}
                               disabled={driveBusy || selectedDriveFolders.length === 0}
                             >
                               <RefreshCw className="h-3.5 w-3.5" />
@@ -1406,9 +1433,11 @@ export default function NotesPage() {
                                 <Loader2 className="h-4 w-4 animate-spin" />
                                 Drive 폴더를 불러오는 중
                               </div>
-                            ) : driveFolders.length > 0 ? (
-                              <div className="space-y-2">
-                                {driveFolders.map((folder) => (
+                            ) : driveFolders.length > 0 || drivePdfFiles.length > 0 ? (
+                              <div className="space-y-4">
+                                {driveFolders.length > 0 && <div className="space-y-2">
+                                  <p className="text-xs font-semibold text-muted-foreground">하위 폴더</p>
+                                  {driveFolders.map((folder) => (
                                   <div
                                     key={folder.id}
                                     className="flex items-center justify-between gap-3 rounded-lg border p-3"
@@ -1436,11 +1465,24 @@ export default function NotesPage() {
                                       선택
                                     </Button>
                                   </div>
-                                ))}
+                                  ))}
+                                </div>}
+                                {drivePdfFiles.length > 0 && <div className="space-y-2">
+                                  <p className="text-xs font-semibold text-muted-foreground">
+                                    이 폴더의 PDF {drivePdfFiles.length}개
+                                  </p>
+                                  {drivePdfFiles.map((file) => (
+                                    <div key={file.id} className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3">
+                                      <FileText className="h-4 w-4 shrink-0 text-primary" />
+                                      <span className="min-w-0 truncate text-sm" title={file.name}>{file.name}</span>
+                                      {file.size && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{formatBytes(Number(file.size))}</span>}
+                                    </div>
+                                  ))}
+                                </div>}
                               </div>
                             ) : (
                               <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-                                이 위치에는 하위 폴더가 없습니다.
+                                이 위치에 하위 폴더나 PDF가 없습니다.
                               </div>
                             )}
                           </div>
