@@ -4,7 +4,6 @@ import { isSupabaseConfigured } from "@/lib/supabase-client";
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +13,6 @@ import { signInWithGoogle } from "@/lib/google-login";
 import { isValidPassword, passwordChecks } from "@/lib/password-policy";
 
 export default function SignupPage() {
-  const router = useRouter();
   const [form, setForm] = useState({
     username: "",
     displayName: "",
@@ -46,7 +44,7 @@ export default function SignupPage() {
       return;
     }
 
-    router.push("/dashboard");
+    window.location.assign(new URL(`${window.location.pathname.startsWith("/unilink/") ? "/unilink" : ""}/dashboard`, window.location.origin).href);
   }
 
   async function handleGoogleSignup() {

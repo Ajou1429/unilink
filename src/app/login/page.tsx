@@ -4,7 +4,6 @@ import { isSupabaseConfigured } from "@/lib/supabase-client";
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +12,6 @@ import { loginWithPassword } from "@/lib/auth-storage";
 import { signInWithGoogle } from "@/lib/google-login";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
@@ -32,7 +30,7 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/dashboard");
+    window.location.assign(new URL(`${window.location.pathname.startsWith("/unilink/") ? "/unilink" : ""}/dashboard`, window.location.origin).href);
   }
 
   async function handleGoogleLogin() {

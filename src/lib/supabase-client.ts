@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { isDemoMode } from "./demo-mode";
+import { clearDemoModeOnAuthenticationRoute, isDemoMode } from "./demo-mode";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -11,6 +11,7 @@ export function isSupabaseConfigured() {
 }
 
 export function getSupabaseBrowserClient() {
+  clearDemoModeOnAuthenticationRoute();
   if (!isSupabaseConfigured()) return null;
 
   if (!browserClient) {
