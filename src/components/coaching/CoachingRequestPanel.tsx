@@ -84,8 +84,9 @@ export function CoachingRequestPanel() {
     setResult(null);
     if (!selected.length || selected.length > 5 || !range.length) { setStatus("목표 1~5개와 1~14일의 기간을 선택해 주세요."); return; }
     const budgets = range.map((date) => days[date] ?? { date, minutes: 0, start: "", end: "" });
-    if (budgets.some((day) => !day.start || !day.end || day.start >= day.end || day.minutes < 0 || day.minutes > 480) ||
-      !budgets.some((day) => day.minutes >= 15)) { setStatus("각 날짜의 시간 창과 학습 가능 시간을 확인해 주세요."); return; }
+    if (budgets.some((day) => day.minutes < 0 || day.minutes > 480 ||
+      (day.minutes > 0 && (!day.start || !day.end || day.start >= day.end))) ||
+      !budgets.some((day) => day.minutes >= 15)) { setStatus("학습할 날짜의 시간 창과 학습 가능 시간을 확인해 주세요."); return; }
     setBusy(true);
     setStatus("DB 동기화와 GPT 계획 생성 중입니다…");
     try {
@@ -94,7 +95,8 @@ export function CoachingRequestPanel() {
       await flushP0Changes();
       const { data, error } = await db.functions.invoke<Result>("coaching-propose", { body: {
         goal_ids: selected, intent, period_start: start, period_end: end,
-        day_budgets: budgets.map((day) => ({ date: day.date, minutes: day.minutes, windows: [{ start: day.start, end: day.end }] })),
+        day_budgets: budgets.map((day) => ({ date: day.date, minutes: day.minutes,
+          windows: day.minutes > 0 ? [{ start: day.start, end: day.end }] : [] })),
         desired_outcome: outcome.slice(0, 1000), constraints: constraints.slice(0, 1000),
         rules: { transition_minutes: transition, break_minutes: breakMinutes, break_after_minutes: breakAfter,
           method_minimums: methodMinimums, max_focus_goals: maxFocus, carryover: true },
@@ -129,11 +131,11 @@ export function CoachingRequestPanel() {
         <div className={styles.coachingGrid}><label>일괄 시작<input aria-label="일괄 시작" type="time" value={bulk.start} onChange={(e) => setBulk({ ...bulk, start: e.target.value })} /></label>
           <label>일괄 종료<input aria-label="일괄 종료" type="time" value={bulk.end} onChange={(e) => setBulk({ ...bulk, end: e.target.value })} /></label>
           <label>일괄 학습 분<input aria-label="일괄 학습 분" type="number" min={0} max={480} value={bulk.minutes} onChange={(e) => setBulk({ ...bulk, minutes: Number(e.target.value) })} /></label></div>
-        <button type="button" className={styles.save} onClick={() => { if (!bulk.start || !bulk.end || bulk.start >= bulk.end) { setStatus("일괄 시간 창을 먼저 확인해 주세요."); return; }
+        <button type="button" className={styles.save} onClick={() => { if (bulk.minutes > 0 && (!bulk.start || !bulk.end || bulk.start >= bulk.end)) { setStatus("일괄 시간 창을 먼저 확인해 주세요."); return; }
           setDays(Object.fromEntries(range.map((date) => [date, { date, ...bulk }]))); setResult(null); }}>기간에 적용</button>
         {range.map((date) => { const day = days[date] ?? { date, minutes: 0, start: "", end: "" }; return <div key={date} className={styles.dayRow}>
-          <strong>{date}</strong><input aria-label={`${date} 시작`} type="time" value={day.start} onChange={(e) => updateDay(date, { start: e.target.value })} />
-          <input aria-label={`${date} 종료`} type="time" value={day.end} onChange={(e) => updateDay(date, { end: e.target.value })} />
+          <strong>{date}</strong><input aria-label={`${date} 시작`} type="time" value={day.start} disabled={day.minutes === 0} onChange={(e) => updateDay(date, { start: e.target.value })} />
+          <input aria-label={`${date} 종료`} type="time" value={day.end} disabled={day.minutes === 0} onChange={(e) => updateDay(date, { end: e.target.value })} />
           <input aria-label={`${date} 학습 분`} type="number" min={0} max={480} value={day.minutes} onChange={(e) => updateDay(date, { minutes: Number(e.target.value) })} /></div>; })}
       </div>}
       <label>달성하고 싶은 목표<textarea maxLength={1000} rows={2} value={outcome} onChange={(e) => setOutcome(e.target.value)} /></label>
@@ -142,7 +144,7 @@ export function CoachingRequestPanel() {
         <label>일정 전후 여유 (분)<input type="number" min={0} max={60} value={transition} onChange={(e) => setTransition(Number(e.target.value))} /></label>
         <label>휴식 (분)<input type="number" min={0} max={60} value={breakMinutes} onChange={(e) => setBreakMinutes(Number(e.target.value))} /></label>
         <label>연속 학습 상한 (분)<input type="number" min={30} max={240} value={breakAfter} onChange={(e) => setBreakAfter(Number(e.target.value))} /></label>
-        <label>집중 목표 수<input type="number" min={1} max={5} value={maxFocus} onChange={(e) => setMaxFocus(Number(e.target.value))} /></label>
+        <label>하루 집중 목표 수<input type="number" min={1} max={5} value={maxFocus} onChange={(e) => setMaxFocus(Number(e.target.value))} /></label>
       </div>
       <details><summary>방법별 최소 연속 학습 시간</summary><div className={styles.methodRules}>
         {methods.map((method) => <label key={method.code}>{method.display_name}<input aria-label={`${method.display_name} 최소 분`} type="number" min={15} max={Math.min(180, breakAfter)}

@@ -21,7 +21,8 @@ not create a second persistence path or change database migrations.
   link to their existing service screens.
 - Coaching request drafts store a versioned, account-scoped browser record with
   target, intent, period, daily availability, desired outcome and constraints.
-  Drafts are not yet cloud-synchronized, sent to an LLM or saved as study plans.
+  Drafts are not cloud-synchronized or saved as study plans. When generation is
+  enabled, the request is sent to the proposal harness and displayed as a preview.
 
 ## Agent integration boundary
 
@@ -31,15 +32,16 @@ conditions as versioned metadata. Confirm actual availability; recurring schedul
 counts and an empty calendar do not imply free study time. P0 sync's inferred
 legacy durations must not be treated as observed study time.
 
-The generation control remains disabled while the proposal harness is tested.
+The generation control is gated by configuration; deployment and provider
+credentials must be verified separately from the presence of this UI code.
 The [proposal harness](coaching-harness.md) now provides an authenticated Edge
 boundary, bounded P0 context, structured proposal validation and quota/status
-records. The next increment needs UI preview, atomic approval/application,
+records. UI preview exists. The next increment needs atomic approval/application,
 revision history and outcome feedback.
 Google-derived content requires the appropriate data-use policy review before
 being included in model requests.
 
-## Validation
+## Historical UI Validation
 
 - 77 existing and focused unit/database simulation tests passed.
 - Desktop 1440px, tablet 768px and phone 390px checked in isolated headless Edge.
@@ -51,3 +53,12 @@ being included in model requests.
 The coaching workspace UI is published from `main`. The proposal harness is
 included in the repository, but its Edge Function and quota migration require
 separate Supabase deployment before it can serve requests.
+
+## Current Review (2026-10-01)
+
+See [the harness and database preparation](coaching-harness.md). The review's
+continuous-study, daily focus and zero-minute-day defects are corrected in code.
+AI plan application still needs a normalized plan/item read adapter: the current
+P0 hydration bridge restores legacy-bucket records, not arbitrary newly
+persisted AI plans. Live deployment and the current remote database schema were
+not verified in this review.

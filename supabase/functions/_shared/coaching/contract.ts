@@ -3,7 +3,7 @@ export class CoachingError extends Error {
   constructor(message: string, status = 400) { super(message); this.status = status; }
 }
 
-export const COACHING_POLICY_VERSION = "time-window-v2";
+export const COACHING_POLICY_VERSION = "time-window-v3";
 
 export type TimeWindow = { start: string; end: string };
 export type DayBudget = { date: string; minutes: number; windows: TimeWindow[] };
@@ -91,7 +91,8 @@ export function parseCoachingRequest(value: unknown): CoachingRequest {
     }
     const day = dayNumber(entry.date);
     if (day < start || day > end) throw new CoachingError("Availability is outside the plan period");
-    if (!Array.isArray(entry.windows) || entry.windows.length < 1 || entry.windows.length > 8) throw new CoachingError("Confirm study windows for each day");
+    if (!Array.isArray(entry.windows) || entry.windows.length > 8 ||
+      ((entry.minutes as number) > 0 && entry.windows.length < 1)) throw new CoachingError("Confirm study windows for each day");
     const windows = entry.windows.map((window: unknown) => {
       if (!record(window)) throw new CoachingError("Invalid study window");
       const from = minuteOfDay(window.start), to = minuteOfDay(window.end);
@@ -190,14 +191,18 @@ export function validateProposal(value: unknown, request: CoachingRequest, conte
         const gap = current.start - previous.end;
         const required = previous.goal !== current.goal ? request.rules.transition_minutes : 0;
         if (gap < required || gap < 0) throw new CoachingError("Plan items overlap or lack transition time", 502);
-        if (continuous >= request.rules.break_after_minutes && gap < request.rules.break_minutes) throw new CoachingError("Plan lacks required break", 502);
-        continuous = gap >= request.rules.break_minutes ? 0 : continuous;
+        continuous = gap >= Math.max(1, request.rules.break_minutes) ? 0 : continuous;
       }
       continuous += current.end - current.start;
+      if (continuous > request.rules.break_after_minutes) throw new CoachingError("Plan lacks required break", 502);
     }
   }
   const selected = new Set(items.map((item) => item.goal_id));
-  if (selected.size > request.rules.max_focus_goals) throw new CoachingError("Plan exceeds focus goal limit", 502);
+  for (const intervals of scheduled.values()) {
+    if (new Set(intervals.map((interval) => interval.goal)).size > request.rules.max_focus_goals) {
+      throw new CoachingError("Plan exceeds daily focus goal limit", 502);
+    }
+  }
   const deferred: DeferredGoal[] = [];
   const deferredIds = new Set<string>();
   for (const raw of value.deferred_goals) {
