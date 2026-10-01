@@ -14,6 +14,8 @@ import {
   type CurrentUser,
   updateDisplayName,
 } from "@/lib/auth-storage";
+import { linkGoogleToCurrentAccount } from "@/lib/google-login";
+import { getSupabaseBrowserClient } from "@/lib/supabase-client";
 import {
   getNotificationSettings,
   NotificationSettings,
@@ -32,6 +34,34 @@ export default function SettingsPage() {
     });
   const [notificationMessage, setNotificationMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [googleLinked, setGoogleLinked] = useState(false);
+  const [googleMessage, setGoogleMessage] = useState("");
+  const [isLinkingGoogle, setIsLinkingGoogle] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const supabase = getSupabaseBrowserClient();
+    async function refreshIdentities() {
+      const { data, error } = await supabase?.auth.getUserIdentities() ?? { data: null, error: null };
+      if (active) {
+        setGoogleLinked(Boolean(data?.identities.some((identity) => identity.provider === "google")));
+        if (error) setGoogleMessage("Google 계정 연결 상태를 확인하지 못했습니다.");
+      }
+    }
+    void refreshIdentities();
+    const subscription = supabase?.auth.onAuthStateChange(() => {
+      queueMicrotask(() => { if (active) void refreshIdentities(); });
+    });
+    return () => { active = false; subscription?.data.subscription.unsubscribe(); };
+  }, []);
+
+  async function handleGoogleLink() {
+    setIsLinkingGoogle(true);
+    setGoogleMessage("");
+    const error = await linkGoogleToCurrentAccount();
+    if (error) setGoogleMessage(`Google 계정을 연결하지 못했습니다: ${error}`);
+    setIsLinkingGoogle(false);
+  }
 
   useEffect(() => {
     function syncUser() {
@@ -208,6 +238,21 @@ export default function SettingsPage() {
             )}
           </CardContent>
         </Card>
+
+        {currentUser && <Card className="border-0 shadow-sm">
+          <CardHeader className="pb-3"><CardTitle>Google 계정 연결</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {googleLinked
+                ? "Google 계정이 현재 UniLink 계정에 연결되어 있습니다. 두 로그인 방식에서 같은 학습 데이터를 사용합니다."
+                : "현재 UniLink 계정에 Google 계정을 연결하면 같은 학습 데이터를 사용할 수 있습니다."}
+            </p>
+            {!googleLinked && <Button type="button" variant="outline" disabled={isLinkingGoogle} onClick={handleGoogleLink}>
+              {isLinkingGoogle ? "연결 중..." : "Google 계정 연결"}
+            </Button>}
+            {googleMessage && <p role="alert" className="text-sm text-destructive">{googleMessage}</p>}
+          </CardContent>
+        </Card>}
 
         <Card className="border-0 shadow-sm">
           <CardHeader className="pb-3">

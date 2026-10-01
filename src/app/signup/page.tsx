@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GraduationCap } from "lucide-react";
 import { signupWithPassword } from "@/lib/auth-storage";
+import { signInWithGoogle } from "@/lib/google-login";
+import { isValidPassword, passwordChecks } from "@/lib/password-policy";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -24,6 +26,8 @@ export default function SignupPage() {
   });
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const passwordValid = isValidPassword(form.password);
 
   function updateField(field: keyof typeof form, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -45,6 +49,14 @@ export default function SignupPage() {
     router.push("/dashboard");
   }
 
+  async function handleGoogleSignup() {
+    setIsSubmitting(true);
+    setMessage("");
+    const error = await signInWithGoogle();
+    if (error) setMessage(`Google 가입을 시작하지 못했습니다: ${error}`);
+    setIsSubmitting(false);
+  }
+
   return (
     <div className="min-h-screen flex">
       <div className="hidden lg:flex lg:w-1/2 bg-primary flex-col justify-between p-12">
@@ -61,7 +73,7 @@ export default function SignupPage() {
           {[
             "대학교와 학과 기반으로 수업 커뮤니티 준비",
             "강의 노트와 주간 진도 관리",
-            "추후 학교 인증과 소셜 로그인 연동 예정",
+            "Google 계정으로 간편하게 시작",
           ].map((text) => (
             <div key={text} className="flex items-center gap-3 text-primary-foreground/90">
               <div className="h-2 w-2 rounded-full bg-white" />
@@ -70,7 +82,7 @@ export default function SignupPage() {
           ))}
         </div>
         <p className="text-sm text-primary-foreground/60">
-          지금은 기본 회원가입만 받고, 학교 인증 절차는 나중에 추가할 수 있습니다.
+          학교 인증 절차는 나중에 추가할 수 있습니다.
         </p>
       </div>
 
@@ -124,7 +136,7 @@ export default function SignupPage() {
                   id="password"
                   type="password"
                   autoComplete="new-password"
-                  placeholder="12자 이상"
+                  placeholder="10자 이상"
                   className="h-11"
                   value={form.password}
                   onChange={(event) => updateField("password", event.target.value)}
@@ -145,6 +157,17 @@ export default function SignupPage() {
                 />
               </div>
             </div>
+
+            <ul className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs" aria-label="비밀번호 조건">
+              {passwordChecks.map(({ label, test }) => (
+                <li key={label} className={test(form.password) ? "text-emerald-700" : "text-muted-foreground"}>
+                  <span aria-hidden="true">{test(form.password) ? "✓" : "○"}</span> {label}
+                </li>
+              ))}
+              <li className={form.passwordConfirm && form.password === form.passwordConfirm ? "text-emerald-700" : "text-muted-foreground"}>
+                <span aria-hidden="true">{form.passwordConfirm && form.password === form.passwordConfirm ? "✓" : "○"}</span> 비밀번호 일치
+              </li>
+            </ul>
 
             <div className="space-y-2">
               <Label htmlFor="university">대학교</Label>
@@ -190,7 +213,7 @@ export default function SignupPage() {
                 현재는 학교 이메일 인증 없이 기본 정보만 저장합니다. 실제 인증과
                 약관 동의는 추후 추가 예정입니다.
               </p>
-              <Button className="h-11 w-full" type="submit" disabled={isSubmitting || !isSupabaseConfigured()}>
+              <Button className="h-11 w-full" type="submit" disabled={isSubmitting || !isSupabaseConfigured() || !passwordValid || form.password !== form.passwordConfirm}>
                 {isSubmitting ? "가입 중..." : "회원가입"}
               </Button>
             </div>
@@ -208,9 +231,10 @@ export default function SignupPage() {
           </div>
 
           <div className="space-y-3">
-            <Button variant="outline" className="h-11 w-full gap-3">
+            <Button variant="outline" className="h-11 w-full gap-3" onClick={handleGoogleSignup} disabled={isSubmitting || !isSupabaseConfigured()}>
               Google로 가입
             </Button>
+            <p className="text-xs text-muted-foreground">기존 UniLink 계정이 있다면 새로 가입하지 말고, 그 계정으로 로그인한 뒤 설정에서 Google을 연결하세요.</p>
             <Button variant="outline" className="h-11 w-full gap-3">
               카카오로 가입
             </Button>

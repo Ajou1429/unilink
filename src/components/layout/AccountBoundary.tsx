@@ -6,6 +6,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-client";
 import { initializeP0Account, startP0SyncListener, stopP0Sync } from "@/lib/p0-sync";
 import { initializeDemoData } from "@/lib/demo-data";
 import { DEMO_MODE_KEY, isDemoMode } from "@/lib/demo-mode";
+import { GOOGLE_AUTH_RETURN_KEY } from "@/lib/google-login";
 
 /** Do not mount data readers until the server has verified the cached session.
  * Remount all private screens when the principal changes, including other tabs. */
@@ -39,7 +40,11 @@ export function AccountBoundary({ children }: { children: React.ReactNode }) {
         if (stopped || request !== version) return;
         const user = error ? null : data.user;
         if (user && loadedIdentity.current === user.id && getCurrentUser()?.id === user.id) return;
-        if (!user) { loadedIdentity.current = null; stopP0Sync(); }
+        if (!user) {
+          loadedIdentity.current = null;
+          stopP0Sync();
+          if (window.location.pathname === "/") window.sessionStorage.removeItem(GOOGLE_AUTH_RETURN_KEY);
+        }
         pendingIdentity.current = user?.id ?? "guest";
         setIdentity(null);
         applyAuthenticatedUser(user);
@@ -56,7 +61,14 @@ export function AccountBoundary({ children }: { children: React.ReactNode }) {
           }
         }
         pendingIdentity.current = null;
-        if (!stopped && request === version) setIdentity(user?.id ?? "guest");
+        if (!stopped && request === version) {
+          setIdentity(user?.id ?? "guest");
+          const destination = window.sessionStorage.getItem(GOOGLE_AUTH_RETURN_KEY);
+          if (user && window.location.pathname === "/" && (destination === "/dashboard" || destination === "/settings")) {
+            window.sessionStorage.removeItem(GOOGLE_AUTH_RETURN_KEY);
+            window.location.replace(destination);
+          }
+        }
       } catch {
         if (!stopped && request === version) {
           pendingIdentity.current = "guest";

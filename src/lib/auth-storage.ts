@@ -1,6 +1,7 @@
 import { setStorageUser } from "./private-storage";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "./supabase-client";
+import { isValidPassword } from "./password-policy";
 
 export const USERS_STORAGE_KEY = "unilink:users";
 export const CURRENT_USER_STORAGE_KEY = "unilink:current-user";
@@ -46,8 +47,8 @@ function validateInput(input: SignupInput) {
     return "대학교, 학과, 생일을 모두 입력해주세요.";
   }
 
-  if (input.password.length < 12) {
-    return "비밀번호는 12자 이상으로 입력해주세요.";
+  if (!isValidPassword(input.password)) {
+    return "비밀번호는 10자 이상이며 영문 대문자·소문자·숫자·특수기호를 모두 포함해야 합니다.";
   }
 
   if (input.password !== input.passwordConfirm) {
