@@ -4,6 +4,8 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { applyAuthenticatedUser, AUTH_CHANGED_EVENT, getCurrentUser } from "@/lib/auth-storage";
 import { getSupabaseBrowserClient } from "@/lib/supabase-client";
 import { initializeP0Account, startP0SyncListener, stopP0Sync } from "@/lib/p0-sync";
+import { initializeDemoData } from "@/lib/demo-data";
+import { DEMO_MODE_KEY, isDemoMode } from "@/lib/demo-mode";
 
 /** Do not mount data readers until the server has verified the cached session.
  * Remount all private screens when the principal changes, including other tabs. */
@@ -41,6 +43,7 @@ export function AccountBoundary({ children }: { children: React.ReactNode }) {
         pendingIdentity.current = user?.id ?? "guest";
         setIdentity(null);
         applyAuthenticatedUser(user);
+        if (!user) initializeDemoData();
         if (user) {
           try {
             await initializeP0Account(user.id);
@@ -90,6 +93,12 @@ export function AccountBoundary({ children }: { children: React.ReactNode }) {
   }, []);
   if (identity === null) return <p className="p-6 text-sm text-muted-foreground">로그인 상태 확인 중…</p>;
   return <Fragment key={identity}>
+    {isDemoMode() && <div role="status" className="flex flex-wrap items-center justify-center gap-3 bg-amber-100 px-4 py-3 text-sm text-amber-950">
+      <span>데모 체험 · 샘플 데이터와 변경사항은 이 탭에만 저장됩니다. 실제 Drive 연결은 로그인 후 이용하세요.</span>
+      <a className="rounded border border-amber-700 px-3 py-1 font-medium" href={`${process.env.NODE_ENV === "production" ? "/unilink" : ""}/login`} onClick={() => {
+        window.sessionStorage.removeItem(DEMO_MODE_KEY);
+      }}>실제 서비스로 돌아가기</a>
+    </div>}
     {syncError && identity !== "guest" && <div role="alert" className="fixed bottom-4 right-4 z-[100] max-w-md rounded-md border border-red-300 bg-white px-4 py-3 text-sm text-red-700 shadow-lg">
       학습 데이터 동기화 오류: {syncError}
     </div>}

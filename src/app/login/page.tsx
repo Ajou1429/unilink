@@ -116,6 +116,10 @@ export default function LoginPage() {
               {isSubmitting ? "로그인 중..." : "로그인"}
             </Button>
           </form>
+          <a className="mt-3 block rounded-md border px-4 py-3 text-center text-sm font-medium hover:bg-muted"
+            href={`${process.env.NODE_ENV === "production" ? "/unilink" : ""}/dashboard?demo=1`}>
+            로그인 없이 데모 체험하기
+          </a>
 
           <div className="relative my-6">
             <div className="absolute inset-0 flex items-center">

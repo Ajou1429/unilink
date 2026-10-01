@@ -1215,7 +1215,7 @@ export default function NotesPage() {
                   className="gap-1.5"
                   onClick={refreshSync}
                   disabled={
-                    driveBusy ||
+                    !isSupabaseConfigured || driveBusy ||
                     (isSupabaseConfigured &&
                       (!driveStatus?.connected || driveStatus.requiresReconnect || !driveFolderInput))
                   }
@@ -1235,29 +1235,9 @@ export default function NotesPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {!isSupabaseConfigured ? (
-                <>
-                  {["GoodNotes", "iCloud Drive", "Google Drive"].map((provider) => (
-                    <div
-                      key={provider}
-                      className="flex items-center justify-between rounded-lg border p-3"
-                    >
-                      <div>
-                        <p className="text-sm font-medium">{provider}</p>
-                        <p className="text-xs text-muted-foreground">
-                          변경 감지 후 UniLink 노트로 자동 반영
-                        </p>
-                      </div>
-                      <Badge variant="secondary" className="gap-1">
-                        <CheckCircle2 className="h-3 w-3" />
-                        준비됨
-                      </Badge>
-                    </div>
-                  ))}
-                  <p className="text-xs text-muted-foreground">
-                    (개발 모드: Supabase가 설정되지 않아 실제 연동 대신 로컬 목업으로
-                    동작합니다. .env.local.example 참고)
-                  </p>
-                </>
+                <p className="rounded-lg border p-3 text-sm text-muted-foreground">
+                  데모에서는 샘플 노트를 열고 분류할 수 있습니다. 실제 Google Drive 연결과 PDF 동기화는 실제 서비스로 돌아가 로그인한 뒤 이용하세요.
+                </p>
               ) : (
                 <>
                   <div className="flex items-center justify-between gap-3 rounded-lg border p-3">

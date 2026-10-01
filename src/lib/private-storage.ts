@@ -1,15 +1,17 @@
 /** Account namespaces prevent accidental cross-account reads, not access by a
  * person with browser/devtools access. Never store server credentials here. */
+import { isDemoMode } from "./demo-mode.ts";
+
 let userId: string | null = null;
 export const PRIVATE_STORAGE_CHANGED_EVENT = "unilink:privateStorageChanged";
 export function setStorageUser(id: string | null) { userId = id; }
 export function getStorageUser() { return userId; }
 export function privateStorageKey(key: string) {
-  return `unilink:private:${userId ? "user:" + encodeURIComponent(userId) : "guest"}:${key}`;
+  return `unilink:private:${isDemoMode() ? "demo" : userId ? "user:" + encodeURIComponent(userId) : "guest"}:${key}`;
 }
 function storage() {
   // A signed-out demo is tab-local; it never reads account or legacy data.
-  return userId ? window.localStorage : window.sessionStorage;
+  return userId && !isDemoMode() ? window.localStorage : window.sessionStorage;
 }
 function changedRecordIds(previousValue: string | null, nextValue: string | null) {
   try {

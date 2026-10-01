@@ -105,11 +105,11 @@ export default function LandingPage() {
                 무료로 시작하기 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
-            <Link href="/dashboard">
+            <a href={`${process.env.NODE_ENV === "production" ? "/unilink" : ""}/dashboard?demo=1`}>
               <Button size="lg" variant="outline" className="text-base px-8">
                 데모 보기
               </Button>
-            </Link>
+            </a>
           </div>
           <div className="mt-16 grid grid-cols-3 gap-8 max-w-lg mx-auto">
             {stats.map((s) => (

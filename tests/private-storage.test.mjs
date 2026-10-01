@@ -31,3 +31,17 @@ test("guest notes do not persist in a new tab session", () => {
   window.sessionStorage = memory();
   assert.equal(privateStorage.getItem("notes"), null);
 });
+test("demo edits stay separate from both a signed-in account and guest data", () => {
+  privateStorage.setItem("notes", "guest");
+  setStorageUser("A");
+  privateStorage.setItem("notes", "account");
+  window.sessionStorage.setItem("unilink:demo-mode", "1");
+  assert.equal(privateStorage.getItem("notes"), null);
+  privateStorage.setItem("notes", "demo edits");
+  window.sessionStorage.removeItem("unilink:demo-mode");
+  assert.equal(privateStorage.getItem("notes"), "account");
+  setStorageUser(null);
+  assert.equal(privateStorage.getItem("notes"), "guest");
+  window.sessionStorage.setItem("unilink:demo-mode", "1");
+  assert.equal(privateStorage.getItem("notes"), "demo edits");
+});
