@@ -137,7 +137,7 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-3">
-            <Button variant="outline" className="h-11 w-full gap-3" onClick={handleGoogleLogin} disabled={isSubmitting || !isSupabaseConfigured()}>
+            <Button type="button" variant="outline" className="h-11 w-full gap-3" onClick={handleGoogleLogin} disabled={isSubmitting || !isSupabaseConfigured()}>
               <svg className="h-5 w-5" viewBox="0 0 24 24">
                 <path
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -156,12 +156,9 @@ export default function LoginPage() {
                   fill="#EA4335"
                 />
               </svg>
-              Google로 로그인
+              Google 아이디로 로그인
             </Button>
             <p className="text-xs text-muted-foreground">기존 아이디의 학습 데이터를 Google에서도 사용하려면 아이디로 로그인한 뒤 설정에서 Google 계정을 연결하세요.</p>
-            <Button variant="outline" className="h-11 w-full gap-3">
-              카카오로 로그인
-            </Button>
           </div>
         </div>
       </div>

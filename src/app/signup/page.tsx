@@ -231,13 +231,10 @@ export default function SignupPage() {
           </div>
 
           <div className="space-y-3">
-            <Button variant="outline" className="h-11 w-full gap-3" onClick={handleGoogleSignup} disabled={isSubmitting || !isSupabaseConfigured()}>
-              Google로 가입
+            <Button type="button" variant="outline" className="h-11 w-full gap-3" onClick={handleGoogleSignup} disabled={isSubmitting || !isSupabaseConfigured()}>
+              Google 아이디로 가입
             </Button>
             <p className="text-xs text-muted-foreground">기존 UniLink 계정이 있다면 새로 가입하지 말고, 그 계정으로 로그인한 뒤 설정에서 Google을 연결하세요.</p>
-            <Button variant="outline" className="h-11 w-full gap-3">
-              카카오로 가입
-            </Button>
           </div>
         </div>
       </div>
