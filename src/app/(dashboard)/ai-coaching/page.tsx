@@ -38,7 +38,9 @@ import {
 } from "@/lib/drive-connection";
 import {
   PRIVATE_STORAGE_CHANGED_EVENT,
+  getStorageUser,
 } from "@/lib/private-storage";
+import { getSupabaseBrowserClient } from "@/lib/supabase-client";
 import { useCurrentTime } from "@/lib/use-current-time";
 import { CoachingRequestPanel } from "@/components/coaching/CoachingRequestPanel";
 import {
@@ -69,6 +71,12 @@ const emptyLearning: Learning = {
   events: [],
   commitments: [],
 };
+function dateInZone(stamp: string, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" })
+    .formatToParts(new Date(stamp));
+  const part = (type: string) => parts.find((entry) => entry.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
 function Jump({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <Link className={styles.jump} href={href}>
@@ -93,6 +101,8 @@ export default function AiCoachingPage() {
   const [revision, setRevision] = useState(0);
   const [search, setSearch] = useState("");
   const [noteLimit, setNoteLimit] = useState(20);
+  const [aiTasks, setAiTasks] = useState<CoachingTask[]>([]);
+  const [planLoadError, setPlanLoadError] = useState("");
   useEffect(() => {
     const sync = () => setData(readLearning());
     sync();
@@ -102,6 +112,46 @@ export default function AiCoachingPage() {
       window.removeEventListener(PRIVATE_STORAGE_CHANGED_EVENT, sync);
       window.removeEventListener("storage", sync);
     };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    async function loadAiPlans() {
+      const db = getSupabaseBrowserClient();
+      if (!db) return;
+      const user = (await db.auth.getUser()).data.user;
+      if (!active || !user || getStorageUser() !== user.id) return;
+      const plans = await db.from("study_plans").select("id").eq("user_id", user.id)
+        .eq("source_type", "ai").in("status", ["approved", "active", "completed"]).limit(100);
+      if (!active) return;
+      if (plans.error) { setPlanLoadError("승인된 AI 계획을 불러오지 못했습니다."); return; }
+      const planIds = (plans.data ?? []).map((plan) => plan.id);
+      if (!planIds.length) { setAiTasks([]); setPlanLoadError(""); return; }
+      const [items, preferences] = await Promise.all([
+        db.from("study_plan_items").select("id,goal_id,title,scheduled_start,status").eq("user_id", user.id)
+          .in("plan_id", planIds).neq("status", "cancelled").order("scheduled_start").limit(500),
+        db.from("user_preferences").select("timezone").eq("user_id", user.id).maybeSingle(),
+      ]);
+      if (!active) return;
+      if (items.error || preferences.error) { setPlanLoadError("승인된 AI 계획을 불러오지 못했습니다."); return; }
+      const goalIds = [...new Set((items.data ?? []).map((item) => item.goal_id))];
+      const goalResult = goalIds.length
+        ? await db.from("learning_goals").select("id,title").eq("user_id", user.id).in("id", goalIds)
+        : { data: [], error: null };
+      if (!active) return;
+      if (goalResult.error) { setPlanLoadError("승인된 AI 계획을 불러오지 못했습니다."); return; }
+      const timezone = preferences.data?.timezone ?? "Asia/Seoul";
+      const goalNames = new Map((goalResult.data ?? []).map((goal) => [goal.id, goal.title]));
+      setAiTasks((items.data ?? []).map((item) => ({
+        id: `ai:${item.id}`, target: `db:${item.goal_id}`, name: goalNames.get(item.goal_id) ?? "AI 학습 목표",
+        title: item.title, dueDate: item.scheduled_start ? dateInZone(item.scheduled_start, timezone) : "",
+        completed: item.status === "completed", href: "/ai-coaching",
+      })));
+      setPlanLoadError("");
+    }
+    const refresh = () => { void loadAiPlans(); };
+    void loadAiPlans();
+    window.addEventListener("unilink:studyPlansChanged", refresh);
+    return () => { active = false; window.removeEventListener("unilink:studyPlansChanged", refresh); };
   }, []);
   useEffect(() => {
     let active = true;
@@ -129,7 +179,7 @@ export default function AiCoachingPage() {
   }, [revision]);
   const week = coachingWeek(new Date(now), offset);
   const goals = data.goals.filter((g) => !g.status || g.status === "active");
-  const targets = [
+  const baseTargets = [
     ...data.courses.map((c) => ({
       id: `course:${c.id}`,
       name: c.name,
@@ -145,6 +195,16 @@ export default function AiCoachingPage() {
       type: "개인 목표",
     })),
   ];
+  const targets = [...baseTargets];
+  for (const task of aiTasks) {
+    if (!baseTargets.some((target) => target.name === task.name) && !targets.some((target) => target.id === task.target)) {
+      targets.push({ id: task.target, name: task.name, color: "#245acc", href: "/ai-coaching", type: "AI 계획" });
+    }
+  }
+  const normalizedAiTasks = aiTasks.map((task) => ({
+    ...task,
+    target: baseTargets.find((target) => target.name === task.name)?.id ?? task.target,
+  }));
   const allTasks: CoachingTask[] = [
     ...data.plans
       .filter((p) => data.courses.some((c) => c.id === p.courseId))
@@ -169,6 +229,7 @@ export default function AiCoachingPage() {
         completed: p.isCompleted,
         href: "/personal-study",
       })),
+    ...normalizedAiTasks,
   ];
   const tasks = orderCoachingTasks(
     allTasks.filter((p) => selected === "all" || p.target === selected),
@@ -466,6 +527,7 @@ export default function AiCoachingPage() {
                     </button>
                   ))}
                 </div>
+                {planLoadError && <p role="alert" className={styles.error}>{planLoadError}</p>}
                 {visibleTasks.map((p) => (
                   <div className={styles.task} key={p.id}>
                     <span
