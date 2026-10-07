@@ -130,6 +130,8 @@ test("quota migration limits concurrent and repeated requests while hiding opera
   try {
     await db.exec("create role anon; create role authenticated; create role service_role bypassrls; create schema auth; create table auth.users(id uuid primary key);");
     await db.exec(readFileSync(new URL("../supabase/migrations/0014_coaching_proposal_jobs.sql", import.meta.url), "utf8"));
+    await db.exec("drop table public.coaching_proposal_jobs cascade");
+    await db.exec(readFileSync(new URL("../supabase/migrations/0018_repair_coaching_proposal_jobs.sql", import.meta.url), "utf8"));
     await db.exec(`insert into auth.users values ('${goal}')`);
     await db.exec("set role authenticated");
     await assert.rejects(db.query("select * from public.coaching_proposal_jobs"), (error) => error.code === "42501");

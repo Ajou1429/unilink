@@ -45,7 +45,15 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
     }
     const context = await loadCoachingContext(admin, user.id, request);
     const { data: jobId, error: reservationError } = await admin.rpc("reserve_coaching_proposal", { p_user_id: user.id });
-    if (reservationError) throw new CoachingError("Coaching quota is unavailable", 503);
+    if (reservationError) {
+      console.error("coaching quota reservation failed", {
+        code: reservationError.code,
+        message: reservationError.message,
+        details: reservationError.details,
+        hint: reservationError.hint,
+      });
+      throw new CoachingError("Coaching quota is unavailable", 503);
+    }
     if (!jobId) return jsonResponse({ error: "Coaching request limit reached" }, { status: 429 });
     const started = Date.now();
     let resultCode = "model_error";
@@ -64,7 +72,17 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
         throw new CoachingError("Coaching history could not be created", 503);
       }
       runId = created.id;
-      const proposal = validateProposal(await generateProposal(request, context), request, context);
+      let proposal;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          proposal = validateProposal(await generateProposal(request, context), request, context);
+          break;
+        } catch (error) {
+          if (!(error instanceof CoachingError) || error.status !== 502 || attempt === 2) throw error;
+          console.warn("coaching proposal validation retry", { attempt });
+        }
+      }
+      if (!proposal) throw new CoachingError("Coaching model returned no valid plan", 502);
       resultCode = "validated";
       itemCount = proposal.items.length;
       const { error: persistError } = await admin.from("coaching_runs").update({
