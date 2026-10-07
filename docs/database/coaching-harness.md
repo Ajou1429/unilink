@@ -99,7 +99,7 @@ flowchart LR
 | 에이전트 결정 | 선택·이월, 방법, 계획 시간, 우선순위, 이유 | 승인 전에는 제안이며 측정 성과가 아님 |
 | 실행·성과·평가 | 실제 `study_sessions`, 향후 결과·피드백·평가 지표 | 계획치와 실제치를 분리하여 보정 |
 
-`learner_state_snapshots`, `coaching_runs`, `learning_outcomes`, `coaching_feedback` 등은 향후 저장·평가 후보이며 현재 하네스가 사용 중인 테이블이 아니다. 문제은행·Drive 자료를 사용하려면 별도 접근 권한, 추출·버전·출처·신뢰도·개인정보 필터 설계가 필요하다. 지금은 자료 내용을 모델에 전달하지 않는다.
+`0016_coaching_runs_feedback.sql`은 영속 제안 이력과 사용자 피드백 이벤트를 위한 `coaching_runs`, `coaching_feedback`을 추가한다. `coaching-propose`는 생성 전 run을 만들고 검증된 결과 또는 제한된 오류 상태를 기록하며, 같은 요청 키와 같은 본문의 성공 요청은 저장된 결과를 반환한다. 피드백과 계획 승인은 아직 연결하지 않는다. `learner_state_snapshots`, `learning_outcomes` 등은 향후 저장·평가 후보이다. 문제은행·Drive 자료를 사용하려면 별도 접근 권한, 추출·버전·출처·신뢰도·개인정보 필터 설계가 필요하다. 지금은 자료 내용을 모델에 전달하지 않는다.
 
 현재 출력은 `summary`, 시각이 지정된 `items`, 목표별 `deferred_goals`다. 다음 버전에서는 토픽별 이월과 더 자세한 평가 근거를 추가할 수 있다.
 
@@ -153,9 +153,9 @@ summary: string
 
 | 시점 | 제안 변경 | 핵심 필드·관계 |
 | --- | --- | --- |
-| 승인형 MVP | `coaching_runs` 신설 | `id`, `user_id`, `request_key`, intent/status, 최소 request/context snapshot, 모델·프롬프트·정책·계약 버전, 검증된 output, parent run, 오류·사용량·생성/완료/만료 시각. 한 제안 버전당 불변 1행 |
+| 승인형 MVP | `coaching_runs` 스키마·제안 기록 연결 완료 | `id`, `user_id`, `request_key`, intent/status, 최소 request/context snapshot, 모델·프롬프트·정책·계약 버전, 검증된 output, parent run, 오류·사용량·생성/완료/만료 시각. 한 제안 버전당 불변 1행 |
 | 승인형 MVP | `study_plans.coaching_run_id` 추가 | AI 계획과 원본 run의 사용자 포함 복합 FK. 기존 수동/imported 계획은 null 허용. run 중복 적용을 막는 제약 추가 |
-| 승인형 MVP | `coaching_feedback` 신설 | run/선택적 plan 참조, 수락·수정·거절, 설명 또는 수정 버전 참조, 시각, 중복 방지 event key |
+| 승인형 MVP | `coaching_feedback` 스키마 추가, 승인 흐름 연결 대기 | run/선택적 plan 참조, 수락·수정·거절, 설명 또는 수정 버전 참조, 시각, 중복 방지 event key |
 | Topic 개인화 | `topic_observations` 신설, 상태 view 우선 | 사용자·목표·토픽, 이해도/체감 난이도/진도 등의 값과 척도, 관측/자가 보고/파생 구분, 출처, 관측·확인 시각 |
 | 자료 기반 Beta | `resource_topic_links`, 분석 실행 기록 | 기존 노트/문제 자원 참조, 소유권, 파일 버전, 페이지 범위, 분석 버전, 사용자 확인 상태. 원본 파일 이중 저장 금지 |
 | 문제 성과 도입 시 | 문제 시도/토픽 연결 | 실제 응답, 채점 기준 버전, 결과, 시각. 난이도 라벨을 정답률로 해석하지 않음 |

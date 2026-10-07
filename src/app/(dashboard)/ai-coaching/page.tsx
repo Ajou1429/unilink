@@ -222,7 +222,7 @@ export default function AiCoachingPage() {
     );
   return (
     <div className={styles.page}>
-      <Header title="AI 진도 코칭" />
+      <Header title="AI 학습코칭" />
       <main className={styles.workspace}>
         <div className={styles.heading}>
           <div>

@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { CoachingError, parseCoachingRequest, validateProposal } from "../supabase/functions/_shared/coaching/contract.ts";
 import { modelContext } from "../supabase/functions/_shared/coaching/context.ts";
+import { coachingContextSnapshot, coachingOutputPayload, coachingRequestHash, coachingRequestKey,
+  coachingRequestPayload, proposalFromStoredOutput } from "../supabase/functions/_shared/coaching/run.ts";
 
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const goal = id(1), topic = id(2), otherGoal = id(3);
@@ -99,6 +101,30 @@ test("model context excludes raw metadata and estimated legacy observations", ()
   assert.equal(JSON.stringify(payload).includes("secret"), false);
 });
 
+test("coaching run payloads have stable request identity and bounded snapshots", async () => {
+  const request = parseCoachingRequest(body);
+  const sameRequest = parseCoachingRequest({ ...body, rules: {
+    carryover: true, max_focus_goals: 1, method_minimums: { note_review: 20 },
+    break_after_minutes: 60, break_minutes: 10, transition_minutes: 10,
+  } });
+  const hash = await coachingRequestHash(request);
+  assert.equal(hash, await coachingRequestHash(sameRequest));
+  assert.notEqual(hash, await coachingRequestHash(parseCoachingRequest({ ...body, desired_outcome: "Different" })));
+  assert.equal(coachingRequestKey({ request_key: " request.1 " }, null), "request.1");
+  assert.equal(coachingRequestKey({}, "header:1"), "header:1");
+  rejects(() => coachingRequestKey({ request_key: "body" }, "header"), 409);
+  rejects(() => coachingRequestKey({ request_key: "spaces are invalid" }, null), 400);
+  const requestPayload = coachingRequestPayload(request, hash);
+  assert.equal(requestPayload.schema_version, 1);
+  assert.equal(requestPayload.request_hash, hash);
+  const snapshot = coachingContextSnapshot(context);
+  assert.equal(snapshot.schema_version, 1);
+  assert.equal(JSON.stringify(snapshot).includes("metadata"), false);
+  const output = coachingOutputPayload({ summary: "Plan", items: [item], deferred_goals: [] });
+  assert.equal(proposalFromStoredOutput(output)?.items[0].goal_id, goal);
+  assert.equal(proposalFromStoredOutput({ schema_version: 1, proposal: output.proposal }), null);
+});
+
 test("quota migration limits concurrent and repeated requests while hiding operations from users", async () => {
   const db = new PGlite();
   try {
@@ -117,5 +143,62 @@ test("quota migration limits concurrent and repeated requests while hiding opera
       await db.query(`update public.coaching_proposal_jobs set finished=true where id='${job}'`);
     }
     assert.equal(await reserve(), null);
+  } finally { await db.close(); }
+});
+
+test("coaching run and feedback migration keeps history durable and owner-scoped", async () => {
+  const db = new PGlite();
+  const userA = id(101), userB = id(102), runA = id(103), runB = id(104), replacement = id(105), planA = id(106);
+  const role = async (name = "authenticated", user = userA) => {
+    await db.exec(`reset role; set role ${name}; set request.jwt.claim.sub = '${user}';`);
+  };
+  const rejects = (sql, code) => assert.rejects(db.exec(sql), (error) => error.code === code);
+  try {
+    await db.exec(`
+      create role anon; create role authenticated; create role service_role bypassrls;
+      create schema auth; create table auth.users(id uuid primary key);
+      create function auth.uid() returns uuid language sql stable as
+        $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+      grant usage on schema public, auth to anon, authenticated, service_role;
+      alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+    `);
+    for (const name of ["0001_notes_and_drive.sql", "0010_core_learning.sql", "0012_p0_planning_execution.sql", "0016_coaching_runs_feedback.sql"]) {
+      await db.exec(readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8")
+        .replace('create extension if not exists "pgcrypto";', ""));
+    }
+    await db.exec(`insert into auth.users values ('${userA}'),('${userB}')`);
+    await role("service_role");
+    await db.exec(`
+      insert into coaching_runs(id,user_id,request_key,intent,status,request_payload,context_snapshot,output_payload,
+        model_name,prompt_version,policy_version,contract_version,completed_at)
+      values
+        ('${runA}','${userA}','request-a','daily_plan','proposed','{"schema_version":1}','{"schema_version":1}',
+          '{"schema_version":2}','test-model','prompt-v1','policy-v1',2,now()),
+        ('${runB}','${userB}','request-b','daily_plan','proposed','{"schema_version":1}','{"schema_version":1}',
+          '{"schema_version":2}','test-model','prompt-v1','policy-v1',2,now()),
+        ('${replacement}','${userA}','request-a-revision','daily_plan','proposed','{"schema_version":1}','{"schema_version":1}',
+          '{"schema_version":2}','test-model','prompt-v1','policy-v1',2,now());
+      insert into study_plans(id,user_id,plan_horizon,period_start,period_end)
+        values ('${planA}','${userA}','daily','2026-10-07','2026-10-07');
+    `);
+
+    await role("authenticated", userA);
+    assert.deepEqual((await db.query("select id from coaching_runs order by id")).rows.map((row) => row.id), [runA, replacement]);
+    await rejects(`insert into coaching_runs(user_id,request_key,intent,request_payload,context_snapshot,policy_version,contract_version)
+      values ('${userA}','forbidden','daily_plan','{"schema_version":1}','{"schema_version":1}','p',1)`, "42501");
+    await db.exec(`insert into coaching_feedback(user_id,run_id,plan_id,replacement_run_id,feedback_type,event_key)
+      values ('${userA}','${runA}','${planA}','${replacement}','modified','feedback-1')`);
+    await rejects(`update coaching_feedback set explanation='rewrite' where event_key='feedback-1'`, "42501");
+    await rejects(`delete from coaching_feedback where event_key='feedback-1'`, "42501");
+    await rejects(`insert into coaching_feedback(user_id,run_id,feedback_type,event_key)
+      values ('${userA}','${runB}','rejected','foreign-run')`, "23503");
+    await rejects(`insert into coaching_feedback(user_id,run_id,feedback_type,event_key)
+      values ('${userA}','${runA}','modified','missing-revision')`, "23514");
+    await rejects(`insert into coaching_feedback(user_id,run_id,feedback_type,event_key)
+      values ('${userA}','${runA}','rejected','feedback-1')`, "23505");
+
+    await role("authenticated", userB);
+    assert.equal((await db.query("select * from coaching_feedback")).rows.length, 0);
+    assert.equal((await db.query("select * from coaching_runs")).rows.length, 1);
   } finally { await db.close(); }
 });
