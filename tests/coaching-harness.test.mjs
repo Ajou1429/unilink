@@ -146,9 +146,10 @@ test("quota migration limits concurrent and repeated requests while hiding opera
   } finally { await db.close(); }
 });
 
-test("coaching run and feedback migration keeps history durable and owner-scoped", async () => {
+test("coaching run, approval and feedback migrations keep plans atomic and owner-scoped", async () => {
   const db = new PGlite();
   const userA = id(101), userB = id(102), runA = id(103), runB = id(104), replacement = id(105), planA = id(106);
+  const acceptedRun = id(107), acceptedGoal = id(108);
   const role = async (name = "authenticated", user = userA) => {
     await db.exec(`reset role; set role ${name}; set request.jwt.claim.sub = '${user}';`);
   };
@@ -162,7 +163,8 @@ test("coaching run and feedback migration keeps history durable and owner-scoped
       grant usage on schema public, auth to anon, authenticated, service_role;
       alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
     `);
-    for (const name of ["0001_notes_and_drive.sql", "0010_core_learning.sql", "0012_p0_planning_execution.sql", "0016_coaching_runs_feedback.sql"]) {
+    for (const name of ["0001_notes_and_drive.sql", "0010_core_learning.sql", "0012_p0_planning_execution.sql",
+      "0016_coaching_runs_feedback.sql", "0017_approve_coaching_proposals.sql"]) {
       await db.exec(readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8")
         .replace('create extension if not exists "pgcrypto";', ""));
     }
@@ -196,6 +198,28 @@ test("coaching run and feedback migration keeps history durable and owner-scoped
       values ('${userA}','${runA}','modified','missing-revision')`, "23514");
     await rejects(`insert into coaching_feedback(user_id,run_id,feedback_type,event_key)
       values ('${userA}','${runA}','rejected','feedback-1')`, "23505");
+
+    await role("service_role");
+    await db.exec(`
+      insert into learning_goals(id,user_id,goal_type,title) values ('${acceptedGoal}','${userA}','personal','Approved goal');
+      insert into coaching_runs(id,user_id,request_key,intent,status,request_payload,context_snapshot,output_payload,
+        model_name,prompt_version,policy_version,contract_version,completed_at)
+      values ('${acceptedRun}','${userA}','accept-me','daily_plan','proposed',
+        '{"schema_version":1,"request":{"period_start":"2026-10-08","period_end":"2026-10-08"}}',
+        '{"schema_version":1,"context":{"timezone":"Asia/Seoul"}}',
+        '{"schema_version":2,"proposal":{"summary":"One plan","deferred_goals":[],"items":[{
+          "goal_id":"${acceptedGoal}","topic_id":null,"method_code":"concept_review","title":"Review",
+          "planned_date":"2026-10-08","start_time":"09:00","planned_minutes":30,"reason":"Priority"}]}}',
+        'test-model','prompt-v1','policy-v1',2,now());
+    `);
+    await role("authenticated", userA);
+    const approved = (await db.query(`select public.approve_coaching_proposal('${acceptedRun}') as id`)).rows[0].id;
+    assert.equal((await db.query(`select public.approve_coaching_proposal('${acceptedRun}') as id`)).rows[0].id, approved);
+    assert.equal((await db.query(`select count(*)::int as count from study_plans where coaching_run_id='${acceptedRun}'`)).rows[0].count, 1);
+    const savedItem = (await db.query(`select planned_minutes,method_code from study_plan_items where plan_id='${approved}'`)).rows[0];
+    assert.deepEqual(savedItem, { planned_minutes: 30, method_code: "concept_review" });
+    assert.equal((await db.query(`select status from coaching_runs where id='${acceptedRun}'`)).rows[0].status, "approved");
+    assert.equal((await db.query(`select feedback_type from coaching_feedback where run_id='${acceptedRun}'`)).rows[0].feedback_type, "accepted");
 
     await role("authenticated", userB);
     assert.equal((await db.query("select * from coaching_feedback")).rows.length, 0);

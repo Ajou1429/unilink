@@ -44,6 +44,8 @@ export function CoachingRequestPanel() {
   const [requestNote, setRequestNote] = useState("");
   const [status, setStatus] = useState(isSupabaseConfigured() ? "DB 목표를 불러오는 중입니다." : "Supabase 연결 설정이 필요합니다.");
   const [busy, setBusy] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [approvedPlanId, setApprovedPlanId] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   useEffect(() => {
     const db = getSupabaseBrowserClient();
@@ -68,6 +70,7 @@ export function CoachingRequestPanel() {
     const db = getSupabaseBrowserClient();
     if (!db || busy) return;
     setResult(null);
+    setApprovedPlanId(null);
     if (!selected.length || selected.length > 5) { setStatus("학습 목표를 1~5개 선택해 주세요."); return; }
     if (!Number.isInteger(dailyMinutes) || dailyMinutes < 15 || dailyMinutes > 480) { setStatus("하루 학습 시간은 15~480분으로 입력해 주세요."); return; }
     const dates = planDates(intent);
@@ -94,6 +97,25 @@ export function CoachingRequestPanel() {
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "코칭 제안을 생성하지 못했습니다.");
     } finally { setBusy(false); }
+  }
+
+  async function approve() {
+    const db = getSupabaseBrowserClient();
+    if (!db || !result?.proposal_run_id || approving) return;
+    setApproving(true);
+    setStatus("AI 계획을 저장하는 중입니다…");
+    try {
+      const user = (await db.auth.getUser()).data.user;
+      if (!user || getStorageUser() !== user.id) throw new Error("로그인 상태가 변경됐습니다. 다시 로그인해 주세요.");
+      const { data, error } = await db.rpc("approve_coaching_proposal", { p_run_id: result.proposal_run_id });
+      if (error) throw error;
+      if (typeof data !== "string") throw new Error("저장된 계획을 확인하지 못했습니다.");
+      setApprovedPlanId(data);
+      setStatus("AI 계획을 저장했습니다. 실행 계획에서 확인할 수 있습니다.");
+      window.dispatchEvent(new Event("unilink:studyPlansChanged"));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "AI 계획을 저장하지 못했습니다.");
+    } finally { setApproving(false); }
   }
 
   return <aside id="coaching-request" className={styles.request} aria-label="코칭 요청">
@@ -123,7 +145,9 @@ export function CoachingRequestPanel() {
         {item.title} · {item.reason}</li>)}</ul>
       {!!result.proposal.deferred_goals.length && <><h4>다음으로 이월</h4><ul>{result.proposal.deferred_goals.map((goal) => <li key={goal.goal_id}>
         {goals.find((item) => item.id === goal.goal_id)?.title ?? "목표"}: {goal.reason} ({goal.reconsider_on} 재검토)</li>)}</ul></>}
-      <p>이 결과는 미리보기입니다. 계획 저장·승인 기능은 아직 연결되지 않았습니다.</p>
+      <button type="button" className={styles.save} disabled={approving || Boolean(approvedPlanId) || !result.proposal_run_id}
+        onClick={() => void approve()}>{approving ? "저장 중…" : approvedPlanId ? "저장 완료" : "이 계획 사용하기"}</button>
+      <p>{approvedPlanId ? "승인된 계획은 DB에 저장되며 다시 눌러도 중복 생성되지 않습니다." : "확인 후 승인하면 실행할 학습 계획으로 저장됩니다."}</p>
     </section>}
   </aside>;
 }

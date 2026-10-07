@@ -154,7 +154,7 @@ summary: string
 | 시점 | 제안 변경 | 핵심 필드·관계 |
 | --- | --- | --- |
 | 승인형 MVP | `coaching_runs` 스키마·제안 기록 연결 완료 | `id`, `user_id`, `request_key`, intent/status, 최소 request/context snapshot, 모델·프롬프트·정책·계약 버전, 검증된 output, parent run, 오류·사용량·생성/완료/만료 시각. 한 제안 버전당 불변 1행 |
-| 승인형 MVP | `study_plans.coaching_run_id` 추가 | AI 계획과 원본 run의 사용자 포함 복합 FK. 기존 수동/imported 계획은 null 허용. run 중복 적용을 막는 제약 추가 |
+| 승인형 MVP | `study_plans.coaching_run_id` 및 승인 RPC 연결 완료 | AI 계획과 원본 run의 사용자 포함 복합 FK. `approve_coaching_proposal`이 계획·항목·피드백·run 상태를 원자적으로 기록하며 재시도 시 같은 plan을 반환 |
 | 승인형 MVP | `coaching_feedback` 스키마 추가, 승인 흐름 연결 대기 | run/선택적 plan 참조, 수락·수정·거절, 설명 또는 수정 버전 참조, 시각, 중복 방지 event key |
 | Topic 개인화 | `topic_observations` 신설, 상태 view 우선 | 사용자·목표·토픽, 이해도/체감 난이도/진도 등의 값과 척도, 관측/자가 보고/파생 구분, 출처, 관측·확인 시각 |
 | 자료 기반 Beta | `resource_topic_links`, 분석 실행 기록 | 기존 노트/문제 자원 참조, 소유권, 파일 버전, 페이지 범위, 분석 버전, 사용자 확인 상태. 원본 파일 이중 저장 금지 |
