@@ -49,7 +49,10 @@ import {
   saveMonthlyStudyGoals,
   saveMonthlyStudyPlans,
   saveWeeklyStudyPlans,
+  STUDY_PLANS_CHANGED_EVENT,
 } from "@/lib/study-storage";
+import { getSupabaseBrowserClient } from "@/lib/supabase-client";
+import { getStorageUser } from "@/lib/private-storage";
 
 const THIS_WEEK = 8;
 const WEEK_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
@@ -59,6 +62,16 @@ function formatDateKey(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatInTimezone(stamp: string, timezone: string, includeTime = false) {
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
+    ...(includeTime ? { hour: "2-digit", minute: "2-digit", hourCycle: "h23" as const } : {}),
+  }).formatToParts(new Date(stamp));
+  const part = (type: string) => parts.find((entry) => entry.type === type)?.value ?? "";
+  const date = `${part("year")}-${part("month")}-${part("day")}`;
+  return includeTime ? `${date} ${part("hour")}:${part("minute")}` : date;
 }
 
 function addDays(date: Date, amount: number) {
@@ -144,6 +157,8 @@ function getMonthWeekRows(month: string) {
 export default function StudyPage() {
   const [courses, setCourses] = useState<Course[]>(mockCourses);
   const [plans, setPlans] = useState<StudyPlan[]>(mockStudyPlans);
+  const [aiPlans, setAiPlans] = useState<StudyPlan[]>([]);
+  const [aiPlanError, setAiPlanError] = useState("");
   const [monthlyGoals, setMonthlyGoals] = useState<MonthlyStudyGoal[]>([]);
   const [monthlyPlans, setMonthlyPlans] = useState<MonthlyStudyPlan[]>([]);
   const [notes, setNotes] = useState<LectureNote[]>(mockNotes);
@@ -192,6 +207,51 @@ export default function StudyPage() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    async function loadAiPlans() {
+      const db = getSupabaseBrowserClient();
+      if (!db) return;
+      const user = (await db.auth.getUser()).data.user;
+      if (!active || !user || getStorageUser() !== user.id) return;
+      const planResult = await db.from("study_plans").select("id").eq("user_id", user.id)
+        .eq("source_type", "ai").in("status", ["approved", "active", "completed"]).limit(100);
+      if (!active) return;
+      if (planResult.error) { setAiPlanError("AI 학습 계획을 불러오지 못했습니다."); return; }
+      const planIds = (planResult.data ?? []).map((plan) => plan.id);
+      if (!planIds.length) { setAiPlans([]); setAiPlanError(""); return; }
+      const [itemResult, preferenceResult] = await Promise.all([
+        db.from("study_plan_items").select("id,goal_id,title,planned_minutes,scheduled_start,status,reason,created_at")
+          .eq("user_id", user.id).in("plan_id", planIds).neq("status", "cancelled").order("scheduled_start").limit(500),
+        db.from("user_preferences").select("timezone").eq("user_id", user.id).maybeSingle(),
+      ]);
+      if (!active) return;
+      if (itemResult.error || preferenceResult.error) { setAiPlanError("AI 학습 계획을 불러오지 못했습니다."); return; }
+      const goalIds = [...new Set((itemResult.data ?? []).map((item) => item.goal_id))];
+      const goalResult = goalIds.length
+        ? await db.from("learning_goals").select("id,title").eq("user_id", user.id).in("id", goalIds)
+        : { data: [], error: null };
+      if (!active) return;
+      if (goalResult.error) { setAiPlanError("AI 학습 계획을 불러오지 못했습니다."); return; }
+      const timezone = preferenceResult.data?.timezone ?? "Asia/Seoul";
+      const goalNames = new Map((goalResult.data ?? []).map((goal) => [goal.id, goal.title]));
+      setAiPlans((itemResult.data ?? []).map((item) => ({
+        id: `ai:${item.id}`, userId: user.id, courseId: "self",
+        courseName: goalNames.get(item.goal_id) ?? "AI 학습 목표", week: THIS_WEEK,
+        weekStart: item.scheduled_start ? formatDateKey(getSundayWeekStart(new Date(formatInTimezone(item.scheduled_start, timezone)))) : undefined,
+        title: item.title,
+        description: `${item.scheduled_start ? `${formatInTimezone(item.scheduled_start, timezone, true)} · ` : ""}${item.planned_minutes}분${item.reason ? ` · ${item.reason}` : ""}`,
+        dueDate: item.scheduled_start ? formatInTimezone(item.scheduled_start, timezone) : "",
+        isCompleted: item.status === "completed", createdAt: item.created_at,
+      })));
+      setAiPlanError("");
+    }
+    const refresh = () => { void loadAiPlans(); };
+    void loadAiPlans();
+    window.addEventListener(STUDY_PLANS_CHANGED_EVENT, refresh);
+    return () => { active = false; window.removeEventListener(STUDY_PLANS_CHANGED_EVENT, refresh); };
+  }, []);
+
+  useEffect(() => {
     const timeout = window.setTimeout(() => {
       const planId = new URLSearchParams(window.location.search).get("planId");
       if (!planId) return;
@@ -203,11 +263,11 @@ export default function StudyPage() {
     }, 150);
 
     return () => window.clearTimeout(timeout);
-  }, [plans]);
+  }, [plans, aiPlans]);
 
   const currentWeekStartDate = getSundayWeekStart(new Date());
   const currentWeekStartKey = formatDateKey(currentWeekStartDate);
-  const currentWeekPlans = plans.filter(
+  const currentWeekPlans = [...plans, ...aiPlans].filter(
     (plan) => getPlanWeekStart(plan) === currentWeekStartKey,
   );
   const completed = currentWeekPlans.filter((plan) => plan.isCompleted).length;
@@ -298,7 +358,31 @@ export default function StudyPage() {
     persistMonthlyPlans(nextMonthlyPlans);
   }
 
-  function togglePlan(id: string) {
+  async function togglePlan(id: string) {
+    if (id.startsWith("ai:")) {
+      const itemId = id.slice(3);
+      const current = aiPlans.find((plan) => plan.id === id);
+      const db = getSupabaseBrowserClient();
+      if (!current || !db) return;
+      const nextCompleted = !current.isCompleted;
+      setAiPlans((items) => items.map((plan) => plan.id === id ? { ...plan, isCompleted: nextCompleted } : plan));
+      setAiPlanError("");
+      const user = (await db.auth.getUser()).data.user;
+      if (!user || getStorageUser() !== user.id) {
+        setAiPlans((items) => items.map((plan) => plan.id === id ? current : plan));
+        setAiPlanError("로그인 상태가 변경되어 AI 계획을 수정하지 못했습니다.");
+        return;
+      }
+      const { error } = await db.from("study_plan_items").update({ status: nextCompleted ? "completed" : "planned" })
+        .eq("id", itemId).eq("user_id", user.id);
+      if (error) {
+        setAiPlans((items) => items.map((plan) => plan.id === id ? current : plan));
+        setAiPlanError("AI 계획의 완료 상태를 저장하지 못했습니다.");
+      } else {
+        window.dispatchEvent(new Event(STUDY_PLANS_CHANGED_EVENT));
+      }
+      return;
+    }
     const nextPlans = plans.map((plan) =>
       plan.id === id ? { ...plan, isCompleted: !plan.isCompleted } : plan,
     );
@@ -708,6 +792,8 @@ export default function StudyPage() {
               </Dialog>
             </div>
 
+            {aiPlanError && <p role="alert" className="text-sm text-destructive">{aiPlanError}</p>}
+
             {currentWeekPlans.length > 0 ? (
               <div className="grid gap-3 md:grid-cols-2">
                 {currentWeekPlans.map((plan) => (
@@ -722,7 +808,7 @@ export default function StudyPage() {
                       <div className="flex items-start gap-3">
                         <button
                           type="button"
-                          onClick={() => togglePlan(plan.id)}
+                          onClick={() => void togglePlan(plan.id)}
                           className="mt-0.5 shrink-0"
                           aria-label={`${plan.title} 완료 상태 변경`}
                         >
@@ -747,13 +833,14 @@ export default function StudyPage() {
                           )}
                           <div className="mt-3 flex flex-wrap items-center gap-2">
                             <Badge variant="secondary">{plan.courseName}</Badge>
+                            {plan.id.startsWith("ai:") && <Badge>AI 계획</Badge>}
                             {plan.dueDate && (
                               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                                 <Clock className="h-3 w-3" />
                                 {plan.dueDate}
                               </span>
                             )}
-                            <Button
+                            {!plan.id.startsWith("ai:") && <Button
                               type="button"
                               size="sm"
                               variant="outline"
@@ -762,7 +849,7 @@ export default function StudyPage() {
                             >
                               <Pencil className="h-3 w-3" />
                               수정
-                            </Button>
+                            </Button>}
                           </div>
                         </div>
                       </div>
