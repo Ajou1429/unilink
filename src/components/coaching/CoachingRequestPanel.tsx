@@ -121,21 +121,21 @@ export function CoachingRequestPanel() {
   return <aside id="coaching-request" className={styles.request} aria-label="코칭 요청">
     <div className={styles.requestTitle}><Sparkles size={20} /><h2>AI 학습코칭</h2><span className={styles.pill}>제안</span></div>
     <div className={styles.coachingForm}>
-      <fieldset className={styles.goalChoices}><legend>학습 목표 (최대 5개)</legend>
-        {goals.map((goal) => <label key={goal.id}><input type="checkbox" checked={selected.includes(goal.id)}
+      <fieldset className={styles.goalChoices}><legend>계획할 과목·목표 <span className={styles.goalCount}>{selected.length}/5 선택</span></legend>
+        {goals.map((goal) => <label key={goal.id} className={styles.goalChoice} data-selected={selected.includes(goal.id)}><span className={styles.goalTitle}>{goal.title}</span><input type="checkbox" checked={selected.includes(goal.id)}
           disabled={!selected.includes(goal.id) && selected.length >= 5}
-          onChange={(event) => { setSelected((current) => event.target.checked ? [...current, goal.id] : current.filter((id) => id !== goal.id)); setResult(null); }} />{goal.title}</label>)}
+          onChange={(event) => { setSelected((current) => event.target.checked ? [...current, goal.id] : current.filter((id) => id !== goal.id)); setResult(null); }} /></label>)}
         {!goals.length && <p>활성 목표가 없습니다.</p>}
       </fieldset>
-      <label>요청 종류<select value={intent} onChange={(event) => setIntent(event.target.value as typeof intent)}>
+      <label>요청 종류<select value={intent} onChange={(event) => { setIntent(event.target.value as typeof intent); setResult(null); }}>
         {intents.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>
       <label>하루 학습 가능 시간 (분)<input type="number" min={15} max={480} step={15} value={dailyMinutes}
         onChange={(event) => { setDailyMinutes(Number(event.target.value)); setResult(null); }} /></label>
       <label>추가 요청 <span className={styles.optional}>(선택)</span><textarea maxLength={1000} rows={2}
         placeholder="예: 수요일은 가볍게 계획해줘" value={requestNote} onChange={(event) => { setRequestNote(event.target.value); setResult(null); }} /></label>
-      <p className={styles.autoPlanNotice}>기간, 수업 충돌, 이동·휴식 시간은 자동으로 반영합니다.</p>
-      <button type="button" className={styles.save} disabled={busy || !goals.length || !coachingEnabled} onClick={() => void generate()}><Sparkles size={16} />{busy ? "계획 생성 중…" : coachingEnabled ? "AI 계획 만들기" : "AI 기능 설정 후 사용 가능"}</button>
+      <p className={styles.autoPlanNotice}>등록된 일정과 기본 전환·휴식 여유를 반영합니다. 실제 이동 시간은 추가 요청에 적어 주세요.</p>
+      <button type="button" className={styles.save} disabled={busy || !selected.length || !coachingEnabled} onClick={() => void generate()}><Sparkles size={16} />{busy ? "계획 생성 중…" : coachingEnabled ? "AI 계획 만들기" : "AI 기능 설정 후 사용 가능"}</button>
       <p role="status" className={styles.notice}>{status}</p>
     </div>
     {result && <section className={styles.proposal} aria-label="코칭 제안">

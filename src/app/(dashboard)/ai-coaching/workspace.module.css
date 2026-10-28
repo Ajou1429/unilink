@@ -400,7 +400,34 @@
   overflow-y: auto;
 }
 .goalChoices legend { font-size: 12px; font-weight: 650; }
-.goalChoices label { flex-direction: row; align-items: center; margin: 6px 0; }
+.coachingForm .goalChoices .goalChoice {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin-top: 6px;
+  padding: 9px 10px;
+  border: 1px solid #dce2e6;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.coachingForm .goalChoices .goalChoice:hover { border-color: #9aaeb5; }
+.coachingForm .goalChoices .goalChoice[data-selected="true"] { border-color: #22776b; background: #edf7f3; }
+.goalChoice:has(input:focus-visible) { outline: 2px solid #22776b; outline-offset: 2px; }
+.goalChoice:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
+.coachingForm .goalChoice input[type="checkbox"] {
+  appearance: auto;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  accent-color: #22776b;
+}
+.goalTitle { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.5; text-align: left; }
+.goalCount { margin-left: 8px; color: #52646a; font-weight: 400; }
 .coachingGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .dayBudgets { border: 1px solid #dce2e6; border-radius: 6px; padding: 10px; }
 .dayBudgets > strong { font-size: 12px; }
