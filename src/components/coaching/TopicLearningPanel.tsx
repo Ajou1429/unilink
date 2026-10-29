@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase-client";
 import { getStorageUser } from "@/lib/private-storage";
 import { flushP0Changes } from "@/lib/p0-sync";
+import { TopicCheckPanel } from "./TopicCheckPanel";
 
 type Goal = { id: string; title: string; course_id: string | null; metadata: { legacy_record?: { courseId?: string } } };
 type Topic = { id: string; goal_id: string; title: string };
@@ -23,6 +24,7 @@ function TopicEditor({ topic, state, sessions, notes, onSaved, disabled, onPendi
   const [observedAt, setObservedAt] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [expanded, setExpanded] = useState(false);
   const pendingRequest = useRef<{ signature: string; id: string; at: string } | null>(null);
   async function save() {
     if (busy || disabled) return;
@@ -47,7 +49,7 @@ function TopicEditor({ topic, state, sessions, notes, onSaved, disabled, onPendi
     finally { setBusy(false); onPendingChange?.(-1); }
   }
   const control = "mt-1 w-full rounded border bg-white px-2 py-1.5 text-xs";
-  return <details className="rounded-lg border bg-white p-3">
+  return <details className="rounded-lg border bg-white p-3" onToggle={(e) => setExpanded(e.currentTarget.open)}>
     <summary className="cursor-pointer text-sm"><strong>{topic.title}</strong><span className="ml-2 text-xs text-muted-foreground">{state ? statusLabels[state.learning_status] : "미입력"}{state?.self_rating ? ` · 자기평가 ${state.self_rating}/5` : ""}</span></summary>
     <fieldset disabled={busy || disabled} className="mt-3 space-y-3">
       {state && <p className="text-xs text-muted-foreground">마지막 관측: {new Date(state.observed_at).toLocaleString("ko-KR")} · 수정 기록은 새 이력으로 보존됩니다.</p>}
@@ -67,6 +69,7 @@ function TopicEditor({ topic, state, sessions, notes, onSaved, disabled, onPendi
       <button type="button" className="rounded bg-primary px-3 py-2 text-xs text-primary-foreground" onClick={() => void save()}>{busy ? "저장 중…" : "학습 상태 저장"}</button>
       <p role="status" className="text-xs">{message}</p>
     </fieldset>
+    {expanded && <TopicCheckPanel topicId={topic.id} disabled={disabled || busy} onPendingChange={onPendingChange} />}
   </details>;
 }
 

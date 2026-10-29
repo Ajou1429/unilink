@@ -62,6 +62,10 @@ export async function loadCoachingContext(
     .eq("user_id", userId).in("goal_id", request.goal_ids).limit(caps.topics + 1);
   if (learningStates.error) throw new CoachingError("학습 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
   if ((learningStates.data?.length ?? 0) > caps.topics) throw new CoachingError("학습 주제가 많습니다. 목표 범위를 나눠 주세요.", 409);
+  const checkStates = await db.from("topic_check_states").select("id,check_id,goal_id,topic_id,correct_count,question_count,source,grader_version,created_at,note_id,note_version,source_stale,voided_at")
+    .eq("user_id", userId).in("goal_id", request.goal_ids).limit(caps.topics + 1);
+  if (checkStates.error) throw new CoachingError("문제풀이 결과를 확인하지 못했습니다.", 503);
+  if ((checkStates.data?.length ?? 0) > caps.topics) throw new CoachingError("확인 주제가 많습니다. 목표 범위를 나눠 주세요.", 409);
   for (const [rows, cap] of [
     [topics.data, caps.topics], [deadlines.data, caps.deadlines],
     [existing.data, caps.existing_items], [events.data, caps.blocks], [commitments.data, caps.blocks],
@@ -85,6 +89,7 @@ export async function loadCoachingContext(
     deadlines: deadlines.data ?? [], sessions: sessions.data ?? [], existing_items: existing.data ?? [],
     course_progress: progressResults.flatMap((result) => result.data ?? []) as CourseProgress[],
     topic_learning_states: learningStates.data ?? [],
+    topic_check_states: checkStates.data ?? [],
     blocked_events: [
       ...(events.data ?? []).filter((event) => event.starts_at && event.ends_at)
         .map((event) => ({ start: localStamp(event.starts_at!, timezone), end: localStamp(event.ends_at!, timezone), label: event.title })),
@@ -110,6 +115,13 @@ export function modelContext(context: CoachingContext) {
   const selectedCourses = new Set(context.goals.flatMap((goal) => goal.course_id ? [goal.course_id] : []));
   return {
     timezone: context.timezone,
+    topic_check_results: (context.topic_check_states ?? []).filter((state) => !state.voided_at && context.topics.some((topic) => topic.status === "confirmed" && topic.id === state.topic_id && topic.goal_id === state.goal_id)).map((state) => ({
+      attempt_id: state.id, check_id: state.check_id, goal_id: state.goal_id, topic_id: state.topic_id,
+      correct_count: state.correct_count, question_count: state.question_count, source: state.source,
+      grader_version: state.grader_version, assessed_at: state.created_at,
+      note_id: state.note_id, note_version: state.note_version, source_stale: state.source_stale,
+      review_signal: state.correct_count < state.question_count ? "incorrect_answers_recorded" : "all_sampled_questions_correct",
+    })),
     topic_learning_states: (context.topic_learning_states ?? []).filter((state) => context.topics.some((topic) => topic.status === "confirmed" && topic.id === state.topic_id && topic.goal_id === state.goal_id)).map((state) => ({
       observation_id: state.id, goal_id: state.goal_id, topic_id: state.topic_id,
       learning_status: state.learning_status, self_rating_1_to_5: level(state.self_rating),
