@@ -78,14 +78,16 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
       }
       runId = created.id;
       let proposal;
+      let validationFeedback: string | undefined;
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          const generated = await generateProposal(request, context);
+          const generated = await generateProposal(request, context, validationFeedback);
           usageAttempts.push(generated.usage);
           proposal = validateProposal(fitProposalSchedule(generated.proposal, request, context), request, context);
           break;
         } catch (error) {
           if (!(error instanceof CoachingError) || error.status !== 502 || attempt === 2) throw error;
+          validationFeedback = error.message;
           console.warn("coaching proposal validation retry", { attempt, reason: error.message });
         }
       }

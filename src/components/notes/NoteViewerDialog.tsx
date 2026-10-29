@@ -12,8 +12,10 @@ import {
 } from "@/components/ui/dialog";
 import { MyNote } from "@/lib/my-notes-storage";
 import { getSupabaseClient } from "@/lib/supabase/client";
-import { fetchDrivePdf } from "@/lib/drive-connection";
+import { fetchDrivePdf, uploadNoteToDrive } from "@/lib/drive-connection";
 import { PdfPreview } from "@/components/notes/PdfPreview";
+import { NoteAnalysisPanel } from "@/components/notes/NoteAnalysisPanel";
+import { MY_NOTES_CHANGED_EVENT } from "@/lib/my-notes-storage";
 import {
   CalendarClock,
   ExternalLink,
@@ -57,6 +59,20 @@ export function NoteViewerDialog({
   const [fileUrl, setFileUrl] = useState<string | null>(note.fileDataUrl ?? null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [driveUploading, setDriveUploading] = useState(false);
+  const [driveUploaded, setDriveUploaded] = useState(false);
+  const [driveUploadMessage, setDriveUploadMessage] = useState("");
+  async function uploadToDrive() {
+    if (driveUploading) return;
+    setDriveUploading(true); setDriveUploadMessage("");
+    try {
+      await uploadNoteToDrive(note.id);
+      setDriveUploaded(true);
+      setDriveUploadMessage(`Drive의 UniLink / ${note.linkedTitle ?? note.courseName} 폴더에 저장했습니다. 기존 분류가 유지됩니다.`);
+      window.dispatchEvent(new Event(MY_NOTES_CHANGED_EVENT));
+    } catch (error) { setDriveUploadMessage(error instanceof Error ? error.message : "Drive 업로드에 실패했습니다."); }
+    finally { setDriveUploading(false); }
+  }
   const [dialogSize, setDialogSize] = useState<{ width: number; height: number } | null>(null);
 
   function startResizing(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -104,7 +120,7 @@ export function NoteViewerDialog({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    if (note.filePath && !note.fileDataUrl) {
+    if (note.filePath && !note.fileDataUrl && !(note.driveFileId && note.fileName?.toLowerCase().endsWith(".pdf"))) {
       const supabase = getSupabaseClient();
       if (!supabase) return;
 
@@ -204,6 +220,12 @@ export function NoteViewerDialog({
         </DialogHeader>
 
         <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden [overflow-wrap:anywhere]">
+          {!note.driveFileId && <section className="space-y-2 rounded-lg border p-4">
+            <Button type="button" disabled={driveUploading || driveUploaded || note.linkedType === "unassigned"} onClick={() => void uploadToDrive()}>{driveUploading ? "Drive에 올리는 중…" : driveUploaded ? "Drive 저장 완료" : "Google Drive에 노트 올리기"}</Button>
+            <p className="text-xs text-muted-foreground">{note.linkedType === "unassigned" ? "노트를 내 수업 또는 개인 학습으로 분류하면 해당 폴더에 자동 저장할 수 있습니다." : `UniLink / ${note.linkedTitle ?? note.courseName} 폴더를 자동 생성해 저장합니다. 파일이 없는 글 노트는 TXT로 올립니다. 쓰기 권한 승인을 위해 Drive 재연결이 필요할 수 있습니다.`}</p>
+            <p role="status" className="text-sm">{driveUploadMessage}</p>
+          </section>}
+          {open && note.fileName?.toLowerCase().endsWith(".pdf") && (note.driveFileId || note.filePath) && <NoteAnalysisPanel key={note.id} note={note} />}
           <div className="rounded-lg border bg-muted/30 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0 flex-1">

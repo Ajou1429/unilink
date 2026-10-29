@@ -12,7 +12,7 @@ Deno.test("OAuth binds browser proof and user, expires states and consumes each 
   const previous = Object.fromEntries(Object.keys(env).map(k => [k, Deno.env.get(k)]));
   for (const [key,value] of Object.entries(env)) Deno.env.set(key,value);
   const originalFetch = globalThis.fetch;
-  type Pending = { state:string; user_id:string; code_challenge:string; created_at:string };
+  type Pending = { state:string; user_id:string; code_challenge:string; created_at:string; return_url:string };
   let pending: Pending | null = null;
   let exchanges = 0;
   let saves = 0;
@@ -27,6 +27,7 @@ Deno.test("OAuth binds browser proof and user, expires states and consumes each 
       return id === "A" || id === "B" ? json({id, app_metadata:{},user_metadata:{},aud:"authenticated",created_at:"2026-01-01"}) : Response.json({message:"invalid"},{status:401});
     }
     if (url.pathname === "/rest/v1/oauth_states") {
+      if (req.method === "GET") return json(pending && url.searchParams.get("state") === `eq.${pending.state}` && pending.created_at >= url.searchParams.get("created_at")!.slice(4) ? { return_url: pending.return_url } : null);
       if (req.method === "POST") { pending = {...await req.json(), created_at:new Date().toISOString()}; return new Response(null,{status:201}); }
       if (req.method === "DELETE") {
         if (!url.searchParams.has("state")) { pending = null; return new Response(null,{status:204}); }
@@ -37,8 +38,10 @@ Deno.test("OAuth binds browser proof and user, expires states and consumes each 
       }
     }
     if (url.hostname === "oauth2.googleapis.com") {
+      const form = await req.formData();
+      if (form.get("grant_type") === "refresh_token") return json({ access_token: "fake-access" });
       exchanges++;
-      assert((await req.formData()).get("code_verifier") === verifier);
+      assert(form.get("code_verifier") === verifier);
       return json({access_token:"fake-access", refresh_token:"fake-refresh"});
     }
     if (url.pathname === "/drive/v3/about") return json({user:{emailAddress:"test@example.invalid"}});
@@ -58,7 +61,11 @@ Deno.test("OAuth binds browser proof and user, expires states and consumes each 
     assert(exchanges === 0 && saves === 0);
     assert((await post("start",{codeChallenge:challenge},"invalid")).status === 401);
     assert((await post("start",{})).status === 400);
-    const start = await (await post("start",{codeChallenge:challenge})).json();
+    assert((await post("start",{codeChallenge:challenge,returnTo:"https://evil.invalid/notes"})).status === 400);
+    const start = await (await post("start",{codeChallenge:challenge,returnTo:"http://localhost:3000/notes"})).json();
+    const localCallback = await handleGoogleAuth(new Request(`https://supabase.invalid/functions/v1/google-auth/callback?code=relayed&state=${start.state}`));
+    assert(localCallback.headers.get("Location") === `http://localhost:3000/notes#drive_code=relayed&drive_state=${start.state}`);
+    assert(pending !== null && exchanges === 0);
     const consent = new URL(start.url); assert(consent.searchParams.get("code_challenge") === challenge);
     assert(consent.searchParams.get("code_challenge_method") === "S256");
     const body = {code:"fake-code",state:start.state,verifier};

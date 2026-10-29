@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Sparkles } from "lucide-react";
+import { TopicLearningPanel } from "./TopicLearningPanel";
 import {
   Dialog,
   DialogContent,
@@ -138,10 +139,12 @@ export function CoachingRequestPanel() {
   const [examInputs, setExamInputs] = useState<Record<string, ExamInput>>({});
   const [status, setStatus] = useState(isSupabaseConfigured() ? "DB 목표를 불러오는 중입니다." : "Supabase 연결 설정이 필요합니다.");
   const [busy, setBusy] = useState(false);
+  const [learningPending, setLearningPending] = useState(0);
   const [approving, setApproving] = useState(false);
   const [approvedPlanId, setApprovedPlanId] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const dates = useMemo(() => planDates(intent), [intent]);
+  const learningGoalIds = intent === "daily_plan" ? [...new Set(dailySources.filter((s) => chosenSources.includes(`${s.kind}:${s.id}`)).map((s) => s.goal_id))] : selected;
   useEffect(() => {
     if (!open) return;
     const db = getSupabaseBrowserClient();
@@ -197,7 +200,7 @@ export function CoachingRequestPanel() {
 
   async function generate() {
     const db = getSupabaseBrowserClient();
-    if (!db || busy) return;
+    if (!db || busy || learningPending > 0) return;
     setResult(null);
     setApprovedPlanId(null);
     const picked = dailySources.filter((s) => chosenSources.includes(`${s.kind}:${s.id}`));
@@ -301,9 +304,12 @@ export function CoachingRequestPanel() {
               })}
               {intent === "exam_prep" && <p className={styles.autoPlanNotice}>등록된 가까운 시험 정보를 불러옵니다. 앞으로 14일 안에서 시험 일시·우선도·난이도를 반영합니다. 수정한 시험 정보는 이번 추천 요청에 적용됩니다.</p>}
               {intent === "topic_review" && <p className={styles.autoPlanNotice}>기존 학습 계획을 기준으로 빈 시간에 복습을 추가합니다. 가능한 경우 수업이 끝난 당일에 해당 과목을 복습합니다.</p>}
+              {learningGoalIds.length > 0 && <details><summary className="cursor-pointer text-sm font-semibold">계획 전 진도·이해도 확인</summary>
+                <div className="mt-3"><TopicLearningPanel goalIds={learningGoalIds} disabled={busy} onPendingChange={(delta) => { setLearningPending((current) => Math.max(0, current + delta)); setResult(null); }} /></div>
+              </details>}
               <fieldset className={styles.preferencePicker}>
                 <legend>공통 선호 학습 시간 <span className={styles.optional}>(선택)</span></legend>
-                <p>모든 요청 종류에 함께 적용됩니다. 종류를 바꿔도 날짜별 선택은 유지되며, 현재 계획 기간에 해당하는 날짜만 반영합니다. 선택하지 않은 날은 오후 1시~밤 11시에 배치합니다.</p>
+                <p>모든 요청 종류에 공통 적용하며, 선택한 시간 안에서 공부 계획을 배치합니다. 휴식은 학습 사이의 빈 간격으로 확보합니다. 선택하지 않은 날은 오후 1시~밤 11시에 배치합니다.</p>
                 <div className={styles.preferenceScroll}>
                   <div className={styles.preferenceGrid} style={{ gridTemplateColumns: `62px repeat(${Math.max(1, dates.length)}, minmax(68px, 1fr))` }}>
                     <div className={styles.preferenceCorner}>시간</div>
@@ -329,8 +335,8 @@ export function CoachingRequestPanel() {
               </fieldset>
               <label>추가 요청 <span className={styles.optional}>(선택)</span><textarea maxLength={1000} rows={4}
                 placeholder="예: 수요일은 가볍게 계획해줘" value={requestNote} onChange={(event) => { setRequestNote(event.target.value); setResult(null); }} /></label>
-              <p className={styles.autoPlanNotice}>순공시간은 휴식·이동 시간을 제외한 하루 목표 공부시간입니다. 선택한 선호 시간과 기존 수업·일정을 함께 반영하며, 미선택 날짜는 오후 시간에 계획합니다.</p>
-              <button type="button" className={styles.save} disabled={busy || !goals.length || !coachingEnabled} onClick={() => void generate()}><Sparkles size={16} />{busy ? "계획 생성 중…" : coachingEnabled ? "AI 계획 만들기" : "AI 기능 설정 후 사용 가능"}</button>
+              <p className={styles.autoPlanNotice}>순공시간은 휴식·이동을 제외한 목표 공부시간입니다. 휴식·이동은 시간 계산에 반영하지만 별도 계획으로 표시하지 않습니다. 선택 시간 안에 목표량을 채우기 어려우면 가능한 분량만 추천합니다.</p>
+              <button type="button" className={styles.save} disabled={busy || learningPending > 0 || !goals.length || !coachingEnabled} onClick={() => void generate()}><Sparkles size={16} />{learningPending > 0 ? "학습 상태 저장 중…" : busy ? "계획 생성 중…" : coachingEnabled ? "AI 계획 만들기" : "AI 기능 설정 후 사용 가능"}</button>
               <p role="status" className={styles.notice}>{status}</p>
             </div>
           </section>

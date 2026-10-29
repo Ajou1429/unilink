@@ -57,6 +57,11 @@ export async function loadCoachingContext(
       .eq("user_id", userId).eq("course_id", courseId).lte("session_date", request.period_start)
       .order("session_date", { ascending: false }).order("id", { ascending: false }).limit(10)));
   if (progressResults.some((result) => result.error)) throw new CoachingError("Course progress is unavailable", 503);
+  const learningStates = await db.from("topic_learning_states")
+    .select("id,goal_id,topic_id,learning_status,self_rating,memo,observed_at,source,session_id,session_date,note_id,page_start,page_end")
+    .eq("user_id", userId).in("goal_id", request.goal_ids).limit(caps.topics + 1);
+  if (learningStates.error) throw new CoachingError("학습 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
+  if ((learningStates.data?.length ?? 0) > caps.topics) throw new CoachingError("학습 주제가 많습니다. 목표 범위를 나눠 주세요.", 409);
   for (const [rows, cap] of [
     [topics.data, caps.topics], [deadlines.data, caps.deadlines],
     [existing.data, caps.existing_items], [events.data, caps.blocks], [commitments.data, caps.blocks],
@@ -79,6 +84,7 @@ export async function loadCoachingContext(
     goals: goals.data ?? [], topics: topics.data ?? [], methods: methods.data ?? [],
     deadlines: deadlines.data ?? [], sessions: sessions.data ?? [], existing_items: existing.data ?? [],
     course_progress: progressResults.flatMap((result) => result.data ?? []) as CourseProgress[],
+    topic_learning_states: learningStates.data ?? [],
     blocked_events: [
       ...(events.data ?? []).filter((event) => event.starts_at && event.ends_at)
         .map((event) => ({ start: localStamp(event.starts_at!, timezone), end: localStamp(event.ends_at!, timezone), label: event.title })),
@@ -104,6 +110,13 @@ export function modelContext(context: CoachingContext) {
   const selectedCourses = new Set(context.goals.flatMap((goal) => goal.course_id ? [goal.course_id] : []));
   return {
     timezone: context.timezone,
+    topic_learning_states: (context.topic_learning_states ?? []).filter((state) => context.topics.some((topic) => topic.status === "confirmed" && topic.id === state.topic_id && topic.goal_id === state.goal_id)).map((state) => ({
+      observation_id: state.id, goal_id: state.goal_id, topic_id: state.topic_id,
+      learning_status: state.learning_status, self_rating_1_to_5: level(state.self_rating),
+      memo: text(state.memo, 1000), observed_at: state.observed_at, source: state.source,
+      session_id: state.session_id, session_date: state.session_date, note_id: state.note_id,
+      page_start: state.page_start, page_end: state.page_end,
+    })),
     goals: context.goals.map(({ id, title, goal_type, course_id, target_date, importance }) =>
       ({ id, title: short(title), goal_type, course_id: course_id ?? null, target_date, importance })),
     course_progress_scope: "Latest 10 recorded sessions per selected course, on or before plan start; not the full syllabus or PDF contents.",

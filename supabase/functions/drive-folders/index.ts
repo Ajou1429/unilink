@@ -5,7 +5,7 @@ import { readSmallJson, RequestError } from "../_shared/requestLimits.ts";
 
 import { corsHeaders, handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { decryptSecret } from "../_shared/crypto.ts";
-import { GoogleTokenError, listDriveFolders, listPdfFilesInFolder, refreshAccessToken } from "../_shared/google.ts";
+import { GoogleTokenError, listDriveFolders, listPdfFilesInFolder, refreshAccessToken, searchDriveContents } from "../_shared/google.ts";
 import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
@@ -23,6 +23,7 @@ Deno.serve(async (req) => {
   const body = await readSmallJson(req);
   const parentId = body.parentId == null ? null : validateDriveId(body.parentId);
   const includePdfs = body.includePdfs === true;
+  if (body.search !== undefined && (typeof body.search !== "string" || body.search.length > 100)) throw new RequestError("검색어는 100자 이하로 입력해 주세요.");
   const admin = getAdminClient();
 
   stage = "read_connection";
@@ -48,6 +49,7 @@ Deno.serve(async (req) => {
   stage = "refresh_token";
   const { access_token } = await refreshAccessToken(refreshToken);
   stage = "list_folders";
+  if (typeof body.search === "string" && body.search.trim()) return jsonResponse(await searchDriveContents(access_token, body.search.trim()));
   const [folders, pdfs] = await Promise.all([
     listDriveFolders(access_token, parentId),
     includePdfs ? listPdfFilesInFolder(access_token, parentId ?? "root") : Promise.resolve([]),

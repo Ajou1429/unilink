@@ -27,8 +27,9 @@ export async function saveDriveNote(admin: ReturnType<typeof getAdminClient>, us
       if (unchanged && existing.sync_status === "synced") return false;
     }
     const values = {
-      ...fields, title: file.name.replace(/\.[^.]+$/, ""), source: "GoodNotes", sync_status: "synced",
-      content: buildMetadataSummary(file, !existing), version: (existing?.version ?? 0) + 1,
+      ...fields, title: existing?.file_path ? existing.title : file.name.replace(/\.[^.]+$/, ""),
+      source: existing?.file_path ? existing.source : "GoodNotes", sync_status: "synced",
+      content: existing?.file_path ? existing.content : buildMetadataSummary(file, !existing), version: (existing?.version ?? 0) + 1,
     };
     if (!existing) {
       const { error } = await admin.from("notes").insert({ ...values, user_id: userId,

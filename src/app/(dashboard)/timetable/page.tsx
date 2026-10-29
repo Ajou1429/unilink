@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { TimetableGrid } from "@/components/timetable/TimetableGrid";
 import { AjouCoursePicker } from "@/components/timetable/AjouCoursePicker";
@@ -307,6 +308,7 @@ function getNoteDisplayName(note?: MyNote) {
 }
 
 export default function TimetablePage() {
+  const router = useRouter();
   const currentTerm = getCurrentAcademicTermLabel();
   const [courses, setCourses] = useState<Course[]>([]);
   const [workSchedules, setWorkSchedules] = useState<WorkSchedule[]>([]);
@@ -710,6 +712,7 @@ export default function TimetablePage() {
   }
 
   function selectOccurrence(occurrence: CourseOccurrence) {
+    router.push(`/course?courseId=${encodeURIComponent(occurrence.course.id)}`);
     const saved = getCourseSession(
       occurrence.course.id,
       occurrence.date,

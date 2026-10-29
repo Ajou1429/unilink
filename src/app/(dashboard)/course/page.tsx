@@ -1,11 +1,14 @@
 "use client";
 
+import { FileDropzone } from "@/components/ui/file-dropzone";
+
 import { ChangeEvent, Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
 import { CourseEvents } from "@/components/course/CourseEvents";
+import { TopicLearningPanel } from "@/components/coaching/TopicLearningPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -467,6 +470,7 @@ function CourseContent() {
         <Tabs key={course.id} defaultValue="notes">
           <TabsList className="bg-white border shadow-sm mb-6">
             <TabsTrigger value="events">과제·시험·일정</TabsTrigger>
+            <TabsTrigger value="progress">진도·이해도</TabsTrigger>
             <TabsTrigger value="notes" className="gap-2">
               <FileText className="h-4 w-4" /> 노트 정리
             </TabsTrigger>
@@ -479,6 +483,7 @@ function CourseContent() {
           </TabsList>
 
           <TabsContent value="events"><CourseEvents key={course.id} courseId={course.id} /></TabsContent>
+          <TabsContent value="progress"><TopicLearningPanel key={course.id} courseId={course.id} /></TabsContent>
           <TabsContent value="notes">
             <div className="grid items-start gap-6 lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)]">
               <Card className="self-start border-0 shadow-sm lg:sticky lg:top-20">
@@ -507,12 +512,12 @@ function CourseContent() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="course-note-file">강의 자료 파일 (선택)</Label>
-                    <Input
+                    <FileDropzone
                       key={noteFileInputKey}
                       id="course-note-file"
-                      type="file"
                       accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt"
-                      onChange={(event) => setNoteFile(event.target.files?.[0] ?? null)}
+                      disabled={noteSaving}
+                      onFiles={(files) => setNoteFile(files[0] ?? null)}
                     />
                     {noteFile && (
                       <p className="text-xs text-muted-foreground">

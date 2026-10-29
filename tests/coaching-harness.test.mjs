@@ -86,6 +86,19 @@ test("focus goal limit applies to each day of a multi-day plan", () => {
   rejects(() => validateProposal({ summary: "Plan", items: [item, { ...second, start_time: "09:40" }], deferred_goals: [] }, request, twoGoalsContext), 502);
 });
 
+test("long generated tasks split across confirmed windows without losing minutes or required breaks", () => {
+  const request = parseCoachingRequest({ ...body,
+    day_budgets: [{ ...body.day_budgets[0], minutes: 120, windows: [{ start: "13:00", end: "14:00" }, { start: "15:00", end: "16:00" }] }, body.day_budgets[1]],
+    rules: { ...body.rules, break_after_minutes: 90 },
+  });
+  const fitted = fitProposalSchedule({ summary: "Study", items: [{ ...item, start_time: "06:00", planned_minutes: 120 }], deferred_goals: [] }, request, context);
+  const validated = validateProposal(fitted, request, context);
+  assert.deepEqual(validated.items.map((i) => [i.start_time, i.planned_minutes]), [["13:00", 60], ["15:00", 60]]);
+  assert.equal(validated.items.reduce((n, i) => n + i.planned_minutes, 0), 120);
+  const blocked = { ...context, blocked_events: [{ start: "2026-10-01T13:00", end: "2026-10-01T16:00", label: "Class" }] };
+  rejects(() => fitProposalSchedule({ summary: "Study", items: [{ ...item, planned_minutes: 120 }], deferred_goals: [] }, request, blocked), 502);
+});
+
 test("proposal rejects foreign IDs, unconfirmed topics, invalid methods and overbooked dates", () => {
   const request = parseCoachingRequest(body);
   const proposal = (items, deferred_goals = []) => ({ summary: "Plan", items, deferred_goals });
@@ -238,19 +251,22 @@ test("quota migration limits concurrent and repeated requests while hiding opera
     await db.exec(readFileSync(new URL("../supabase/migrations/0014_coaching_proposal_jobs.sql", import.meta.url), "utf8"));
     await db.exec("drop table public.coaching_proposal_jobs cascade");
     await db.exec(readFileSync(new URL("../supabase/migrations/0018_repair_coaching_proposal_jobs.sql", import.meta.url), "utf8"));
+    await db.exec(readFileSync(new URL("../supabase/migrations/0023_coaching_quota_twenty.sql", import.meta.url), "utf8"));
     await db.exec(`insert into auth.users values ('${goal}')`);
     await db.exec("set role authenticated");
     await assert.rejects(db.query("select * from public.coaching_proposal_jobs"), (error) => error.code === "42501");
     await assert.rejects(db.query(`select public.reserve_coaching_proposal('${goal}')`), (error) => error.code === "42501");
     await db.exec("reset role; set role service_role");
     const reserve = async () => (await db.query(`select public.reserve_coaching_proposal('${goal}') as id`)).rows[0].id;
-    for (let n = 0; n < 5; n++) {
+    for (let n = 0; n < 20; n++) {
       const job = await reserve();
       assert.ok(job);
       assert.equal(await reserve(), null);
       await db.query(`update public.coaching_proposal_jobs set finished=true where id='${job}'`);
     }
     assert.equal(await reserve(), null);
+    await db.exec("update coaching_proposal_jobs set created_at=now()-interval '25 hours'");
+    assert.ok(await reserve());
   } finally { await db.close(); }
 });
 

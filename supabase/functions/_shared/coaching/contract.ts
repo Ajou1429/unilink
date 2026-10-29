@@ -3,7 +3,7 @@ export class CoachingError extends Error {
   constructor(message: string, status = 400) { super(message); this.status = status; }
 }
 
-export const COACHING_POLICY_VERSION = "time-window-v4";
+export const COACHING_POLICY_VERSION = "time-window-v5";
 
 export type TimeWindow = { start: string; end: string };
 export type DayBudget = { date: string; minutes: number; windows: TimeWindow[] };
@@ -29,7 +29,9 @@ export type CourseProgress = { id: string; course_id: string; session_date: stri
 export type ExistingItem = { goal_id: string; topic_id: string | null; title: string; planned_minutes: number; scheduled_start: string | null; status: string; metadata: Record<string, unknown> };
 export type BlockedInterval = { start: string; end: string; label: string };
 export type RecurringBlock = { day_of_week: number; start_time: string; end_time: string; effective_from: string | null; effective_to: string | null; label: string };
+export type TopicLearningState = { id: string; goal_id: string; topic_id: string; learning_status: string; self_rating: number | null; memo: string; observed_at: string; source: string; session_id: string | null; session_date: string | null; note_id: string | null; page_start: number | null; page_end: number | null };
 export type CoachingContext = {
+  topic_learning_states?: TopicLearningState[];
   timezone: string;
   goals: Goal[];
   topics: Topic[];
@@ -187,28 +189,44 @@ export function fitProposalSchedule(value: unknown, request: CoachingRequest, co
       continue;
     }
     const fixed = fixedBlocksForDate(raw.planned_date, context);
-    const scheduled = byDate.get(raw.planned_date) ?? [];
+    const scheduled = [...(byDate.get(raw.planned_date) ?? [])];
+    const minimum = typeof raw.method_code === "string" && Object.hasOwn(request.rules.method_minimums, raw.method_code)
+      ? request.rules.method_minimums[raw.method_code] : 15;
+    if (duration < minimum) { fitted.push(raw); continue; }
     const preferred = minuteOfDay(raw.start_time);
     const candidates = [preferred];
     for (const window of day.windows) {
       const from = minuteOfDay(window.start), to = minuteOfDay(window.end);
-      for (let start = from; start + duration <= to; start += 5) candidates.push(start);
+      for (let start = from; start + minimum <= to; start += 5) candidates.push(start);
     }
-    const start = [...new Set(candidates)].find((candidate) => {
-      const end = candidate + duration;
-      if (!day.windows.some((window) => candidate >= minuteOfDay(window.start) && end <= minuteOfDay(window.end))) return false;
-      if (fixed.some((block) => candidate < block.end + request.rules.transition_minutes && end > block.start - request.rules.transition_minutes)) return false;
-      return scheduled.every((item) => {
-        const gap = Math.max(request.rules.break_minutes, item.goal === raw.goal_id ? 0 : request.rules.transition_minutes);
-        return end + gap <= item.start || candidate >= item.end + gap;
-      });
-    });
-    if (start === undefined) {
-      fitted.push(raw);
-      continue;
+    let remaining = duration;
+    const pieces: Record<string, unknown>[] = [];
+    while (remaining >= minimum) {
+      let placed = false;
+      for (const start of [...new Set(candidates)]) {
+        for (let length = Math.min(remaining, request.rules.break_after_minutes); length >= minimum; length--) {
+          if (remaining !== length && remaining - length < minimum) continue;
+          const end = start + length;
+          if (!day.windows.some((window) => start >= minuteOfDay(window.start) && end <= minuteOfDay(window.end))) continue;
+          if (fixed.some((block) => start < block.end + request.rules.transition_minutes && end > block.start - request.rules.transition_minutes)) continue;
+          if (scheduled.reduce((total, item) => total + item.end - item.start, 0) + length > day.minutes) continue;
+          if (!scheduled.every((item) => {
+            const gap = Math.max(request.rules.break_minutes, item.goal === raw.goal_id ? 0 : request.rules.transition_minutes);
+            return end + gap <= item.start || start >= item.end + gap;
+          })) continue;
+          scheduled.push({ start, end, goal: raw.goal_id });
+          pieces.push({ ...raw, start_time: clockFromMinutes(start), planned_minutes: length });
+          remaining -= length;
+          placed = true;
+          break;
+        }
+        if (placed) break;
+      }
+      if (!placed) break;
     }
-    byDate.set(raw.planned_date, [...scheduled, { start, end: start + duration, goal: raw.goal_id }]);
-    fitted.push({ ...raw, start_time: clockFromMinutes(start) });
+    if (remaining || fitted.length + pieces.length > 30) throw new CoachingError("추천한 학습 분량을 선택한 시간대와 휴식 조건에 맞춰 배치하지 못했습니다. 항목을 더 작게 나누거나 분량을 줄여 다시 생성해 주세요.", 502);
+    byDate.set(raw.planned_date, scheduled);
+    fitted.push(...pieces);
   }
   fitted.sort((a, b) => `${String(a.planned_date)} ${String(a.start_time)}`.localeCompare(`${String(b.planned_date)} ${String(b.start_time)}`));
   return { ...value, items: fitted };
@@ -249,7 +267,7 @@ export function validateProposal(value: unknown, request: CoachingRequest, conte
     const minimum = Object.hasOwn(request.rules.method_minimums, raw.method_code) ? request.rules.method_minimums[raw.method_code] : 15;
     if ((raw.planned_minutes as number) < minimum || (raw.planned_minutes as number) > request.rules.break_after_minutes ||
       !day.windows.some((window) => start >= minuteOfDay(window.start) && end <= minuteOfDay(window.end))) {
-      throw new CoachingError("Plan item violates method minimum or confirmed time window", 502);
+      throw new CoachingError("학습 블록이 방법별 최소시간·연속 학습 상한 또는 선택한 시간대를 벗어났습니다.", 502);
     }
     const blocks = fixedBlocksForDate(date, context);
     if (blocks.some((block) => start < block.end + request.rules.transition_minutes && end > block.start - request.rules.transition_minutes)) {

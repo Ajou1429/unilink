@@ -7,6 +7,23 @@ import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { readSmallJson, RequestError } from "../_shared/requestLimits.ts";
 import { codeChallenge, validVerifier } from "../_shared/oauthProof.ts";
 
+function frontendNotesUrl(): URL {
+  const target = new URL(Deno.env.get("FRONTEND_URL")!);
+  if (target.protocol !== "https:" && !(target.protocol === "http:" && ["localhost", "127.0.0.1"].includes(target.hostname))) throw new Error("Invalid frontend URL");
+  target.pathname = target.pathname.replace(/\/$/, "").replace(/\/notes$/, "") + "/notes";
+  target.search = ""; target.hash = "";
+  return target;
+}
+
+export function driveReturnUrl(value: unknown): URL {
+  const fallback = frontendNotesUrl();
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== "string") throw new RequestError("유효한 복귀 주소가 필요합니다.");
+  const allowed = new Set([fallback.href, "https://ajou1429.github.io/unilink/notes", "http://localhost:3000/notes", "http://127.0.0.1:3000/notes"]);
+  if (!allowed.has(value)) throw new RequestError("허용되지 않은 복귀 주소입니다.");
+  return new URL(value);
+}
+
 export async function handleGoogleAuth(req: Request): Promise<Response> {
   const options = handleOptions(req);
   if (options) return options;
@@ -15,15 +32,16 @@ export async function handleGoogleAuth(req: Request): Promise<Response> {
   let stage = "request";
   try {
     if (action === "callback" && req.method === "GET") {
-      const target = new URL(Deno.env.get("FRONTEND_URL")!);
-      if (target.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(target.hostname)) {
-        throw new Error("Invalid frontend URL");
-      }
-      // FRONTEND_URL is the app root, with an optional deployment basePath.
-      target.pathname = target.pathname.replace(/\/$/, "").replace(/\/notes$/, "") + "/notes";
-      target.search = "";
       const code = url.searchParams.get("code");
       const state = url.searchParams.get("state");
+      let target = frontendNotesUrl();
+      if (state && /^[0-9a-f-]{36}$/i.test(state)) {
+        stage = "read_return_url";
+        const saved = await getAdminClient().from("oauth_states").select("return_url").eq("state", state)
+          .gte("created_at", new Date(Date.now() - 600000).toISOString()).maybeSingle();
+        if (saved.error) throw saved.error;
+        if (saved.data?.return_url) target = driveReturnUrl(saved.data.return_url);
+      }
       target.hash = new URLSearchParams(code && state && code.length < 4096 && state.length < 100
         ? { drive_code: code, drive_state: state }
         : { drive_error: "authorization_failed" }).toString();
@@ -37,6 +55,7 @@ export async function handleGoogleAuth(req: Request): Promise<Response> {
     const body = await readSmallJson(req);
     const admin = getAdminClient();
     if (action === "start") {
+      const returnUrl = driveReturnUrl(body.returnTo);
       const challenge = body.codeChallenge;
       if (typeof challenge !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) {
         throw new RequestError("브라우저 검증값이 필요합니다.");
@@ -45,7 +64,7 @@ export async function handleGoogleAuth(req: Request): Promise<Response> {
       const { error: cleanupError } = await admin.from("oauth_states").delete().eq("user_id", user.id);
       if (cleanupError) throw cleanupError;
       const state = crypto.randomUUID();
-      const { error } = await admin.from("oauth_states").insert({ state, user_id: user.id, code_challenge: challenge });
+      const { error } = await admin.from("oauth_states").insert({ state, user_id: user.id, code_challenge: challenge, return_url: returnUrl.href });
       if (error) throw error;
       return jsonResponse({ url: buildConsentUrl(state, challenge), state });
     }

@@ -73,6 +73,7 @@ import {
   completeDriveConnection,
   startDriveConnection,
   syncDriveFolders,
+  uploadNoteToDrive,
 } from "@/lib/drive-connection";
 
 const NOTE_SOURCES: NoteSource[] = [
@@ -283,6 +284,7 @@ export default function NotesPage() {
   const [open, setOpen] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteSaveError, setNoteSaveError] = useState("");
+  const [saveToDrive, setSaveToDrive] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [newNote, setNewNote] = useState({
@@ -316,6 +318,9 @@ export default function NotesPage() {
   const [folderPickerError, setFolderPickerError] = useState<string | null>(null);
   const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([]);
   const [drivePdfFiles, setDrivePdfFiles] = useState<DrivePdfFile[]>([]);
+  const [driveSearch, setDriveSearch] = useState("");
+  const [searchingDrive, setSearchingDrive] = useState(false);
+  const [driveTruncated, setDriveTruncated] = useState(false);
   const folderLoadRequest = useRef(0);
   const [driveFolderPaths, setDriveFolderPaths] = useState<DriveFolderPath[]>([]);
   const [hiddenDriveFolderIds, setHiddenDriveFolderIds] = useState<string[]>(() => {
@@ -543,6 +548,9 @@ export default function NotesPage() {
 
   async function handleAddNote() {
     setNoteSaveError("");
+    if (saveToDrive && (newNote.linkedType === "unassigned" || !newNote.linkedId)) {
+      setNoteSaveError("Drive에 올릴 노트의 수업 또는 개인 학습을 선택해 주세요."); return;
+    }
     if (!newNote.title.trim()) {
       setNoteSaveError("노트 제목을 입력해주세요.");
       return;
@@ -564,7 +572,7 @@ export default function NotesPage() {
 
     setNoteSaving(true);
     try {
-      await addNote({
+      const savedNote = await addNote({
         title: newNote.title.trim(),
         courseName: newNote.courseName,
         linkedType: newNote.linkedType,
@@ -584,10 +592,16 @@ export default function NotesPage() {
           .filter(Boolean),
       });
 
+      let feedback = "노트가 저장되었습니다.";
+      if (saveToDrive) {
+        try { await uploadNoteToDrive(savedNote.id); feedback = "노트를 저장하고 Drive의 해당 수업·개인 학습 폴더에 올렸습니다."; }
+        catch (error) { feedback = `노트는 저장됐습니다. Drive 업로드는 실패했습니다: ${error instanceof Error ? error.message : "다시 시도해 주세요."} 노트를 열어 다시 업로드할 수 있습니다.`; }
+      }
       await loadNotes();
       setOpen(false);
       setNoteSaveError("");
-      setFeedbackMessage("노트가 저장되었습니다.");
+      setFeedbackMessage(feedback);
+      setSaveToDrive(false);
       setNewNote({
         title: "",
         courseName: "",
@@ -700,17 +714,19 @@ export default function NotesPage() {
     if (syncedNotes) setNotes(syncedNotes);
   }
 
-  async function loadDriveFolders(parentId?: string | null) {
+  async function loadDriveFolders(parentId?: string | null, search?: string) {
     const requestId = ++folderLoadRequest.current;
     setFolderPickerBusy(true);
     setFolderPickerError(null);
     setDriveFolders([]);
     setDrivePdfFiles([]);
     try {
-      const { folders, pdfs } = await listDriveFolderContents(parentId);
+      const { folders, pdfs, truncated } = await listDriveFolderContents(parentId, true, search);
       if (requestId !== folderLoadRequest.current) return;
       setDriveFolders(folders);
       setDrivePdfFiles(pdfs);
+      setSearchingDrive(Boolean(search?.trim()));
+      setDriveTruncated(Boolean(truncated));
     } catch (error) {
       if (requestId !== folderLoadRequest.current) return;
       setFolderPickerError(
@@ -722,17 +738,20 @@ export default function NotesPage() {
   }
 
   function openFolderPicker() {
+    setDriveSearch(""); setSearchingDrive(false);
     setFolderPickerOpen(true);
     setFolderPath([{ id: null, name: "내 드라이브" }]);
     loadDriveFolders(null);
   }
 
   function enterDriveFolder(folder: DriveFolder) {
+    setDriveSearch(""); setSearchingDrive(false);
     setFolderPath((prev) => [...prev, { id: folder.id, name: folder.name }]);
     loadDriveFolders(folder.id);
   }
 
   function goBackDriveFolder() {
+    setDriveSearch(""); setSearchingDrive(false);
     if (folderPath.length <= 1) return;
     const nextPath = folderPath.slice(0, -1);
     setFolderPath(nextPath);
@@ -1198,6 +1217,8 @@ export default function NotesPage() {
                           {noteSaveError}
                         </p>
                       )}
+                      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={saveToDrive} onChange={(e) => setSaveToDrive(e.target.checked)} />Google Drive에도 저장하기</label>
+                      <p className="text-xs text-muted-foreground">선택한 수업·개인 학습 분류를 유지하며 Drive에 폴더를 자동 생성합니다.</p>
                       <Button onClick={handleAddNote} className="w-full" disabled={noteSaving}>
                         {noteSaving ? "저장 중..." : "저장하기"}
                       </Button>
@@ -1390,7 +1411,14 @@ export default function NotesPage() {
                               </Button>
                             </div>
 
-                            {currentPickerFolder.id && (
+                            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void loadDriveFolders(currentPickerFolder.id, driveSearch.trim()); }}>
+                              <Input aria-label="Drive 폴더·PDF 이름 검색" placeholder="Drive 전체에서 폴더·PDF 이름 검색" maxLength={100} value={driveSearch} onChange={(e) => setDriveSearch(e.target.value)} />
+                              <Button type="submit" disabled={folderPickerBusy}>검색</Button>
+                              {searchingDrive && <Button type="button" variant="outline" onClick={() => { setDriveSearch(""); void loadDriveFolders(currentPickerFolder.id); }}>초기화</Button>}
+                            </form>
+                            {searchingDrive && <p className="text-xs text-muted-foreground">Drive 전체 검색 결과입니다. PDF의 폴더를 열어 동기화할 수 있습니다.{driveTruncated ? " 최대 500개까지 표시합니다. 검색어를 구체적으로 입력해 주세요." : ""}</p>}
+
+                            {currentPickerFolder.id && !searchingDrive && (
                               <Button
                                 size="sm"
                                 className="w-full gap-1.5"
@@ -1476,6 +1504,7 @@ export default function NotesPage() {
                                       <FileText className="h-4 w-4 shrink-0 text-primary" />
                                       <span className="min-w-0 truncate text-sm" title={file.name}>{file.name}</span>
                                       {file.size && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{formatBytes(Number(file.size))}</span>}
+                                      {searchingDrive && file.parents?.[0] && <Button size="sm" variant="outline" onClick={() => enterDriveFolder({ id: file.parents![0], name: "검색한 PDF의 폴더", mimeType: "application/vnd.google-apps.folder" })}>폴더 열기</Button>}
                                     </div>
                                   ))}
                                 </div>}

@@ -11,7 +11,7 @@ Deno.test("coaching provider uses bounded structured output and fails closed on 
   Deno.env.set("COACHING_MODEL", "test-model");
   const goal = "00000000-0000-4000-8000-000000000001";
   const request = parseCoachingRequest({
-    goal_ids: [goal], intent: "daily_plan", period_start: "2026-10-01", period_end: "2026-10-01",
+    goal_ids: [goal], intent: "daily_plan", daily_sources: [{ kind: "event", id: goal }], period_start: "2026-10-01", period_end: "2026-10-01",
     day_budgets: [{ date: "2026-10-01", minutes: 30, windows: [{ start: "09:00", end: "10:00" }] }],
     desired_outcome: "Review", constraints: "",
     rules: { transition_minutes: 10, break_minutes: 10, break_after_minutes: 60,

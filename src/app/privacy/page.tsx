@@ -26,7 +26,7 @@ export default function PrivacyPage() {
           </section>
           <section>
             <h2 className="text-xl font-semibold text-slate-900">3. Google Drive 연동</h2>
-            <p className="mt-2">Google Drive 연동은 사용자가 직접 동의한 경우에만 시작됩니다. UniLink는 동기화와 파일 표시를 위해 Google Drive 읽기 권한만 요청하며, 사용자가 선택한 범위의 파일을 읽습니다. 사용자는 서비스의 Drive 연결 해제 기능 또는 Google 계정의 연결된 앱 관리에서 언제든 권한을 철회할 수 있습니다.</p>
+            <p className="mt-2">Google Drive 연동은 사용자가 직접 동의한 경우에만 시작됩니다. 기존 자료 조회·동기화에는 Drive 읽기 권한을, 사용자가 실행한 노트 업로드와 폴더 생성에는 앱에서 생성하거나 사용을 허용한 파일을 관리하는 권한(drive.file)을 요청합니다. 동기화 대상 폴더 선택은 서비스 내부 설정이며 읽기 권한 자체를 해당 폴더로 제한하지는 않습니다. 사용자는 Drive 연결 해제 또는 Google 계정의 연결된 앱 관리에서 권한을 철회할 수 있습니다. 서비스에서 노트를 삭제해도 Drive 원본은 자동 삭제하지 않습니다.</p>
           </section>
           <section>
             <h2 className="text-xl font-semibold text-slate-900">4. 보관 및 삭제</h2>
@@ -35,6 +35,7 @@ export default function PrivacyPage() {
           <section>
             <h2 className="text-xl font-semibold text-slate-900">5. 제3자 제공 및 처리 위탁</h2>
             <p className="mt-2">UniLink는 서비스 운영을 위해 인증·데이터 저장 서비스와 Google Drive API를 이용합니다. 법령상 근거가 있거나 사용자의 동의가 있는 경우를 제외하고 개인정보를 판매하거나 제공하지 않습니다.</p>
+            <p className="mt-2">사용자가 PDF 자료 분석에 별도로 동의하고 분석을 실행하면 해당 PDF를 OpenAI API에 전송합니다. 수업 주제·과제·시험 후보와 근거 페이지·인용문, 자료 버전 및 분석 처리 정보를 저장하며, 확인한 항목만 학습 목표와 일정에 등록합니다. 노트 삭제 시 연결된 분석 기록은 삭제됩니다. 이미 확인해 등록한 학습 주제와 일정은 별도로 삭제할 때까지 남을 수 있습니다.</p>
           </section>
           <section>
             <h2 className="text-xl font-semibold text-slate-900">6. 문의 및 권리 행사</h2>

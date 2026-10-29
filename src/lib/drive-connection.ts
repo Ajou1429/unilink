@@ -140,7 +140,7 @@ export async function startDriveConnection(): Promise<void> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
   const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
   const { data, error } = await supabase.functions.invoke<{ url: string; state: string }>("google-auth/start", {
-    body: { codeChallenge: challenge },
+    body: { codeChallenge: challenge, returnTo: `${window.location.origin}${window.location.pathname.startsWith("/unilink/") ? "/unilink" : ""}/notes` },
   });
   if (error || !data?.url || !data.state) throw new Error("Google 연결을 시작하지 못했습니다.");
   const target = new URL(data.url);
@@ -204,11 +204,13 @@ export interface DrivePdfFile {
   name: string;
   modifiedTime?: string;
   size?: string;
+  parents?: string[];
 }
 
-export async function listDriveFolderContents(parentId?: string | null, includePdfs = true): Promise<{
+export async function listDriveFolderContents(parentId?: string | null, includePdfs = true, search?: string): Promise<{
   folders: DriveFolder[];
   pdfs: DrivePdfFile[];
+  truncated?: boolean;
 }> {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error("Supabase가 설정되지 않았습니다.");
@@ -216,16 +218,17 @@ export async function listDriveFolderContents(parentId?: string | null, includeP
   const { data, error } = await supabase.functions.invoke<{
     folders: DriveFolder[];
     pdfs: DrivePdfFile[];
+    truncated?: boolean;
   }>(
     "drive-folders",
     {
-      body: { ...(parentId ? { parentId } : {}), includePdfs },
+      body: { ...(parentId ? { parentId } : {}), includePdfs, ...(search ? { search } : {}) },
     },
   );
   if (error || !data) {
     throw new Error(await describeFunctionError(error, "Drive 폴더 목록을 불러오지 못했습니다."));
   }
-  return { folders: data.folders ?? [], pdfs: data.pdfs ?? [] };
+  return { folders: data.folders ?? [], pdfs: data.pdfs ?? [], truncated: data.truncated };
 }
 
 export async function listDriveFolders(parentId?: string | null): Promise<DriveFolder[]> {
@@ -250,6 +253,13 @@ export async function syncDriveFolders(
 
 export async function syncDriveFolder(folderId?: string): Promise<DriveSyncResult> {
   return syncDriveFolders(folderId ? [folderId] : undefined);
+}
+
+export async function uploadNoteToDrive(noteId: string): Promise<void> {
+  const db = getSupabaseClient();
+  if (!db) throw new Error("로그인이 필요합니다.");
+  const result = await db.functions.invoke("drive-upload", { body: { noteId } });
+  if (result.error) throw new Error(await describeFunctionError(result.error, "Drive 업로드에 실패했습니다."));
 }
 
 export async function fetchDrivePdf(fileId: string): Promise<Blob> {

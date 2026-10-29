@@ -40,7 +40,7 @@ export function buildConsentUrl(state: string, challenge: string): string {
     access_type: "offline",
     prompt: "consent",
     include_granted_scopes: "true",
-    scope: "https://www.googleapis.com/auth/drive.readonly",
+    scope: "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file",
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",
@@ -225,6 +225,22 @@ export async function listDriveFolders(
   } while (pageToken);
 
   return folders;
+}
+
+export async function searchDriveContents(accessToken: string, search: string) {
+  const escaped = search.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
+  const files: (DriveFolder & { size?: string })[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; page < 5; page++) {
+    const params = new URLSearchParams({ q: `trashed=false and (mimeType='application/vnd.google-apps.folder' or mimeType='application/pdf') and name contains '${escaped}'`,
+      fields: "nextPageToken,files(id,name,mimeType,size,modifiedTime,parents)", pageSize: "100", orderBy: "name" });
+    if (pageToken) params.set("pageToken", pageToken);
+    const data = await (await driveFetch(accessToken, `/files?${params}`)).json();
+    files.push(...(data.files ?? []));
+    pageToken = data.nextPageToken;
+    if (!pageToken) break;
+  }
+  return { folders: files.filter((f) => f.mimeType === "application/vnd.google-apps.folder"), pdfs: files.filter((f) => f.mimeType === "application/pdf"), truncated: Boolean(pageToken) };
 }
 
 export async function listChanges(
