@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.116.0";
-import { CoachingError, type CoachingContext, type CoachingRequest } from "./contract.ts";
+import { CoachingError, type CoachingContext, type CoachingRequest, type CourseProgress } from "./contract.ts";
 
 const caps = { topics: 100, deadlines: 100, sessions: 100, existing_items: 100, blocks: 200 };
 
@@ -26,7 +26,7 @@ export async function loadCoachingContext(
     db.from("calendar_events").select("id,goal_id,title,due_at,starts_at,event_type,description,exam_scope")
       .eq("user_id", userId).in("goal_id", request.goal_ids).eq("status", "scheduled")
       .limit(caps.deadlines + 1),
-    db.from("study_sessions").select("goal_id,topic_id,actual_minutes,completion_status,started_at,metadata")
+    db.from("study_sessions").select("goal_id,topic_id,actual_minutes,completion_status,started_at,mastery_before,mastery_after,metadata")
       .eq("user_id", userId).in("goal_id", request.goal_ids)
       .order("started_at", { ascending: false }).limit(caps.sessions),
     db.from("study_plan_items").select("id,goal_id,topic_id,title,planned_minutes,scheduled_start,scheduled_end,status,metadata")
@@ -50,6 +50,13 @@ export async function loadCoachingContext(
     if (result.error) throw new CoachingError("Learning context is unavailable", 503);
   }
   if (goals.data?.length !== request.goal_ids.length) throw new CoachingError("Goal is missing or unavailable", 404);
+  // Bound history per selected course so one busy course cannot hide the others.
+  const selectedCourses = [...new Set((goals.data ?? []).flatMap((goal) => goal.course_id ? [goal.course_id] : []))];
+  const progressResults = await Promise.all(selectedCourses.map((courseId) =>
+    db.from("course_sessions").select("id,course_id,session_date,pace,memo,metadata")
+      .eq("user_id", userId).eq("course_id", courseId).lte("session_date", request.period_start)
+      .order("session_date", { ascending: false }).order("id", { ascending: false }).limit(10)));
+  if (progressResults.some((result) => result.error)) throw new CoachingError("Course progress is unavailable", 503);
   for (const [rows, cap] of [
     [topics.data, caps.topics], [deadlines.data, caps.deadlines],
     [existing.data, caps.existing_items], [events.data, caps.blocks], [commitments.data, caps.blocks],
@@ -71,6 +78,7 @@ export async function loadCoachingContext(
     timezone,
     goals: goals.data ?? [], topics: topics.data ?? [], methods: methods.data ?? [],
     deadlines: deadlines.data ?? [], sessions: sessions.data ?? [], existing_items: existing.data ?? [],
+    course_progress: progressResults.flatMap((result) => result.data ?? []) as CourseProgress[],
     blocked_events: [
       ...(events.data ?? []).filter((event) => event.starts_at && event.ends_at)
         .map((event) => ({ start: localStamp(event.starts_at!, timezone), end: localStamp(event.ends_at!, timezone), label: event.title })),
@@ -90,10 +98,27 @@ export async function loadCoachingContext(
 
 export function modelContext(context: CoachingContext) {
   const short = (value: string) => value.slice(0, 200);
+  const text = (value: unknown, limit = 200) => typeof value === "string" ? value.slice(0, limit) : null;
+  const level = (value: unknown) => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 5 ? Number(value) : null;
+  const reportedLevel = (value: unknown) => value === "상" || value === "중" || value === "하" ? value : null;
+  const selectedCourses = new Set(context.goals.flatMap((goal) => goal.course_id ? [goal.course_id] : []));
   return {
     timezone: context.timezone,
-    goals: context.goals.map(({ id, title, goal_type, target_date, importance }) =>
-      ({ id, title: short(title), goal_type, target_date, importance })),
+    goals: context.goals.map(({ id, title, goal_type, course_id, target_date, importance }) =>
+      ({ id, title: short(title), goal_type, course_id: course_id ?? null, target_date, importance })),
+    course_progress_scope: "Latest 10 recorded sessions per selected course, on or before plan start; not the full syllabus or PDF contents.",
+    recent_course_progress: (context.course_progress ?? []).filter((session) => selectedCourses.has(session.course_id)).map((session) => {
+      const raw = session.metadata?.legacy_record;
+      const legacy = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+      return {
+        session_id: session.id, course_id: session.course_id, session_date: session.session_date,
+        progress_title: text(legacy.progressTitle), progress_memo: text(session.memo, 1500),
+        recorded_pace_1_to_5: level(session.pace),
+        self_reported_difficulty: reportedLevel(legacy.difficulty), self_reported_pace: reportedLevel(legacy.pace),
+        linked_note_title: text(legacy.noteTitle), page_start: text(legacy.pageStart, 20), page_end: text(legacy.pageEnd, 20),
+      };
+    }),
+    evidence_limits: "Mastery values are recorded 1-5 ratings, not verified test scores. Difficulty and pace are user reports. Completion and minutes do not prove understanding. Missing evidence means unknown.",
     topics: context.topics.map(({ id, goal_id, title }) => ({ id, goal_id, title: short(title) })),
     methods: context.methods.map(({ code, display_name }) => ({ code, display_name: short(display_name) })),
     deadlines: context.deadlines.map(({ id, goal_id, title, due_at, starts_at, event_type, description, exam_scope }) =>
@@ -102,6 +127,7 @@ export function modelContext(context: CoachingContext) {
     recent_study: context.sessions.map((session) => ({
       goal_id: session.goal_id, topic_id: session.topic_id,
       actual_minutes: session.actual_minutes, completion_status: session.completion_status,
+      recorded_mastery_before_1_to_5: level(session.mastery_before), recorded_mastery_after_1_to_5: level(session.mastery_after),
       started_at: session.metadata?.completed_at_estimated === true ? null : session.started_at,
     })),
     existing_items: context.existing_items.map(({ id, goal_id, topic_id, title, planned_minutes, scheduled_start, scheduled_end, metadata }) =>

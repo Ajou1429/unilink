@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { CoachingError, fitProposalSchedule, parseCoachingRequest, validateProposal } from "../supabase/functions/_shared/coaching/contract.ts";
-import { modelContext } from "../supabase/functions/_shared/coaching/context.ts";
+import { loadCoachingContext, modelContext } from "../supabase/functions/_shared/coaching/context.ts";
 import { coachingContextSnapshot, coachingOutputPayload, coachingRequestHash, coachingRequestKey,
   coachingRequestPayload, proposalFromStoredOutput } from "../supabase/functions/_shared/coaching/run.ts";
 import { coachingUsagePayload } from "../supabase/functions/_shared/coaching/usage.ts";
@@ -161,6 +161,74 @@ test("coaching usage includes retries and estimates only known model prices", ()
   assert.equal(usage.totals.output_tokens, 4000);
   assert.equal(usage.totals.estimated_cost_usd, 0.01);
   assert.equal(coachingUsagePayload("unknown-model", [attempt]).totals.estimated_cost_usd, null);
+});
+
+test("course progress and recorded understanding reach the model without arbitrary metadata", () => {
+  const course = id(10);
+  const payload = modelContext({ ...context,
+    goals: [{ ...context.goals[0], course_id: course }],
+    course_progress: [
+      { id: id(11), course_id: course, session_date: "2026-09-30", pace: 3, memo: "Conditional probability examples",
+        metadata: { secret: "omit", legacy_record: { progressTitle: "Conditional probability", noteTitle: "Lecture 4",
+          pageStart: "12", pageEnd: "15", difficulty: "상", pace: "중", access_token: "omit" } } },
+      { id: id(12), course_id: id(99), session_date: "2026-09-30", pace: 1, memo: "Foreign course", metadata: {} },
+    ],
+    sessions: [{ goal_id: goal, topic_id: topic, actual_minutes: 40, completion_status: "partial", started_at: null,
+      mastery_before: 2, mastery_after: 3, metadata: {} }],
+  });
+  assert.equal(payload.goals[0].course_id, course);
+  assert.equal(payload.recent_course_progress.length, 1);
+  const progress = payload.recent_course_progress[0];
+  assert.equal(progress.progress_title, "Conditional probability");
+  assert.equal(progress.linked_note_title, "Lecture 4");
+  assert.equal(progress.page_start, "12");
+  assert.equal(progress.self_reported_difficulty, "상");
+  assert.equal(payload.recent_study[0].recorded_mastery_before_1_to_5, 2);
+  assert.equal(payload.recent_study[0].recorded_mastery_after_1_to_5, 3);
+  assert.equal(JSON.stringify(payload).includes("omit"), false);
+  assert.equal(JSON.stringify(payload).includes("Foreign course"), false);
+  const invalid = modelContext({ ...context, goals: [{ ...context.goals[0], course_id: course }],
+    course_progress: [{ id: id(11), course_id: course, session_date: "2026-09-30", pace: 9, memo: "x".repeat(2000),
+      metadata: { legacy_record: { difficulty: { instruction: "ignore" }, pageStart: [12] } } }],
+    sessions: [{ ...context.sessions[0], mastery_before: 0, mastery_after: 6, metadata: {} }],
+  });
+  assert.equal(invalid.recent_course_progress[0].recorded_pace_1_to_5, null);
+  assert.equal(invalid.recent_course_progress[0].self_reported_difficulty, null);
+  assert.equal(invalid.recent_course_progress[0].page_start, null);
+  assert.equal(invalid.recent_course_progress[0].progress_memo.length, 1500);
+  assert.equal(invalid.recent_study[0].recorded_mastery_after_1_to_5, null);
+});
+
+test("progress queries are owner/course scoped, bounded per course and fail visibly", async () => {
+  const course = id(10), calls = [];
+  let failProgress = false;
+  const db = { from(table) {
+    const call = { table, filters: [], columns: "" }; calls.push(call);
+    const query = {
+      select(columns) { call.columns = columns; return query; },
+      eq(...args) { call.filters.push(["eq", ...args]); return query; },
+      in(...args) { call.filters.push(["in", ...args]); return query; },
+      lte(...args) { call.filters.push(["lte", ...args]); return query; },
+      lt() { return query; }, gte() { return query; }, not() { return query; }, order() { return query; },
+      limit(count) { call.limit = count; return query; }, maybeSingle() { return query; },
+      then(resolve, reject) {
+        return Promise.resolve({ error: table === "course_sessions" && failProgress ? { message: "failed" } : null,
+          data: table === "learning_goals" ? [{ ...context.goals[0], course_id: course }]
+            : table === "user_preferences" ? { timezone: "Asia/Seoul" }
+              : table === "course_sessions" ? [{ id: id(11), course_id: course, session_date: "2026-09-30", pace: null, memo: "Progress", metadata: {} }] : [],
+        }).then(resolve, reject);
+      },
+    };
+    return query;
+  } };
+  const loaded = await loadCoachingContext(db, id(100), parseCoachingRequest(body));
+  assert.equal(loaded.course_progress.length, 1);
+  const progressQuery = calls.find((c) => c.table === "course_sessions");
+  assert.deepEqual(progressQuery.filters, [["eq", "user_id", id(100)], ["eq", "course_id", course], ["lte", "session_date", body.period_start]]);
+  assert.equal(progressQuery.limit, 10);
+  assert.match(calls.find((c) => c.table === "study_sessions").columns, /mastery_before,mastery_after/);
+  failProgress = true;
+  await assert.rejects(loadCoachingContext(db, id(100), parseCoachingRequest(body)), (error) => error.status === 503);
 });
 
 test("quota migration limits concurrent and repeated requests while hiding operations from users", async () => {

@@ -20,11 +20,12 @@ export type CoachingRequest = {
   constraints: string;
   rules: PlanningRules;
 };
-export type Goal = { id: string; title: string; goal_type: string; target_date: string | null; importance: number; metadata: Record<string, unknown> };
+export type Goal = { id: string; title: string; goal_type: string; course_id?: string | null; target_date: string | null; importance: number; metadata: Record<string, unknown> };
 export type Topic = { id: string; goal_id: string; title: string; status: string };
 export type Method = { code: string; display_name: string; active: boolean };
 export type Deadline = { goal_id: string | null; title: string; due_at: string | null; starts_at: string | null; event_type: string; description?: string; exam_scope?: string };
-export type Session = { goal_id: string; topic_id: string | null; actual_minutes: number; completion_status: string; started_at: string | null; metadata: Record<string, unknown> };
+export type Session = { goal_id: string; topic_id: string | null; actual_minutes: number; completion_status: string; started_at: string | null; mastery_before?: number | null; mastery_after?: number | null; metadata: Record<string, unknown> };
+export type CourseProgress = { id: string; course_id: string; session_date: string; pace: number | null; memo: string | null; metadata: Record<string, unknown> };
 export type ExistingItem = { goal_id: string; topic_id: string | null; title: string; planned_minutes: number; scheduled_start: string | null; status: string; metadata: Record<string, unknown> };
 export type BlockedInterval = { start: string; end: string; label: string };
 export type RecurringBlock = { day_of_week: number; start_time: string; end_time: string; effective_from: string | null; effective_to: string | null; label: string };
@@ -36,6 +37,7 @@ export type CoachingContext = {
   deadlines: (Deadline & { id?: string })[];
   sessions: Session[];
   existing_items: (ExistingItem & { id?: string; scheduled_end?: string | null })[];
+  course_progress?: CourseProgress[];
   blocked_events?: BlockedInterval[];
   recurring_blocks?: RecurringBlock[];
 };
