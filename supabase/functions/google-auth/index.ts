@@ -1,6 +1,6 @@
 // callback only relays the authorization response. Only authenticated /complete
 // may exchange the code, after checking the initiating browser's secret.
-import { buildConsentUrl, exchangeCodeForTokens, getDriveAccountProfile } from "../_shared/google.ts";
+import { buildConsentUrl, exchangeCodeForTokens, getDriveAccountProfile, GoogleTokenError, refreshAccessToken } from "../_shared/google.ts";
 import { encryptSecret } from "../_shared/crypto.ts";
 import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.ts";
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
@@ -68,10 +68,13 @@ export async function handleGoogleAuth(req: Request): Promise<Response> {
     stage = "exchange_token";
     const tokens = await exchangeCodeForTokens(code, verifier as string);
     if (!tokens.refresh_token) throw new RequestError("Google Drive 연결 동의를 다시 진행해주세요.");
+    // Verify offline access before declaring success or replacing an existing connection.
+    stage = "verify_refresh_token";
+    const verifiedTokens = await refreshAccessToken(tokens.refresh_token);
     stage = "encrypt_token";
     const encrypted = await encryptSecret(tokens.refresh_token);
     stage = "read_drive_profile";
-    const profile = await getDriveAccountProfile(tokens.access_token);
+    const profile = await getDriveAccountProfile(verifiedTokens.access_token);
     stage = "save_connection";
     const { error: saveError } = await admin.from("drive_connections").upsert({
       user_id: user.id, refresh_token_encrypted: encrypted.ciphertext, refresh_token_iv: encrypted.iv,
@@ -85,12 +88,15 @@ export async function handleGoogleAuth(req: Request): Promise<Response> {
     return jsonResponse({ connected: true });
   } catch (error) {
     // Never return OAuth token responses or internal database errors to clients.
-    const status = error instanceof RequestError ? error.status : 500;
+    const status = error instanceof RequestError ? error.status : error instanceof GoogleTokenError ? 409 : 500;
     // Do not log error messages: providers may include credentials or user data.
     const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
     const safeCode = ["invalid_client", "invalid_grant", "redirect_uri_mismatch", "access_denied", "23502", "23503", "23505", "42501", "42703", "42P01", "PGRST204"].includes(code) ? code : "unknown";
     console.error("google-auth failed", { action, status, stage, code: safeCode });
-    return jsonResponse({ error: error instanceof RequestError ? error.message : "Google 연결을 완료하지 못했습니다." }, { status });
+    const message = error instanceof RequestError ? error.message : error instanceof GoogleTokenError
+      ? "새 Google 인증의 갱신 검증에 실패했습니다. Google 계정의 UniLink 접근 권한과 OAuth 설정을 확인해 주세요."
+      : "Google 연결을 완료하지 못했습니다.";
+    return jsonResponse({ error: `${message} [${stage}]` }, { status });
   }
 }
 

@@ -18,18 +18,18 @@ export async function loadCoachingContext(
   // Every user-owned table is explicitly scoped even though this server client has service-role access.
   const [preferences, goals, topics, methods, deadlines, sessions, existing, events, commitments, courses, schedules, plannedBlocks] = await Promise.all([
     db.from("user_preferences").select("timezone").eq("user_id", userId).maybeSingle(),
-    db.from("learning_goals").select("id,title,goal_type,target_date,importance,metadata")
+    db.from("learning_goals").select("id,title,goal_type,course_id,target_date,importance,metadata")
       .eq("user_id", userId).eq("status", "active").in("id", request.goal_ids),
     db.from("goal_topics").select("id,goal_id,title,status")
       .eq("user_id", userId).in("goal_id", request.goal_ids).eq("status", "confirmed").limit(caps.topics + 1),
     db.from("study_methods").select("code,display_name,active").eq("active", true),
-    db.from("calendar_events").select("goal_id,title,due_at,starts_at,event_type")
+    db.from("calendar_events").select("id,goal_id,title,due_at,starts_at,event_type,description,exam_scope")
       .eq("user_id", userId).in("goal_id", request.goal_ids).eq("status", "scheduled")
       .limit(caps.deadlines + 1),
     db.from("study_sessions").select("goal_id,topic_id,actual_minutes,completion_status,started_at,metadata")
       .eq("user_id", userId).in("goal_id", request.goal_ids)
       .order("started_at", { ascending: false }).limit(caps.sessions),
-    db.from("study_plan_items").select("goal_id,topic_id,title,planned_minutes,scheduled_start,status,metadata")
+    db.from("study_plan_items").select("id,goal_id,topic_id,title,planned_minutes,scheduled_start,scheduled_end,status,metadata")
       .eq("user_id", userId).in("goal_id", request.goal_ids).eq("status", "planned")
       .limit(caps.existing_items + 1),
     db.from("calendar_events").select("title,starts_at,ends_at,is_blocking")
@@ -61,6 +61,12 @@ export async function loadCoachingContext(
   try { new Intl.DateTimeFormat("en", { timeZone: timezone }); }
   catch { throw new CoachingError("Invalid user timezone", 409); }
   const activeCourses = new Set((courses.data ?? []).map((course) => course.id));
+  if (request.intent === "daily_plan") {
+    for (const source of request.daily_sources ?? []) {
+      const rows = source.kind === "event" ? deadlines.data : existing.data;
+      if (!rows?.some((row) => row.id === source.id)) throw new CoachingError("선택한 작업이 완료되었거나 더 이상 사용할 수 없습니다.", 409);
+    }
+  }
   return {
     timezone,
     goals: goals.data ?? [], topics: topics.data ?? [], methods: methods.data ?? [],
@@ -75,7 +81,8 @@ export async function loadCoachingContext(
       ...(commitments.data ?? []).map((block) => ({ ...block, label: block.title })),
       ...(schedules.data ?? []).filter((block) => activeCourses.has(block.course_id)).map((block) => ({
         day_of_week: block.day_of_week, start_time: block.start_time, end_time: block.end_time,
-        effective_from: block.effective_from, effective_to: block.effective_to, label: "수업",
+        effective_from: block.effective_from, effective_to: block.effective_to,
+        label: `수업:${(goals.data ?? []).find((goal) => goal.course_id === block.course_id)?.id ?? block.course_id}`,
       })),
     ],
   } as CoachingContext;
@@ -89,17 +96,19 @@ export function modelContext(context: CoachingContext) {
       ({ id, title: short(title), goal_type, target_date, importance })),
     topics: context.topics.map(({ id, goal_id, title }) => ({ id, goal_id, title: short(title) })),
     methods: context.methods.map(({ code, display_name }) => ({ code, display_name: short(display_name) })),
-    deadlines: context.deadlines.map(({ goal_id, title, due_at, starts_at, event_type }) =>
-      ({ goal_id, title: short(title), due_at, starts_at, event_type })),
+    deadlines: context.deadlines.map(({ id, goal_id, title, due_at, starts_at, event_type, description, exam_scope }) =>
+      ({ id, goal_id, title: short(title), due_at, starts_at, event_type,
+        description: description?.slice(0, 3000) ?? "", exam_scope: exam_scope?.slice(0, 2000) ?? "" })),
     recent_study: context.sessions.map((session) => ({
       goal_id: session.goal_id, topic_id: session.topic_id,
       actual_minutes: session.actual_minutes, completion_status: session.completion_status,
       started_at: session.metadata?.completed_at_estimated === true ? null : session.started_at,
     })),
-    existing_items: context.existing_items.map(({ goal_id, topic_id, title, planned_minutes, scheduled_start, metadata }) =>
-      ({ goal_id, topic_id, title: short(title),
+    existing_items: context.existing_items.map(({ id, goal_id, topic_id, title, planned_minutes, scheduled_start, scheduled_end, metadata }) =>
+      ({ id, goal_id, topic_id, title: short(title),
+        due_date: typeof (metadata?.legacy_record as Record<string, unknown> | undefined)?.dueDate === "string" ? String((metadata.legacy_record as Record<string, unknown>).dueDate).slice(0, 10) : null,
         planned_minutes: metadata?.estimated_minutes === true ? null : planned_minutes,
-        scheduled_start })),
+        scheduled_start, scheduled_end })),
     blocked_events: (context.blocked_events ?? []).map(({ start, end, label }) => ({ start, end, label: short(label) })),
     recurring_blocks: (context.recurring_blocks ?? []).map(({ day_of_week, start_time, end_time, effective_from, effective_to, label }) =>
       ({ day_of_week, start_time, end_time, effective_from, effective_to, label: short(label) })),

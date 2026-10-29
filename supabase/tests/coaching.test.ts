@@ -28,15 +28,24 @@ Deno.test("coaching provider uses bounded structured output and fails closed on 
     const body = JSON.parse(String(init?.body));
     assert(body.store === false && body.model === "test-model");
     assert(body.text.format.strict === true && body.text.format.schema.additionalProperties === false);
+    const itemSchema = body.text.format.schema.properties.items.items;
+    assert(itemSchema.properties.goal_id.enum.length === 1 && itemSchema.properties.goal_id.enum[0] === goal);
+    assert(itemSchema.properties.topic_id.enum.length === 1 && itemSchema.properties.topic_id.enum[0] === null);
+    assert(itemSchema.properties.method_code.enum[0] === "note_review");
+    assert(itemSchema.properties.planned_date.enum.length === 1 && itemSchema.properties.planned_date.enum[0] === "2026-10-01");
     assert(!body.input.includes("private"));
     return Response.json(refuse ? { status: "completed", output: [{ type: "message", content: [{ type: "refusal", refusal: "No" }] }] }
-      : { status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({
+      : { status: "completed", usage: { input_tokens: 120, input_tokens_details: { cached_tokens: 20 }, output_tokens: 40,
+        output_tokens_details: { reasoning_tokens: 10 }, total_tokens: 160 }, output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({
         summary: "Review", items: [{ goal_id: goal, topic_id: null, method_code: "note_review", title: "Math review",
           planned_date: "2026-10-01", start_time: "09:00", planned_minutes: 30, reason: "Practice" }], deferred_goals: [],
       }) }] }] });
   };
   try {
-    assert((await generateProposal(request, context)).items.length === 1);
+    const generated = await generateProposal(request, context);
+    assert(generated.proposal.items.length === 1);
+    assert(generated.usage.input_tokens === 120 && generated.usage.cached_input_tokens === 20);
+    assert(generated.usage.output_tokens === 40 && generated.usage.reasoning_tokens === 10);
     refuse = true;
     try { await generateProposal(request, context); throw new Error("Expected refusal"); }
     catch (error) { assert(error instanceof CoachingError && error.status === 502); }

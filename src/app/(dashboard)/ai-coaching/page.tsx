@@ -293,7 +293,10 @@ export default function AiCoachingPage() {
               수업부터 개인 목표까지, 이번 주의 진행 상황
             </p>
           </div>
-          <Jump href="/study">학습 계획 열기</Jump>
+          <div className={styles.headingActions}>
+            <CoachingRequestPanel />
+            <Jump href="/study">학습 계획 열기</Jump>
+          </div>
         </div>
         <div className={styles.toolbar}>
           <div className={styles.week}>
@@ -678,7 +681,6 @@ export default function AiCoachingPage() {
               </>
             )}
           </section>
-          <CoachingRequestPanel />
         </div>
       </main>
     </div>

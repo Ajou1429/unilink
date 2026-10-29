@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
+import { CourseEvents } from "@/components/course/CourseEvents";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,10 +34,9 @@ import {
   getCoursePlans,
   getStoredCourses,
   saveCourseFile,
-  saveCourseNote,
   saveCoursePlan,
 } from "@/lib/course-storage";
-import { getMyNotes, MY_NOTES_CHANGED_EVENT, MyNote } from "@/lib/my-notes-storage";
+import { addNote as saveMyNote, getMyNotes, MY_NOTES_CHANGED_EVENT, MyNote } from "@/lib/my-notes-storage";
 import {
   getMonthlyStudyPlans,
   getWeeklyStudyPlans,
@@ -189,6 +189,10 @@ function CourseContent() {
   const [linkedMyNotes, setLinkedMyNotes] = useState<MyNote[]>([]);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteContent, setNoteContent] = useState("");
+  const [noteFile, setNoteFile] = useState<File | null>(null);
+  const [noteFileInputKey, setNoteFileInputKey] = useState(0);
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteSaveError, setNoteSaveError] = useState("");
   const [planTitle, setPlanTitle] = useState("");
   const [planDescription, setPlanDescription] = useState("");
   const [planDueDate, setPlanDueDate] = useState("");
@@ -209,6 +213,9 @@ function CourseContent() {
       );
       setNoteTitle("");
       setNoteContent("");
+      setNoteFile(null);
+      setNoteFileInputKey((key) => key + 1);
+      setNoteSaveError("");
       setPlanTitle("");
       setPlanDescription("");
       setPlanDueDate("");
@@ -265,26 +272,39 @@ function CourseContent() {
     (plan) => !plan.isCompleted && (!plan.dueDate || plan.dueDate >= todayKey),
   ).length;
 
-  function addNote() {
-    if (!course || !noteTitle.trim()) return;
+  async function addCourseNote() {
+    if (!course || noteSaving) return;
+    const title = noteTitle.trim() || noteFile?.name.replace(/\.[^.]+$/, "").trim();
+    if (!title) {
+      setNoteSaveError("노트 제목이나 파일을 입력해주세요.");
+      return;
+    }
 
-    const note: LectureNote = {
-      id: Date.now().toString(),
-      userId: "me",
-      courseId: course.id,
-      courseName: course.name,
-      week: 1,
-      title: noteTitle.trim(),
-      content: noteContent.trim(),
-      tags: [course.name],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    saveCourseNote(note);
-    setNotes((prev) => [note, ...prev]);
-    setNoteTitle("");
-    setNoteContent("");
+    setNoteSaving(true);
+    setNoteSaveError("");
+    try {
+      const saved = await saveMyNote({
+        title,
+        courseName: course.name,
+        linkedType: "course",
+        linkedId: course.id,
+        linkedTitle: course.name,
+        source: "직접 작성",
+        content: noteContent.trim(),
+        file: noteFile ?? undefined,
+        tags: [course.name],
+      });
+      setLinkedMyNotes((current) => [saved, ...current.filter((note) => note.id !== saved.id)]);
+      setLinkedNoteFolderPath([]);
+      setNoteTitle("");
+      setNoteContent("");
+      setNoteFile(null);
+      setNoteFileInputKey((key) => key + 1);
+    } catch (error) {
+      setNoteSaveError(error instanceof Error ? error.message : "노트를 저장하지 못했습니다.");
+    } finally {
+      setNoteSaving(false);
+    }
   }
 
   function syncCoursePlan(plan: StudyPlan, linkedCourse: Course) {
@@ -446,6 +466,7 @@ function CourseContent() {
 
         <Tabs key={course.id} defaultValue="notes">
           <TabsList className="bg-white border shadow-sm mb-6">
+            <TabsTrigger value="events">과제·시험·일정</TabsTrigger>
             <TabsTrigger value="notes" className="gap-2">
               <FileText className="h-4 w-4" /> 노트 정리
             </TabsTrigger>
@@ -457,12 +478,13 @@ function CourseContent() {
             </TabsTrigger>
           </TabsList>
 
+          <TabsContent value="events"><CourseEvents key={course.id} courseId={course.id} /></TabsContent>
           <TabsContent value="notes">
             <div className="grid items-start gap-6 lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)]">
               <Card className="self-start border-0 shadow-sm lg:sticky lg:top-20">
                 <CardHeader>
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Plus className="h-4 w-4" /> 노트 추가
+                    <Plus className="h-4 w-4" /> 강의 노트 추가
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -483,8 +505,27 @@ function CourseContent() {
                       onChange={(event) => setNoteContent(event.target.value)}
                     />
                   </div>
-                  <Button onClick={addNote} className="w-full">
-                    노트 저장
+                  <div className="space-y-2">
+                    <Label htmlFor="course-note-file">강의 자료 파일 (선택)</Label>
+                    <Input
+                      key={noteFileInputKey}
+                      id="course-note-file"
+                      type="file"
+                      accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt"
+                      onChange={(event) => setNoteFile(event.target.files?.[0] ?? null)}
+                    />
+                    {noteFile && (
+                      <p className="text-xs text-muted-foreground">
+                        {noteFile.name} · {formatBytes(noteFile.size)}
+                      </p>
+                    )}
+                  </div>
+                  {noteSaveError && <p role="alert" className="text-sm text-destructive">{noteSaveError}</p>}
+                  <Button onClick={addCourseNote} className="w-full" disabled={noteSaving}>
+                    {noteSaving ? "저장 중..." : "노트 저장"}
+                  </Button>
+                  <Button variant="outline" className="w-full" nativeButton={false} render={<Link href="/notes" />}>
+                    Drive 노트 가져오기 · 나의 노트
                   </Button>
                 </CardContent>
               </Card>
@@ -493,7 +534,7 @@ function CourseContent() {
                 {linkedMyNotes.length > 0 && (
                   <div className="space-y-3">
                     <p className="text-xs font-semibold text-muted-foreground">
-                      GoodNotes 연동 노트
+                      이 수업의 강의 노트
                     </p>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
@@ -570,7 +611,7 @@ function CourseContent() {
                                 <Badge variant="secondary">v{note.version}</Badge>
                               </div>
                               <p className="text-xs text-muted-foreground mt-1">
-                                {note.fileName ?? "GoodNotes PDF"} ·{" "}
+                                {note.fileName ?? note.source} ·{" "}
                                 {new Date(note.updatedAt).toLocaleString("ko-KR")}
                               </p>
                               <p className="text-sm text-muted-foreground mt-3 whitespace-pre-wrap">

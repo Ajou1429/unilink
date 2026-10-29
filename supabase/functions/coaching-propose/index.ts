@@ -1,9 +1,10 @@
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { readSmallJson, RequestError } from "../_shared/requestLimits.ts";
 import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.ts";
-import { COACHING_POLICY_VERSION, CoachingError, parseCoachingRequest, validateProposal } from "../_shared/coaching/contract.ts";
+import { COACHING_POLICY_VERSION, CoachingError, fitProposalSchedule, parseCoachingRequest, validateProposal } from "../_shared/coaching/contract.ts";
 import { loadCoachingContext } from "../_shared/coaching/context.ts";
 import { COACHING_PROMPT_VERSION, generateProposal } from "../_shared/coaching/model.ts";
+import { coachingUsagePayload, type ModelUsage } from "../_shared/coaching/usage.ts";
 import { coachingContextSnapshot, coachingOutputPayload, coachingRequestHash, coachingRequestKey,
   coachingRequestPayload, proposalFromStoredOutput } from "../_shared/coaching/run.ts";
 
@@ -27,7 +28,7 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
     admin = getAdminClient();
     runUserId = user.id;
     const { data: existing, error: existingError } = await admin.from("coaching_runs")
-      .select("id,status,request_payload,output_payload,prompt_version,policy_version")
+      .select("id,status,request_payload,output_payload,prompt_version,policy_version,usage_payload")
       .eq("user_id", user.id).eq("request_key", requestKey).maybeSingle();
     if (existingError) throw new CoachingError("Coaching history is unavailable", 503);
     if (existing) {
@@ -36,9 +37,11 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
       }
       const stored = proposalFromStoredOutput(existing.output_payload);
       if (existing.status === "proposed" && stored) {
+        const storedUsage = existing.usage_payload?.model && existing.usage_payload?.totals
+          ? existing.usage_payload : undefined;
         return jsonResponse({ schema_version: 2, status: "proposal", proposal: stored, proposal_run_id: existing.id,
           prompt_version: existing.prompt_version, policy_version: existing.policy_version,
-          proposal_persisted: true, persisted: false, replayed: true });
+          ...(storedUsage ? { usage: storedUsage } : {}), proposal_persisted: true, persisted: false, replayed: true });
       }
       return jsonResponse({ error: "Coaching request already exists", proposal_run_id: existing.id,
         run_status: existing.status }, { status: 409 });
@@ -58,6 +61,8 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
     const started = Date.now();
     let resultCode = "model_error";
     let itemCount = 0;
+    const usageAttempts: ModelUsage[] = [];
+    const modelName = Deno.env.get("COACHING_MODEL") ?? "unknown";
     try {
       const { data: created, error: createError } = await admin.from("coaching_runs").insert({
         user_id: user.id, request_key: requestKey, intent: request.intent, status: "generating",
@@ -75,23 +80,27 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
       let proposal;
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          proposal = validateProposal(await generateProposal(request, context), request, context);
+          const generated = await generateProposal(request, context);
+          usageAttempts.push(generated.usage);
+          proposal = validateProposal(fitProposalSchedule(generated.proposal, request, context), request, context);
           break;
         } catch (error) {
           if (!(error instanceof CoachingError) || error.status !== 502 || attempt === 2) throw error;
-          console.warn("coaching proposal validation retry", { attempt });
+          console.warn("coaching proposal validation retry", { attempt, reason: error.message });
         }
       }
       if (!proposal) throw new CoachingError("Coaching model returned no valid plan", 502);
+      const usage = coachingUsagePayload(modelName, usageAttempts);
       resultCode = "validated";
       itemCount = proposal.items.length;
       const { error: persistError } = await admin.from("coaching_runs").update({
-        status: "proposed", output_payload: coachingOutputPayload(proposal), completed_at: new Date().toISOString(),
+        status: "proposed", output_payload: coachingOutputPayload(proposal), usage_payload: usage,
+        completed_at: new Date().toISOString(),
       }).eq("id", runId).eq("user_id", user.id).eq("status", "generating");
       if (persistError) throw new CoachingError("Coaching proposal could not be saved", 503);
       return jsonResponse({ schema_version: 2, status: "proposal", proposal, proposal_run_id: runId,
         prompt_version: COACHING_PROMPT_VERSION, policy_version: COACHING_POLICY_VERSION,
-        proposal_persisted: true, persisted: false, replayed: false });
+        usage, proposal_persisted: true, persisted: false, replayed: false });
     } catch (error) {
       if (error instanceof CoachingError && error.status === 502) resultCode = "rejected";
       if (runId) {
@@ -100,6 +109,7 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
           status: rejected ? "invalid" : "failed",
           error_code: rejected ? "model_output_rejected" : "proposal_failed",
           error_message: error instanceof CoachingError || error instanceof RequestError ? error.message : "Coaching request failed",
+          ...(usageAttempts.length ? { usage_payload: coachingUsagePayload(modelName, usageAttempts) } : {}),
           completed_at: new Date().toISOString(),
         }).eq("id", runId).eq("user_id", user.id).eq("status", "generating");
         if (runError) console.error("coaching run failure update failed");
@@ -115,7 +125,10 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
     }
   } catch (error) {
     const status = error instanceof CoachingError || error instanceof RequestError ? error.status : 503;
-    console.error("coaching-propose failed", { status });
+    console.error("coaching-propose failed", {
+      status,
+      reason: error instanceof CoachingError || error instanceof RequestError ? error.message : "unexpected_error",
+    });
     return jsonResponse({ error: error instanceof CoachingError || error instanceof RequestError
       ? error.message : "Coaching request failed", ...(runId && runUserId ? { proposal_run_id: runId } : {}) }, { status });
   }

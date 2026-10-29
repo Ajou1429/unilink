@@ -53,6 +53,7 @@ export function NoteViewerDialog({
   note,
   triggerLabel = "노트 열기",
 }: NoteViewerDialogProps) {
+  const [open, setOpen] = useState(false);
   const [fileUrl, setFileUrl] = useState<string | null>(note.fileDataUrl ?? null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -101,6 +102,7 @@ export function NoteViewerDialog({
   }
 
   useEffect(() => {
+    if (!open) return;
     let cancelled = false;
     if (note.filePath && !note.fileDataUrl) {
       const supabase = getSupabaseClient();
@@ -143,7 +145,7 @@ export function NoteViewerDialog({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [note.driveFileId, note.fileDataUrl, note.fileName, note.filePath]);
+  }, [open, note.driveFileId, note.fileDataUrl, note.fileName, note.filePath]);
 
   const fileExtension = note.fileName?.split(".").pop()?.toLowerCase();
   const isImage = Boolean(
@@ -152,7 +154,16 @@ export function NoteViewerDialog({
   const isPdf = fileExtension === "pdf";
 
   return (
-    <Dialog>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) {
+          setFileUrl(note.fileDataUrl ?? null);
+          setFileError(null);
+        }
+      }}
+    >
       <DialogTrigger render={<Button size="sm" variant="outline" className="gap-1.5" />}>
         <ExternalLink className="h-3.5 w-3.5" />
         {triggerLabel}

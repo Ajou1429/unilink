@@ -1,6 +1,8 @@
 project_id = "unilink"
 
 [auth]
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/dashboard", "http://localhost:3000/settings", "http://127.0.0.1:3000/dashboard", "http://127.0.0.1:3000/settings"]
 minimum_password_length = 10
 password_requirements = "lower_upper_letters_digits_symbols"
 

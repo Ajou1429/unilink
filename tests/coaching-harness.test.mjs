@@ -2,10 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
-import { CoachingError, parseCoachingRequest, validateProposal } from "../supabase/functions/_shared/coaching/contract.ts";
+import { CoachingError, fitProposalSchedule, parseCoachingRequest, validateProposal } from "../supabase/functions/_shared/coaching/contract.ts";
 import { modelContext } from "../supabase/functions/_shared/coaching/context.ts";
 import { coachingContextSnapshot, coachingOutputPayload, coachingRequestHash, coachingRequestKey,
   coachingRequestPayload, proposalFromStoredOutput } from "../supabase/functions/_shared/coaching/run.ts";
+import { coachingUsagePayload } from "../supabase/functions/_shared/coaching/usage.ts";
 
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const goal = id(1), topic = id(2), otherGoal = id(3);
@@ -52,6 +53,28 @@ test("continuous study needs a real break before the configured limit is exceede
   assert.equal(validateProposal(proposal("10:10"), request, context).items.length, 2);
 });
 
+test("intent-specific requests require selected work and complete exam information", () => {
+  rejects(() => parseCoachingRequest({ ...body, intent: "progress_check" }), 400);
+  rejects(() => parseCoachingRequest({ ...body, intent: "daily_plan" }), 400);
+  const daily = parseCoachingRequest({ ...body, intent: "daily_plan", daily_sources: [{ kind: "event", id: topic }] });
+  assert.equal(daily.daily_sources[0].id, topic);
+  rejects(() => parseCoachingRequest({ ...body, intent: "exam_prep" }), 400);
+  const exam = { goal_id: goal, scope: "Chapters 1-3", exam_at: "2026-10-01T00:20:00Z", priority: 5, difficulty: 4 };
+  const request = parseCoachingRequest({ ...body, intent: "exam_prep", exam_inputs: [exam] });
+  assert.deepEqual(request.exam_inputs, [exam]);
+  rejects(() => parseCoachingRequest({ ...body, intent: "exam_prep", exam_inputs: [{ ...exam, difficulty: 6 }] }), 400);
+  rejects(() => validateProposal({ summary: "Plan", items: [item], deferred_goals: [] }, request, context), 502);
+});
+
+test("generated items are fitted around fixed commitments and transition buffers", () => {
+  const request = parseCoachingRequest(body);
+  const blocked = { ...context, recurring_blocks: [{ day_of_week: 4, start_time: "09:00", end_time: "10:00", effective_from: null, effective_to: null, label: "Class" }] };
+  const generated = { summary: "Plan", items: [item], deferred_goals: [] };
+  const fitted = fitProposalSchedule(generated, request, blocked);
+  assert.equal(fitted.items[0].start_time, "10:10");
+  assert.equal(validateProposal(fitted, request, blocked).items[0].start_time, "10:10");
+});
+
 test("focus goal limit applies to each day of a multi-day plan", () => {
   const request = parseCoachingRequest({ ...body, goal_ids: [goal, otherGoal],
     rules: { ...body.rules, max_focus_goals: 1 },
@@ -90,6 +113,8 @@ test("proposal rejects foreign IDs, unconfirmed topics, invalid methods and over
 
 test("model context excludes raw metadata and estimated legacy observations", () => {
   const payload = modelContext({ ...context,
+    deadlines: [{ goal_id: goal, title: "Midterm", event_type: "exam", starts_at: "2026-10-09T05:00:00Z", due_at: null,
+      description: "Solve practice problems", exam_scope: "Chapters 3-5" }],
     sessions: [{ goal_id: goal, topic_id: topic, actual_minutes: 30, completion_status: "completed", started_at: null,
       metadata: { completed_at_estimated: true, secret: "omit" } }],
     existing_items: [{ goal_id: goal, topic_id: topic, title: "Legacy", planned_minutes: 30,
@@ -98,6 +123,8 @@ test("model context excludes raw metadata and estimated legacy observations", ()
   assert.equal(payload.recent_study[0].started_at, null);
   assert.equal(payload.existing_items[0].planned_minutes, null);
   assert.equal(payload.existing_items[0].title, "Legacy");
+  assert.equal(payload.deadlines[0].exam_scope, "Chapters 3-5");
+  assert.equal(payload.deadlines[0].description, "Solve practice problems");
   assert.equal(JSON.stringify(payload).includes("secret"), false);
 });
 
@@ -123,6 +150,17 @@ test("coaching run payloads have stable request identity and bounded snapshots",
   const output = coachingOutputPayload({ summary: "Plan", items: [item], deferred_goals: [] });
   assert.equal(proposalFromStoredOutput(output)?.items[0].goal_id, goal);
   assert.equal(proposalFromStoredOutput({ schema_version: 1, proposal: output.proposal }), null);
+});
+
+test("coaching usage includes retries and estimates only known model prices", () => {
+  const attempt = { input_tokens: 4000, cached_input_tokens: 0, cache_write_input_tokens: 0,
+    output_tokens: 2000, reasoning_tokens: 500, total_tokens: 6000 };
+  const usage = coachingUsagePayload("gpt-5-mini", [attempt, attempt]);
+  assert.equal(usage.attempt_count, 2);
+  assert.equal(usage.totals.input_tokens, 8000);
+  assert.equal(usage.totals.output_tokens, 4000);
+  assert.equal(usage.totals.estimated_cost_usd, 0.01);
+  assert.equal(coachingUsagePayload("unknown-model", [attempt]).totals.estimated_cost_usd, null);
 });
 
 test("quota migration limits concurrent and repeated requests while hiding operations from users", async () => {
@@ -165,8 +203,8 @@ test("coaching run, approval and feedback migrations keep plans atomic and owner
       grant usage on schema public, auth to anon, authenticated, service_role;
       alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
     `);
-    for (const name of ["0001_notes_and_drive.sql", "0010_core_learning.sql", "0012_p0_planning_execution.sql",
-      "0016_coaching_runs_feedback.sql", "0017_approve_coaching_proposals.sql"]) {
+    for (const name of ["0001_notes_and_drive.sql", "0010_core_learning.sql", "0011_p0_schedules.sql", "0012_p0_planning_execution.sql",
+      "0016_coaching_runs_feedback.sql", "0017_approve_coaching_proposals.sql", "0019_course_event_details.sql"]) {
       await db.exec(readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8")
         .replace('create extension if not exists "pgcrypto";', ""));
     }

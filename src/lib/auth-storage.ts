@@ -211,7 +211,7 @@ export async function signupWithPassword(input: SignupInput) {
         },
         emailRedirectTo:
           typeof window !== "undefined"
-            ? `${window.location.origin}/dashboard`
+            ? `${window.location.origin}${window.location.pathname.startsWith("/unilink/") ? "/unilink" : ""}/dashboard`
             : undefined,
       },
     });

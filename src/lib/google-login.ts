@@ -3,11 +3,7 @@ import { getSupabaseBrowserClient } from "./supabase-client";
 export const GOOGLE_AUTH_RETURN_KEY = "unilink:google-auth-return";
 
 function redirectTo(path: string) {
-  // The hosted project currently allows only the localhost origin, not nested paths.
-  if (window.location.origin === "http://localhost:3000") {
-    window.sessionStorage.setItem(GOOGLE_AUTH_RETURN_KEY, path);
-    return window.location.origin;
-  }
+  // Return to the initiating environment; allow this URL in Supabase Auth settings.
   const basePath = window.location.pathname.startsWith("/unilink/") ? "/unilink" : "";
   return `${window.location.origin}${basePath}${path}`;
 }

@@ -3,12 +3,14 @@ export class CoachingError extends Error {
   constructor(message: string, status = 400) { super(message); this.status = status; }
 }
 
-export const COACHING_POLICY_VERSION = "time-window-v3";
+export const COACHING_POLICY_VERSION = "time-window-v4";
 
 export type TimeWindow = { start: string; end: string };
 export type DayBudget = { date: string; minutes: number; windows: TimeWindow[] };
 export type PlanningRules = { transition_minutes: number; break_minutes: number; break_after_minutes: number; method_minimums: Record<string, number>; max_focus_goals: number; carryover: boolean };
 export type CoachingRequest = {
+  daily_sources?: { kind: string; id: string }[];
+  exam_inputs?: { goal_id: string; scope: string; exam_at: string; priority: number; difficulty: number }[];
   goal_ids: string[];
   intent: string;
   period_start: string;
@@ -21,7 +23,7 @@ export type CoachingRequest = {
 export type Goal = { id: string; title: string; goal_type: string; target_date: string | null; importance: number; metadata: Record<string, unknown> };
 export type Topic = { id: string; goal_id: string; title: string; status: string };
 export type Method = { code: string; display_name: string; active: boolean };
-export type Deadline = { goal_id: string | null; title: string; due_at: string | null; starts_at: string | null; event_type: string };
+export type Deadline = { goal_id: string | null; title: string; due_at: string | null; starts_at: string | null; event_type: string; description?: string; exam_scope?: string };
 export type Session = { goal_id: string; topic_id: string | null; actual_minutes: number; completion_status: string; started_at: string | null; metadata: Record<string, unknown> };
 export type ExistingItem = { goal_id: string; topic_id: string | null; title: string; planned_minutes: number; scheduled_start: string | null; status: string; metadata: Record<string, unknown> };
 export type BlockedInterval = { start: string; end: string; label: string };
@@ -31,9 +33,9 @@ export type CoachingContext = {
   goals: Goal[];
   topics: Topic[];
   methods: Method[];
-  deadlines: Deadline[];
+  deadlines: (Deadline & { id?: string })[];
   sessions: Session[];
-  existing_items: ExistingItem[];
+  existing_items: (ExistingItem & { id?: string; scheduled_end?: string | null })[];
   blocked_events?: BlockedInterval[];
   recurring_blocks?: RecurringBlock[];
 };
@@ -52,7 +54,7 @@ export type Proposal = { summary: string; items: ProposedItem[]; deferred_goals:
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isoDay = /^\d{4}-\d{2}-\d{2}$/;
-const intents = new Set(["weekly_plan", "daily_plan", "exam_prep", "topic_review", "progress_check"]);
+const intents = new Set(["weekly_plan", "daily_plan", "exam_prep", "topic_review"]);
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const clock = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -80,6 +82,17 @@ export function parseCoachingRequest(value: unknown): CoachingRequest {
     throw new CoachingError("Select 1 to 5 unique goals");
   }
   if (typeof value.intent !== "string" || !intents.has(value.intent)) throw new CoachingError("Invalid intent");
+  const sources = value.daily_sources ?? [];
+  if (!Array.isArray(sources) || sources.length > 30 || sources.some((s) => !record(s) ||
+    !["event", "plan"].includes(String(s.kind)) || typeof s.id !== "string" || !uuid.test(s.id))) throw new CoachingError("Invalid daily sources");
+  const exams = value.exam_inputs ?? [];
+  if (!Array.isArray(exams) || exams.length > 5 || exams.some((e) => !record(e) ||
+    !(value.goal_ids as string[]).includes(String(e.goal_id)) || typeof e.scope !== "string" || !e.scope.trim() || e.scope.length > 2000 ||
+    typeof e.exam_at !== "string" || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(e.exam_at) || !Number.isFinite(Date.parse(e.exam_at)) ||
+    !Number.isInteger(e.priority) || Number(e.priority) < 1 || Number(e.priority) > 5 ||
+    !Number.isInteger(e.difficulty) || Number(e.difficulty) < 1 || Number(e.difficulty) > 5)) throw new CoachingError("Invalid exam inputs");
+  if (value.intent === "daily_plan" && !sources.length) throw new CoachingError("마감 작업을 선택해 주세요.");
+  if (value.intent === "exam_prep" && ((new Set(exams.map((e) => e.goal_id))).size !== (value.goal_ids as string[]).length || exams.length !== (value.goal_ids as string[]).length)) throw new CoachingError("과목별 시험 정보를 입력해 주세요.");
   if (typeof value.desired_outcome !== "string" || value.desired_outcome.length > 1000 ||
     typeof value.constraints !== "string" || value.constraints.length > 1000) throw new CoachingError("Request text is too long");
   if (!Array.isArray(value.day_budgets) || value.day_budgets.length !== end - start + 1) {
@@ -121,6 +134,8 @@ export function parseCoachingRequest(value: unknown): CoachingRequest {
     methodMinimums[code] = minutes as number;
   }
   return {
+    ...(value.intent === "daily_plan" ? { daily_sources: sources } : {}),
+    ...(value.intent === "exam_prep" ? { exam_inputs: exams } : {}),
     goal_ids: value.goal_ids as string[], intent: value.intent,
     period_start: value.period_start as string, period_end: value.period_end as string,
     day_budgets: days.sort((a, b) => a.date.localeCompare(b.date)),
@@ -129,6 +144,72 @@ export function parseCoachingRequest(value: unknown): CoachingRequest {
       break_after_minutes: inputRules.break_after_minutes as number, method_minimums: methodMinimums,
       max_focus_goals: inputRules.max_focus_goals as number, carryover: inputRules.carryover as boolean },
   };
+}
+
+function fixedBlocksForDate(date: string, context: CoachingContext): { start: number; end: number }[] {
+  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+  const dayEpoch = Date.parse(`${date}T00:00:00Z`);
+  return [
+    ...(context.blocked_events ?? []).map((block) => ({
+      start: (Date.parse(`${block.start}:00Z`) - dayEpoch) / 60_000,
+      end: (Date.parse(`${block.end}:00Z`) - dayEpoch) / 60_000,
+    })),
+    ...(context.recurring_blocks ?? [])
+      .filter((block) => block.day_of_week === weekday && (!block.effective_from || block.effective_from <= date) && (!block.effective_to || block.effective_to >= date))
+      .map((block) => ({ start: minuteOfDay(block.start_time.slice(0, 5)), end: minuteOfDay(block.end_time.slice(0, 5)) })),
+  ];
+}
+
+function clockFromMinutes(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+export function fitProposalSchedule(value: unknown, request: CoachingRequest, context: CoachingContext): unknown {
+  if (!record(value) || !Array.isArray(value.items)) return value;
+  const fitted: Record<string, unknown>[] = [];
+  const byDate = new Map<string, { start: number; end: number; goal: string }[]>();
+  const sourceItems = value.items.map((raw, index) => ({ raw, index })).sort((a, b) => {
+    if (!record(a.raw) || !record(b.raw)) return a.index - b.index;
+    return `${String(a.raw.planned_date)} ${String(a.raw.start_time)}`.localeCompare(`${String(b.raw.planned_date)} ${String(b.raw.start_time)}`);
+  });
+  for (const { raw } of sourceItems) {
+    if (!record(raw) || typeof raw.planned_date !== "string" || typeof raw.start_time !== "string" ||
+      !clock.test(raw.start_time) || typeof raw.goal_id !== "string" || !Number.isInteger(raw.planned_minutes)) {
+      fitted.push(raw as Record<string, unknown>);
+      continue;
+    }
+    const day = request.day_budgets.find((entry) => entry.date === raw.planned_date);
+    const duration = raw.planned_minutes as number;
+    if (!day || duration < 15 || duration > 180) {
+      fitted.push(raw);
+      continue;
+    }
+    const fixed = fixedBlocksForDate(raw.planned_date, context);
+    const scheduled = byDate.get(raw.planned_date) ?? [];
+    const preferred = minuteOfDay(raw.start_time);
+    const candidates = [preferred];
+    for (const window of day.windows) {
+      const from = minuteOfDay(window.start), to = minuteOfDay(window.end);
+      for (let start = from; start + duration <= to; start += 5) candidates.push(start);
+    }
+    const start = [...new Set(candidates)].find((candidate) => {
+      const end = candidate + duration;
+      if (!day.windows.some((window) => candidate >= minuteOfDay(window.start) && end <= minuteOfDay(window.end))) return false;
+      if (fixed.some((block) => candidate < block.end + request.rules.transition_minutes && end > block.start - request.rules.transition_minutes)) return false;
+      return scheduled.every((item) => {
+        const gap = Math.max(request.rules.break_minutes, item.goal === raw.goal_id ? 0 : request.rules.transition_minutes);
+        return end + gap <= item.start || candidate >= item.end + gap;
+      });
+    });
+    if (start === undefined) {
+      fitted.push(raw);
+      continue;
+    }
+    byDate.set(raw.planned_date, [...scheduled, { start, end: start + duration, goal: raw.goal_id }]);
+    fitted.push({ ...raw, start_time: clockFromMinutes(start) });
+  }
+  fitted.sort((a, b) => `${String(a.planned_date)} ${String(a.start_time)}`.localeCompare(`${String(b.planned_date)} ${String(b.start_time)}`));
+  return { ...value, items: fitted };
 }
 
 export function validateProposal(value: unknown, request: CoachingRequest, context: CoachingContext): Proposal {
@@ -155,22 +236,20 @@ export function validateProposal(value: unknown, request: CoachingRequest, conte
     const date = raw.planned_date;
     const start = minuteOfDay(raw.start_time);
     const end = start + (raw.planned_minutes as number);
+    const exam = request.exam_inputs?.find((entry) => entry.goal_id === raw.goal_id);
+    if (exam) {
+      const parts = new Intl.DateTimeFormat("en-CA", { timeZone: context.timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(exam.exam_at));
+      const part = (type: string) => parts.find((p) => p.type === type)?.value;
+      const examLocal = `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`;
+      if (`${date}T${clockFromMinutes(end)}` > examLocal) throw new CoachingError("시험 시작 전 시간에만 대비 계획을 배치할 수 있습니다.", 502);
+    }
     const day = request.day_budgets.find((entry) => entry.date === date)!;
     const minimum = Object.hasOwn(request.rules.method_minimums, raw.method_code) ? request.rules.method_minimums[raw.method_code] : 15;
     if ((raw.planned_minutes as number) < minimum || (raw.planned_minutes as number) > request.rules.break_after_minutes ||
       !day.windows.some((window) => start >= minuteOfDay(window.start) && end <= minuteOfDay(window.end))) {
       throw new CoachingError("Plan item violates method minimum or confirmed time window", 502);
     }
-    const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
-    const dayEpoch = Date.parse(`${date}T00:00:00Z`);
-    const blocks = [
-      ...(context.blocked_events ?? []).map((block) => ({
-        start: (Date.parse(`${block.start}:00Z`) - dayEpoch) / 60_000,
-        end: (Date.parse(`${block.end}:00Z`) - dayEpoch) / 60_000,
-      })),
-      ...(context.recurring_blocks ?? []).filter((block) => block.day_of_week === weekday && (!block.effective_from || block.effective_from <= date) && (!block.effective_to || block.effective_to >= date))
-        .map((block) => ({ start: minuteOfDay(block.start_time.slice(0, 5)), end: minuteOfDay(block.end_time.slice(0, 5)) })),
-    ];
+    const blocks = fixedBlocksForDate(date, context);
     if (blocks.some((block) => start < block.end + request.rules.transition_minutes && end > block.start - request.rules.transition_minutes)) {
       throw new CoachingError("Plan conflicts with a fixed commitment or transition time", 502);
     }
