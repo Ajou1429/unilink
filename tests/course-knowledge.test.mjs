@@ -176,6 +176,7 @@ test("actual Edge handler + PostgreSQL: first preparation, incremental PDF slici
     await db.query("insert into notes(id,user_id,title,file_name,file_path,linked_type,linked_id) values($1,$2,'Lecture 1','lecture.pdf',$3,'course','legacy-course')",[nid,user,`${user}/lecture.pdf`]);
     const pdf=await PDFDocument.create();for(let i=0;i<10;i++)pdf.addPage();const bytes=await pdf.save();
     let handler;const pending=[];const calls={pdf:0,search:0,coaching:0};const submittedPages=[];const modelContexts=[];
+    let researchAnswer;let assessmentCalls=0;
     const env={COURSE_KNOWLEDGE_ENABLED:"true",COURSE_RESEARCH_ENABLED:"true",COURSE_RESEARCH_MODEL:"search-test",COACHING_MODEL:"pdf-test",COACHING_HARNESS_ENABLED:"true",OPENAI_API_KEY:"mock-only"};
     const admin=createClient(db,{admin:true});
     const scalarRpc=admin.rpc;
@@ -191,7 +192,12 @@ test("actual Edge handler + PostgreSQL: first preparation, incremental PDF slici
       if(body.tools){
         calls.search++;assert.ok(body.input.includes("SQL JOIN"));assert.ok(!body.input.includes("Lecture 1"));
         parsed={required_depth:unit.required_depth,prerequisites:["SELECT"],methods:["SQL coding"],difficulty:{theory:2,lab:3,assignment:null,exam:null},minutes_low:30,minutes_high:90,time_basis:"Estimated query exercises, not a measured peer average",uncertainty:"Learner-specific adjustment still required",sources:[{url:"https://example.edu/sql",title:"SQL teaching",relevance:"Same query task",reliability:"Test university fixture",evidence:"Exercises for JOIN"}]};
+        researchAnswer=parsed;
         extra=[{type:"web_search_call",status:"completed",action:{sources:[{url:"https://example.edu/sql"}]}}];
+      }else if(body.text.format.name==="course_research"){
+        assessmentCalls++;assert.deepEqual(body.text.format.schema.properties.sources.items.properties.url.enum,["https://example.edu/sql"]);
+        if(assessmentCalls===1)throw new Error("Simulated assessment failure");
+        parsed=researchAnswer;
       }else if(body.text.format.name==="course_knowledge"){
         calls.pdf++;const input=body.input[0].content;const range=input[0].text.match(/Original physical PDF pages (\d+)-(\d+)/);const a=Number(range[1]),b=Number(range[2]);
         const slice=await PDFDocument.load(Buffer.from(input[1].file_data.split(",")[1],"base64"));assert.equal(slice.getPageCount(),b-a+1);submittedPages.push([a,b]);
@@ -222,7 +228,12 @@ test("actual Edge handler + PostgreSQL: first preparation, incremental PDF slici
     await invoke();await invoke();
     assert.equal((await invoke({consent:false,research_consent:false})).status,"research_consent_required");
     assert.deepEqual(calls,{pdf:1,search:0,coaching:0});
-    for(let i=0;i<10;i++){const s=await invoke();if(s.status==="ready"&&s.research_status==="ready")break;}
+    await invoke();
+    const failed=await invoke({action:"status"});assert.equal(failed.research_status,"failed");
+    const checkpoint=(await db.query("select payload from course_knowledge_tasks where user_id=$1 and kind='research'",[user])).rows[0].payload;
+    assert.ok(checkpoint.retrieved_evidence.urls.length);
+    await invoke({retry:true});
+    const researched=await invoke();assert.equal(researched.research_status,"ready");assert.equal(assessmentCalls,2);
     assert.deepEqual(calls,{pdf:1,search:1,coaching:0});await invoke();assert.equal(calls.pdf,1);assert.equal(calls.search,1);
     assert.equal((await invoke({consent:false,research_consent:false})).status,"ready");
     await db.query("insert into course_sessions(id,user_id,course_id,session_date,metadata) values($1,$2,$3,'2026-10-30',$4)",[session,user,course,JSON.stringify(progress(1).metadata)]);

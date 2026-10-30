@@ -1,5 +1,6 @@
 // Pure planning/validation: learner ratings never enter a PDF or research cache key.
 export const KNOWLEDGE_VERSION = "course-knowledge-v1";
+export const RESEARCH_VERSION = "course-research-v2";
 export const OVERVIEW_PAGES = 10;
 export const DETAIL_PAGES = 6;
 export type KnowledgeNote = { id: string; title: string; version: number; updated_at: string; file_path: string | null; file_name: string | null; drive_file_id: string | null; drive_modified_time: string | null };
@@ -112,10 +113,10 @@ export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[]
   const add = async (kind: KnowledgeTask["kind"], note: KnowledgeNote | null, hash: string | null, a: number | null, b: number | null, extra: unknown = null) => {
     const sourceRevision = note ? revision(note) : null;
     const analysisEpoch = note ? epoch(note) : null;
-    const key = await digest([KNOWLEDGE_VERSION, kind, kind === "research" ? searchModel : model, note?.id, kind === "index" ? sourceRevision : hash, a, b, kind === "research" ? researchIdentity(extra) : extra, analysisEpoch]);
+    const key = await digest([kind === "research" ? RESEARCH_VERSION : KNOWLEDGE_VERSION, kind, kind === "research" ? searchModel : model, note?.id, kind === "index" ? sourceRevision : hash, a, b, kind === "research" ? researchIdentity(extra) : extra, analysisEpoch]);
     const previous = saved.find((t) => t.task_key === key);
     const task: KnowledgeTask = { ...previous, task_key: key, kind, note_id: note?.id ?? null, source_revision: sourceRevision, source_hash: hash, page_start: a, page_end: b, analysis_epoch: analysisEpoch,
-      ...(kind === "research" ? { payload: { concepts: extra } } : {}) };
+      ...(kind === "research" ? { payload: { ...previous?.payload, concepts: extra } } : {}) };
     // Retain saved research payload for context; extra is only its request on a cache miss.
     if (previous?.status === "ready") { active.push(previous); return previous; }
     tasks.push(task); return null;
@@ -246,6 +247,11 @@ export const researchSchema = object({
   time_basis: str, uncertainty: str,
   sources: { type: "array", items: object({ url: str, title: str, relevance: str, reliability: str, evidence: str }) },
 });
+export function researchSchemaForSources(urls: string[]) {
+  return object({ ...researchSchema.properties,
+    sources: { type: "array", items: object({ url: { type: "string", enum: urls }, title: str, relevance: str, reliability: str, evidence: str }) },
+  });
+}
 export function parseResearch(raw: unknown, allowedUrls: Set<string>, checkedAt: string) {
   const v = record(raw); const difficulty = record(v.difficulty);
   for (const key of ["theory", "lab", "assignment", "exam"]) if (difficulty[key] !== null && (!Number.isInteger(difficulty[key]) || Number(difficulty[key]) < 1 || Number(difficulty[key]) > 5)) throw new Error("Invalid difficulty estimate");
