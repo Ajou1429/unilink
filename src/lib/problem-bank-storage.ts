@@ -1,6 +1,6 @@
 import { privateStorage } from "./private-storage.ts";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { describeFunctionError } from "@/lib/supabase/function-error";
+import { MAX_LABEL_LENGTH, MAX_LABELS } from "./problem-bank-labels.ts";
 
 export const PROBLEM_BANK_SUBJECTS_KEY = "unilink:problem-bank-subjects";
 export const PROBLEM_BANK_PROBLEMS_KEY = "unilink:problem-bank-problems";
@@ -17,19 +17,41 @@ export interface ProblemBankProblem {
   subjectId: string;
   label: string;
   level: number;
-  sourceFile: string | null;
+  /** 문항을 가져온 파일 이름. 파일 단위 기록 이전에 저장된 문항은 "" */
+  sourceFile: string;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface ProblemBankUploadResult {
+export interface ProblemBankSaveResult {
   addedCount: number;
-  extractedCount: number;
+  /** 같은 파일에 이미 있어 건너뛴 문항 수 */
+  skippedCount: number;
 }
+
+export const MAX_SOURCE_FILE_LENGTH = 200;
+
+function cleanSave(sourceFile: string, labels: string[]) {
+  const file = sourceFile.trim();
+  if (!file || file.length > MAX_SOURCE_FILE_LENGTH) throw new Error("파일 이름을 1-200자로 입력해 주세요.");
+  const clean = [...new Set(labels.map((l) => l.trim()))];
+  if (!clean.length || clean.length > MAX_LABELS || clean.some((l) => !l || l.length > MAX_LABEL_LENGTH)) {
+    throw new Error(`문항 번호는 1-${MAX_LABELS}개, 각 ${MAX_LABEL_LENGTH}자 이내로 입력해 주세요.`);
+  }
+  return { file, labels: clean };
+}
+
+function cleanLabel(label: string) {
+  const clean = label.trim();
+  if (!clean || clean.length > MAX_LABEL_LENGTH) throw new Error(`문항 번호는 1-${MAX_LABEL_LENGTH}자로 입력해 주세요.`);
+  return clean;
+}
+
+const duplicateLabel = (label: string) => new Error(`이 파일에 이미 ${label} 문항이 있어요.`);
 
 // ---------------------------------------------------------------------------
 // localStorage 목업 — Supabase가 설정되지 않은 개발 환경(GitHub Pages 데모)에서만 쓰인다.
-// PDF 업로드(Gemini 추출)는 서버가 필요해 로컬 모드에서는 지원하지 않는다.
+// PDF 문항 추출은 브라우저에서 하므로 로컬 모드에서도 같은 흐름을 쓴다.
 // ---------------------------------------------------------------------------
 
 interface LocalSubject {
@@ -63,7 +85,7 @@ function getLocalSubjects(): LocalSubject[] {
 }
 
 function getLocalProblems(): ProblemBankProblem[] {
-  return readJson<ProblemBankProblem[]>(PROBLEM_BANK_PROBLEMS_KEY, []);
+  return readJson<ProblemBankProblem[]>(PROBLEM_BANK_PROBLEMS_KEY, []).map((p) => ({ ...p, sourceFile: p.sourceFile ?? "" }));
 }
 
 async function listLocalSubjects(): Promise<ProblemBankSubject[]> {
@@ -104,6 +126,43 @@ async function setLocalProblemLevel(id: string, level: number): Promise<ProblemB
   return updated;
 }
 
+async function saveLocalProblems(subjectId: string, sourceFile: string, labels: string[]): Promise<ProblemBankSaveResult> {
+  const problems = getLocalProblems();
+  const existing = new Set(problems.filter((p) => p.subjectId === subjectId && p.sourceFile === sourceFile).map((p) => p.label));
+  const fresh = labels.filter((l) => !existing.has(l));
+  const now = new Date().toISOString();
+  const added = fresh.map((label, i) => ({
+    id: `problem-${Date.now()}-${i}`,
+    subjectId,
+    label,
+    level: 0,
+    sourceFile,
+    createdAt: now,
+    updatedAt: now,
+  }));
+  writeJson(PROBLEM_BANK_PROBLEMS_KEY, [...problems, ...added]);
+  return { addedCount: added.length, skippedCount: labels.length - added.length };
+}
+
+async function renameLocalProblem(id: string, label: string): Promise<ProblemBankProblem> {
+  const problems = getLocalProblems();
+  const target = problems.find((p) => p.id === id);
+  if (!target) throw new Error("문제를 찾을 수 없어요.");
+  if (problems.some((p) => p.id !== id && p.subjectId === target.subjectId && p.sourceFile === target.sourceFile && p.label === label)) {
+    throw duplicateLabel(label);
+  }
+  const updated = { ...target, label, updatedAt: new Date().toISOString() };
+  writeJson(PROBLEM_BANK_PROBLEMS_KEY, problems.map((p) => (p.id === id ? updated : p)));
+  return updated;
+}
+
+async function deleteLocalFile(subjectId: string, sourceFile: string): Promise<void> {
+  writeJson(
+    PROBLEM_BANK_PROBLEMS_KEY,
+    getLocalProblems().filter((p) => !(p.subjectId === subjectId && p.sourceFile === sourceFile)),
+  );
+}
+
 async function deleteLocalProblem(id: string): Promise<void> {
   writeJson(
     PROBLEM_BANK_PROBLEMS_KEY,
@@ -137,7 +196,7 @@ function rowToProblem(row: ProblemRow): ProblemBankProblem {
     subjectId: row.subject_id,
     label: row.label,
     level: row.level,
-    sourceFile: row.source_file,
+    sourceFile: row.source_file ?? "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -215,20 +274,50 @@ async function deleteSupabaseProblem(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-async function uploadSupabasePDF(subjectId: string, file: File): Promise<ProblemBankUploadResult> {
+async function saveSupabaseProblems(subjectId: string, sourceFile: string, labels: string[]): Promise<ProblemBankSaveResult> {
   const supabase = getSupabaseClient()!;
-  const formData = new FormData();
-  formData.append("subjectId", subjectId);
-  formData.append("file", file);
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) throw new Error("로그인이 필요합니다.");
 
-  const { data, error } = await supabase.functions.invoke<ProblemBankUploadResult>(
-    "problem-bank-upload",
-    { body: formData },
-  );
-  if (error || !data) {
-    throw new Error(await describeFunctionError(error, "PDF에서 문제를 읽지 못했어요."));
+  const { data: rows, error: existingError } = await supabase
+    .from("problem_bank_problems")
+    .select("label")
+    .eq("subject_id", subjectId)
+    .eq("source_file", sourceFile);
+  if (existingError) throw new Error(existingError.message);
+  const existing = new Set((rows ?? []).map((r: { label: string }) => r.label));
+  const fresh = labels.filter((l) => !existing.has(l));
+  if (fresh.length) {
+    const { error } = await supabase
+      .from("problem_bank_problems")
+      .insert(fresh.map((label) => ({ subject_id: subjectId, user_id: userId, label, source_file: sourceFile })));
+    if (error) throw new Error(error.message);
   }
-  return data;
+  return { addedCount: fresh.length, skippedCount: labels.length - fresh.length };
+}
+
+async function renameSupabaseProblem(id: string, label: string): Promise<ProblemBankProblem> {
+  const supabase = getSupabaseClient()!;
+  const { data, error } = await supabase
+    .from("problem_bank_problems")
+    .update({ label })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error?.code === "23505") throw duplicateLabel(label);
+  if (error) throw new Error(error.message);
+  return rowToProblem(data as ProblemRow);
+}
+
+async function deleteSupabaseFile(subjectId: string, sourceFile: string): Promise<void> {
+  const supabase = getSupabaseClient()!;
+  const { error } = await supabase
+    .from("problem_bank_problems")
+    .delete()
+    .eq("subject_id", subjectId)
+    .eq("source_file", sourceFile);
+  if (error) throw new Error(error.message);
 }
 
 // ---------------------------------------------------------------------------
@@ -260,9 +349,20 @@ export async function deleteProblem(id: string): Promise<void> {
   return deleteLocalProblem(id);
 }
 
-export async function uploadPDF(subjectId: string, file: File): Promise<ProblemBankUploadResult> {
-  if (!isSupabaseConfigured) {
-    throw new Error("Supabase가 설정되지 않아 PDF 업로드(Gemini 추출)는 사용할 수 없습니다.");
-  }
-  return uploadSupabasePDF(subjectId, file);
+/** 사용자가 확인한 문항 번호를 파일 단위로 저장한다. 같은 파일에 이미 있는 번호는 건너뛴다. */
+export async function saveProblems(subjectId: string, sourceFile: string, labels: string[]): Promise<ProblemBankSaveResult> {
+  const clean = cleanSave(sourceFile, labels);
+  if (isSupabaseConfigured) return saveSupabaseProblems(subjectId, clean.file, clean.labels);
+  return saveLocalProblems(subjectId, clean.file, clean.labels);
+}
+
+export async function renameProblem(id: string, label: string): Promise<ProblemBankProblem> {
+  const clean = cleanLabel(label);
+  if (isSupabaseConfigured) return renameSupabaseProblem(id, clean);
+  return renameLocalProblem(id, clean);
+}
+
+export async function deleteFile(subjectId: string, sourceFile: string): Promise<void> {
+  if (isSupabaseConfigured) return deleteSupabaseFile(subjectId, sourceFile);
+  return deleteLocalFile(subjectId, sourceFile);
 }
