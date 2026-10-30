@@ -31,6 +31,7 @@ export type BlockedInterval = { start: string; end: string; label: string };
 export type RecurringBlock = { day_of_week: number; start_time: string; end_time: string; effective_from: string | null; effective_to: string | null; label: string };
 export type TopicLearningState = { id: string; goal_id: string; topic_id: string; learning_status: string; self_rating: number | null; memo: string; observed_at: string; source: string; session_id: string | null; session_date: string | null; note_id: string | null; page_start: number | null; page_end: number | null };
 export type CoachingContext = {
+  course_knowledge?: Record<string, unknown>[];
   topic_check_states?: { id: string; check_id: string; goal_id: string; topic_id: string; correct_count: number; question_count: number; source: string; grader_version: string; created_at: string; note_id: string; note_version: number; source_stale: boolean; voided_at?: string | null }[];
   topic_learning_states?: TopicLearningState[];
   timezone: string;

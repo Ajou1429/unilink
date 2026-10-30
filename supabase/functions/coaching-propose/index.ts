@@ -3,6 +3,8 @@ import { readSmallJson, RequestError } from "../_shared/requestLimits.ts";
 import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.ts";
 import { COACHING_POLICY_VERSION, CoachingError, fitProposalSchedule, parseCoachingRequest, validateProposal } from "../_shared/coaching/contract.ts";
 import { loadCoachingContext } from "../_shared/coaching/context.ts";
+import { knowledgeModels } from "../_shared/courseKnowledgeStore.ts";
+import { loadCoachingSettings, featureEnabled } from "../_shared/coachingSettings.ts";
 import { COACHING_PROMPT_VERSION, generateProposal } from "../_shared/coaching/model.ts";
 import { coachingUsagePayload, type ModelUsage } from "../_shared/coaching/usage.ts";
 import { coachingContextSnapshot, coachingOutputPayload, coachingRequestHash, coachingRequestKey,
@@ -46,7 +48,9 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
       return jsonResponse({ error: "Coaching request already exists", proposal_run_id: existing.id,
         run_status: existing.status }, { status: 409 });
     }
-    const context = await loadCoachingContext(admin, user.id, request);
+    const settings = await loadCoachingSettings(admin);
+    const context = await loadCoachingContext(admin, user.id, request,
+      featureEnabled(Deno.env.get("COURSE_KNOWLEDGE_ENABLED"), settings.knowledge_enabled) ? knowledgeModels((key) => Deno.env.get(key), settings) : undefined);
     const { data: jobId, error: reservationError } = await admin.rpc("reserve_coaching_proposal", { p_user_id: user.id });
     if (reservationError) {
       console.error("coaching quota reservation failed", {

@@ -502,7 +502,7 @@
   overflow-y: auto;
 }
 .goalChoices legend { font-size: 12px; font-weight: 650; }
-.goalChoices label {
+.coachingForm .goalChoices label {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;

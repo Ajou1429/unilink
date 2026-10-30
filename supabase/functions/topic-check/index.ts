@@ -2,6 +2,7 @@ import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.ts";
 import { readSmallJson, readLimitedBody, RequestError } from "../_shared/requestLimits.ts";
 import { checkSchema, parseTopicCheck, TOPIC_CHECK_PROMPT } from "../_shared/topicCheck.ts";
+import { loadCoachingSettings, featureEnabled } from "../_shared/coachingSettings.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -45,9 +46,10 @@ Deno.serve(async (req) => {
     const body = await readSmallJson(req);
     if (typeof body.topicId !== "string" || !uuid.test(body.topicId) || typeof body.requestId !== "string" || !uuid.test(body.requestId)) throw new RequestError("주제와 요청 번호를 확인해 주세요.");
     if (body.consent !== true) throw new RequestError("노트 근거의 OpenAI 전송에 동의해 주세요.");
-    const model = Deno.env.get("TOPIC_CHECK_MODEL") ?? Deno.env.get("COACHING_MODEL");
-    if (Deno.env.get("TOPIC_CHECK_ENABLED") !== "true" || !model || !Deno.env.get("OPENAI_API_KEY")) throw new RequestError("확인 문제 서비스 설정이 필요합니다.", 503);
     const db = getAdminClient();
+    const settings = await loadCoachingSettings(db);
+    const model = Deno.env.get("TOPIC_CHECK_MODEL") ?? Deno.env.get("COACHING_MODEL");
+    if (!featureEnabled(Deno.env.get("TOPIC_CHECK_ENABLED"), settings.topic_check_enabled) || !model || !Deno.env.get("OPENAI_API_KEY")) throw new RequestError("확인 문제 서비스 설정이 필요합니다.", 503);
     // Reservation is idempotent; the compare-and-set below claims generation once.
     const reservation = await db.rpc("reserve_topic_check", { p_user: user.id, p_topic: body.topicId, p_request: body.requestId, p_model: model });
     if (reservation.error) throw new RequestError(reservation.error.message, 409);

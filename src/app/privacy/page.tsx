@@ -13,7 +13,7 @@ export default function PrivacyPage() {
           UniLink 홈으로
         </Link>
         <h1 className="mt-6 text-3xl font-bold">개인정보처리방침</h1>
-        <p className="mt-2 text-sm text-slate-600">시행일: 2026년 9월 29일</p>
+        <p className="mt-2 text-sm text-slate-600">시행일: 2026년 10월 30일</p>
 
         <div className="mt-8 space-y-8 leading-7 text-slate-700">
           <section>
@@ -36,6 +36,7 @@ export default function PrivacyPage() {
             <h2 className="text-xl font-semibold text-slate-900">5. 제3자 제공 및 처리 위탁</h2>
             <p className="mt-2">UniLink는 서비스 운영을 위해 인증·데이터 저장 서비스와 Google Drive API를 이용합니다. 법령상 근거가 있거나 사용자의 동의가 있는 경우를 제외하고 개인정보를 판매하거나 제공하지 않습니다.</p>
             <p className="mt-2">사용자가 PDF 자료 분석에 별도로 동의하고 분석을 실행하면 해당 PDF를 OpenAI API에 전송합니다. 수업 주제·과제·시험 후보와 근거 페이지·인용문, 자료 버전 및 분석 처리 정보를 저장하며, 확인한 항목만 학습 목표와 일정에 등록합니다. 노트 삭제 시 연결된 분석 기록은 삭제됩니다. 이미 확인해 등록한 학습 주제와 일정은 별도로 삭제할 때까지 남을 수 있습니다.</p>
+            <p className="mt-2">과목 지식 분석에 동의한 뒤 계획 추천을 요청하면 선택한 학습 목표에 연결된 PDF의 구조와 필요한 진도 구간을 분석하고, 추출한 교육과정·개념·요구 수준·근거를 저장하여 이후 코칭에 재사용합니다. 외부 자료 검색에 별도로 동의한 경우 추출된 주제·개념·요구 수준을 OpenAI 검색 도구에 전달합니다. 검색 요청에는 원본 PDF 전체나 사용자 계정 정보·이해도·학습 이력을 포함하지 않습니다. 과목별 검색 근거는 학습 목표를 삭제하면 함께 삭제됩니다.</p>
           </section>
           <section>
             <h2 className="text-xl font-semibold text-slate-900">6. 문의 및 권리 행사</h2>

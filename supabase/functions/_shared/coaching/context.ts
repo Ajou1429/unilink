@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.116.0";
 import { CoachingError, type CoachingContext, type CoachingRequest, type CourseProgress } from "./contract.ts";
+import { loadKnowledge } from "../courseKnowledgeStore.ts";
 
 const caps = { topics: 100, deadlines: 100, sessions: 100, existing_items: 100, blocks: 200 };
 
@@ -14,6 +15,7 @@ export async function loadCoachingContext(
   db: SupabaseClient,
   userId: string,
   request: CoachingRequest,
+  knowledge?: { model: string; searchModel: string | null },
 ): Promise<CoachingContext> {
   // Every user-owned table is explicitly scoped even though this server client has service-role access.
   const [preferences, goals, topics, methods, deadlines, sessions, existing, events, commitments, courses, schedules, plannedBlocks] = await Promise.all([
@@ -50,6 +52,14 @@ export async function loadCoachingContext(
     if (result.error) throw new CoachingError("Learning context is unavailable", 503);
   }
   if (goals.data?.length !== request.goal_ids.length) throw new CoachingError("Goal is missing or unavailable", 404);
+  const courseKnowledge: Record<string, unknown>[] = [];
+  if (knowledge) for (const goalId of request.goal_ids) {
+    const loaded = await loadKnowledge(db, userId, goalId, request.period_start, knowledge.model, knowledge.searchModel);
+    if (loaded.plan.tasks.some((task) => task.kind !== "research")) {
+      throw new CoachingError("과목 자료 분석이 필요합니다. 계획 추천 화면에서 분석을 완료하거나 실패한 단계를 다시 시도해 주세요.", 409);
+    }
+    courseKnowledge.push(loaded.context);
+  }
   // Bound history per selected course so one busy course cannot hide the others.
   const selectedCourses = [...new Set((goals.data ?? []).flatMap((goal) => goal.course_id ? [goal.course_id] : []))];
   const progressResults = await Promise.all(selectedCourses.map((courseId) =>
@@ -84,6 +94,7 @@ export async function loadCoachingContext(
     }
   }
   return {
+    course_knowledge: courseKnowledge,
     timezone,
     goals: goals.data ?? [], topics: topics.data ?? [], methods: methods.data ?? [],
     deadlines: deadlines.data ?? [], sessions: sessions.data ?? [], existing_items: existing.data ?? [],
@@ -114,6 +125,7 @@ export function modelContext(context: CoachingContext) {
   const reportedLevel = (value: unknown) => value === "상" || value === "중" || value === "하" ? value : null;
   const selectedCourses = new Set(context.goals.flatMap((goal) => goal.course_id ? [goal.course_id] : []));
   return {
+    course_knowledge: context.course_knowledge ?? [],
     timezone: context.timezone,
     topic_check_results: (context.topic_check_states ?? []).filter((state) => !state.voided_at && context.topics.some((topic) => topic.status === "confirmed" && topic.id === state.topic_id && topic.goal_id === state.goal_id)).map((state) => ({
       attempt_id: state.id, check_id: state.check_id, goal_id: state.goal_id, topic_id: state.topic_id,

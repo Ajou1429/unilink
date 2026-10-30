@@ -1,5 +1,6 @@
 export class RequestError extends Error {
-  constructor(message: string, public status = 400) { super(message); }
+  public status: number;
+  constructor(message: string, status = 400) { super(message); this.status = status; }
 }
 
 /** Enforce the limit while streaming, including requests without Content-Length. */

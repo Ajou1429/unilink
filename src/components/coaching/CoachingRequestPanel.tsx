@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { TopicLearningPanel } from "./TopicLearningPanel";
+import { CourseKnowledgePanel } from "./CourseKnowledgePanel";
+import { courseKnowledgeEnabled, prepareCourseKnowledge, requestCourseKnowledge, type KnowledgeStatus } from "@/lib/course-knowledge";
 import {
   Dialog,
   DialogContent,
@@ -143,6 +145,9 @@ export function CoachingRequestPanel() {
   const [approving, setApproving] = useState(false);
   const [approvedPlanId, setApprovedPlanId] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  const [knowledgeConsent, setKnowledgeConsent] = useState(false);
+  const [researchConsent, setResearchConsent] = useState(false);
+  const [knowledgeStatuses, setKnowledgeStatuses] = useState<Record<string, KnowledgeStatus>>({});
   const dates = useMemo(() => planDates(intent), [intent]);
   const learningGoalIds = intent === "daily_plan" ? [...new Set(dailySources.filter((s) => chosenSources.includes(`${s.kind}:${s.id}`)).map((s) => s.goal_id))] : selected;
   useEffect(() => {
@@ -215,6 +220,10 @@ export function CoachingRequestPanel() {
       const user = (await db.auth.getUser()).data.user;
       if (!user || getStorageUser() !== user.id) throw new Error("로그인 상태가 변경됐습니다. 다시 로그인해 주세요.");
       await flushP0Changes();
+      await prepareCourseKnowledge(goalIds, requestDates[0], user.id, knowledgeConsent, researchConsent,
+        (row) => { setKnowledgeStatuses((current) => ({ ...current, [row.goal_id]: row }));
+          setStatus(`${row.title}: 자료 구조 ${row.pdf_ready}/${row.pdf_count}, 남은 분석 ${row.pending_steps}단계`); });
+      setStatus("저장된 과목 지식과 학습 기록으로 계획을 만드는 중입니다…");
       const { data, error } = await db.functions.invoke<Result>("coaching-propose", { body: {
         request_key: crypto.randomUUID(),
         goal_ids: goalIds, intent, period_start: requestDates[0], period_end: requestDates.at(-1),
@@ -233,6 +242,22 @@ export function CoachingRequestPanel() {
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "코칭 제안을 생성하지 못했습니다.");
     } finally { setBusy(false); }
+  }
+
+  async function resumeKnowledge(goalId?: string, noteId?: string) {
+    const db = getSupabaseBrowserClient();
+    if (!db || busy || learningPending > 0) return;
+    setBusy(true); setResult(null);
+    try {
+      const user = (await db.auth.getUser()).data.user;
+      if (!user || getStorageUser() !== user.id) throw new Error("로그인 후 다시 시도해 주세요.");
+      await flushP0Changes();
+      if (goalId && noteId) await requestCourseKnowledge(goalId, dates[0], { action: "refresh", note_id: noteId, consent: knowledgeConsent, refresh_request_id: crypto.randomUUID() });
+      await prepareCourseKnowledge(goalId ? [goalId] : learningGoalIds, dates[0], user.id, knowledgeConsent, researchConsent,
+        (row) => setKnowledgeStatuses((current) => ({ ...current, [row.goal_id]: row })), true);
+      setStatus("분석 상태를 갱신했습니다. 준비된 자료로 AI 계획을 만들 수 있습니다.");
+    } catch (error) { setStatus(error instanceof Error ? error.message : "분석을 이어가지 못했습니다."); }
+    finally { setBusy(false); }
   }
 
   async function approve() {
@@ -307,6 +332,17 @@ export function CoachingRequestPanel() {
               {learningGoalIds.length > 0 && <details><summary className="cursor-pointer text-sm font-semibold">계획 전 진도·이해도 확인</summary>
                 <div className="mt-3"><TopicLearningPanel goalIds={learningGoalIds} disabled={busy} onPendingChange={(delta) => { setLearningPending((current) => Math.max(0, current + delta)); setResult(null); }} /></div>
               </details>}
+              {courseKnowledgeEnabled && learningGoalIds.length > 0 && <>
+                <CourseKnowledgePanel goalIds={learningGoalIds} asOf={dates[0]} live={knowledgeStatuses} busy={busy} onResume={() => void resumeKnowledge()} onRefresh={(goalId, noteId) => void resumeKnowledge(goalId, noteId)} />
+                <label style={{ display: "flex", flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+                  <input type="checkbox" style={{ width: 16, height: 16, flex: "0 0 16px", marginTop: 3 }} checked={knowledgeConsent} disabled={busy} onChange={(e) => setKnowledgeConsent(e.target.checked)} />
+                  <span>선택한 목표에 연결된 PDF를 OpenAI로 전송하여 분석하는 데 동의합니다.</span>
+                </label>
+                <label style={{ display: "flex", flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+                  <input type="checkbox" style={{ width: 16, height: 16, flex: "0 0 16px", marginTop: 3 }} checked={researchConsent} disabled={busy} onChange={(e) => setResearchConsent(e.target.checked)} />
+                  <span>추출된 주제·요구 수준으로 외부 자료를 검색하는 데 동의합니다. (선택, 별도 검색 비용)</span>
+                </label>
+              </>}
               <fieldset className={styles.preferencePicker}>
                 <legend>공통 선호 학습 시간 <span className={styles.optional}>(선택)</span></legend>
                 <p>모든 요청 종류에 공통 적용하며, 선택한 시간 안에서 공부 계획을 배치합니다. 휴식은 학습 사이의 빈 간격으로 확보합니다. 선택하지 않은 날은 오후 1시~밤 11시에 배치합니다.</p>

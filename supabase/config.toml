@@ -47,3 +47,6 @@ verify_jwt = true
 
 [functions.topic-check]
 verify_jwt = true
+
+[functions.course-knowledge]
+verify_jwt = true
