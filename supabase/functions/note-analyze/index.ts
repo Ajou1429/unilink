@@ -5,6 +5,7 @@ import { readSmallJson, readLimitedBody, RequestError } from "../_shared/request
 import { validatePageCount } from "../_shared/pdfLimits.ts";
 import { readNotePdf, pdfBase64 } from "../_shared/noteSource.ts";
 import { analysisSchema, parseNoteAnalysis, sameSourceTimestamp } from "../_shared/noteAnalysis.ts";
+import { loadCoachingSettings } from "../_shared/coachingSettings.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -67,7 +68,8 @@ Deno.serve(async (req) => {
     if (previous.error) throw new RequestError("자료 분석 상태를 확인하지 못했습니다.", 503);
     if (previous.data && (previous.data.status === "completed" || Date.now() - Date.parse(previous.data.created_at) < 240000)) return jsonResponse({ analysis_id: previous.data.id });
     if (body.consent !== true) throw new RequestError("PDF의 OpenAI 전송에 동의해 주세요.");
-    const model = Deno.env.get("NOTE_ANALYSIS_MODEL") ?? Deno.env.get("COACHING_MODEL");
+    const settings = await loadCoachingSettings(db);
+    const model = Deno.env.get("NOTE_ANALYSIS_MODEL") ?? settings?.analysis_model ?? Deno.env.get("COACHING_MODEL");
     if (!model || !Deno.env.get("OPENAI_API_KEY")) throw new RequestError("AI 자료 분석 설정이 필요합니다.", 503);
     const reservation = await db.rpc("reserve_note_analysis", { p_note: note.data.id, p_user: user.id, p_model: model });
     if (reservation.error) throw new RequestError("분석 중인 작업이 있거나 24시간 분석 한도(5회)에 도달했습니다.", 429);

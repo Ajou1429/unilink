@@ -1,7 +1,16 @@
-import { generateProposal } from "../functions/_shared/coaching/model.ts";
+import { generateProposal, intentInstructions } from "../functions/_shared/coaching/model.ts";
 import { CoachingError, parseCoachingRequest, type CoachingContext } from "../functions/_shared/coaching/contract.ts";
 
 function assert(value: unknown): asserts value { if (!value) throw new Error("Assertion failed"); }
+
+Deno.test("intent instructions reference the grouped input and preserve daily, exam and review scope", () => {
+  assert(intentInstructions("daily_plan").includes("request.daily_sources"));
+  assert(intentInstructions("daily_plan").includes("kind=plan"));
+  assert(intentInstructions("daily_plan").includes("goal_briefs[].deadlines"));
+  assert(intentInstructions("exam_prep").includes("request.exam_inputs"));
+  assert(intentInstructions("topic_review").includes("shared_context.recurring_blocks"));
+  assert(intentInstructions("topic_review").includes("Never replace existing plans"));
+});
 
 Deno.test("coaching provider uses bounded structured output and fails closed on refusal", async () => {
   const originalFetch = globalThis.fetch;
@@ -27,6 +36,13 @@ Deno.test("coaching provider uses bounded structured output and fails closed on 
     assert(input === "https://api.openai.com/v1/responses");
     const body = JSON.parse(String(init?.body));
     assert(body.store === false && body.model === "test-model");
+    const submitted = JSON.parse(body.input.at(-1).content);
+    assert(submitted.input_schema_version === "coaching-evidence-v2");
+    assert(submitted.request.day_budgets[0].minutes === 30);
+    assert(submitted.goal_briefs[0].goal.id === goal);
+    assert(submitted.goal_briefs[0].evidence_gaps.missing_records.includes("scored_checks"));
+    assert(!JSON.stringify(submitted).includes("private"));
+    assert(body.instructions.includes("# Decision procedure"));
     assert(body.text.format.strict === true && body.text.format.schema.additionalProperties === false);
     const itemSchema = body.text.format.schema.properties.items.items;
     assert(itemSchema.properties.goal_id.enum.length === 1 && itemSchema.properties.goal_id.enum[0] === goal);

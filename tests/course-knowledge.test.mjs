@@ -203,7 +203,7 @@ test("actual Edge handler + PostgreSQL: first preparation, incremental PDF slici
         const slice=await PDFDocument.load(Buffer.from(input[1].file_data.split(",")[1],"base64"));assert.equal(slice.getPageCount(),b-a+1);submittedPages.push([a,b]);
         parsed={...structuredClone(extraction),sections:[{kind:"lecture",page_start:a,page_end:b,quote:unit.quote}],units:[{...unit,page_start:a,page_end:b}]};
       }else{
-        calls.coaching++;const input=JSON.parse(body.input.at(-1).content);modelContexts.push(input.context);
+        calls.coaching++;const input=JSON.parse(body.input.at(-1).content);modelContexts.push(input.goal_briefs[0]);
         const method=body.text.format.schema.properties.items.items.properties.method_code.enum[0];
         parsed={summary:"SQL JOIN query practice based on the lecture",items:[{goal_id:goal,topic_id:null,method_code:method,title:"Write a two-table SQL JOIN query",planned_date:"2026-10-30",start_time:"13:00",planned_minutes:30,reason:"Lecture pages and recorded class progress support query-writing practice."}],deferred_goals:[]};
       }

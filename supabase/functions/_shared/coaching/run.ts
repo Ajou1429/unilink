@@ -37,7 +37,8 @@ export function coachingRequestPayload(request: CoachingRequest, requestHash: st
 }
 
 export function coachingContextSnapshot(context: CoachingContext) {
-  return { schema_version: 1, context: modelContext(context) };
+  // Keep the approval RPC's context.timezone path; grouping is reproducible without a second copy.
+  return { schema_version: 1, context: modelContext(context), model_input_schema_version: "coaching-evidence-v2" };
 }
 
 export function coachingOutputPayload(proposal: Proposal) {
