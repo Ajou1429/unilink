@@ -133,7 +133,7 @@ test("knowledge SQL: owner-only reads, service-only writes, lease fencing, resum
     await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key);
       create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
       grant usage on schema public,auth to anon,authenticated,service_role;alter default privileges in schema public grant all on tables to service_role;`);
-    for(const file of ["0001_notes_and_drive.sql","0010_core_learning.sql","0020_note_analysis.sql","0026_course_knowledge.sql","0027_coaching_service_settings.sql"]) await db.exec(readFileSync(new URL(`../supabase/migrations/${file}`,import.meta.url),"utf8").replace('create extension if not exists "pgcrypto";',""));
+    for(const file of ["0001_notes_and_drive.sql","0010_core_learning.sql","0020_note_analysis.sql","0026_course_knowledge.sql","0027_coaching_service_settings.sql","0028_coaching_synthesis_model.sql"]) await db.exec(readFileSync(new URL(`../supabase/migrations/${file}`,import.meta.url),"utf8").replace('create extension if not exists "pgcrypto";',""));
     await db.exec(`insert into auth.users values('${user}'),('${other}');insert into notes(id,user_id,title) values('${nid}','${user}','PDF');
       insert into learning_goals(id,user_id,goal_type,title) values('${goal}','${user}','personal','Study');set role service_role;`);
     const task={task_key:"a".repeat(64),kind:"index",note_id:nid,source_revision:"r1",source_hash:null,page_start:null,page_end:null};

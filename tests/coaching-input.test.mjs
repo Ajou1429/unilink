@@ -2,6 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildModelInput, groupEvidenceContext } from "../supabase/functions/_shared/coaching/input.ts";
 import { coachingContextSnapshot } from "../supabase/functions/_shared/coaching/run.ts";
+import { synthesisModel } from "../supabase/functions/_shared/coachingSettings.ts";
+import { knowledgeModels } from "../supabase/functions/_shared/courseKnowledgeStore.ts";
+import { coachingUsagePayload } from "../supabase/functions/_shared/coaching/usage.ts";
+
+test("synthesis model routing leaves PDF/search models unchanged and accounts for Sol pricing", () => {
+  const settings = { synthesis_model: "gpt-6.1-sol", analysis_model: "gpt-5.4-mini", research_model: "gpt-4.1", research_enabled: true };
+  const env = (key) => ({ COACHING_MODEL: "gpt-4.1-mini" })[key];
+  assert.equal(synthesisModel(env, settings), "gpt-6.1-sol");
+  assert.equal(synthesisModel((key) => key === "COACHING_SYNTHESIS_MODEL" ? "rollback-model" : undefined, settings), "rollback-model");
+  assert.equal(synthesisModel(env, {}), "gpt-4.1-mini");
+  assert.deepEqual(knowledgeModels(env, settings), { model: "gpt-5.4-mini", searchModel: "gpt-4.1" });
+  const usage = coachingUsagePayload("gpt-6.1-sol", [{ input_tokens: 1000, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 100, reasoning_tokens: 50, total_tokens: 1100 }]);
+  assert.equal(usage.totals.estimated_cost_usd, 0.003);
+});
 
 test("goal briefs isolate evidence, preserve source details, zero scores and missing records without duplication", () => {
   const source = {

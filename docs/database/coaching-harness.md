@@ -120,6 +120,8 @@ summary: string
 
 ## 운영과 다음 구현 순서
 
+2026-11-06 운영 최종 코칭은 **GPT-6.1 Sol**로 분리했다. `COACHING_SYNTHESIS_MODEL` 환경변수 > 서버 전용 DB `coaching_service_settings.synthesis_model` > 기존 `COACHING_MODEL` 순서로 선택한다. 운영 DB 값은 `gpt-6.1-sol`이며, PDF 분석은 `gpt-5.4-mini`, 검색은 `gpt-4.1`로 유지한다. Responses API와 기존 출력·승인 계약을 유지하고 합성 PDF의 실제 호출까지 확인했다. 모델 연결 검증은 실제 강의 추천의 교육적 품질 입증과 다르다. 상세 결과는 `docs/coaching-release-2026-11-06.md`를 참조한다.
+
 마이그레이션 `0014_coaching_proposal_jobs.sql`은 서비스 전용 예약 원장과 원자적 RPC를 제공한다. 사용자별 이동 24시간 5회, 전체 100회, 사용자당 동시 1회, 전체 동시 10회, 2분 리스, 7일 보존이 현재 제한이다. 상태·항목 수·지연 시간·모델/프롬프트/정책 버전만 기록하며 프롬프트·제안·사용자 원문은 저장하지 않는다. 모델 호출까지 간 요청은 실패해도 할당량에 포함된다.
 
 1. 연결된 Supabase 프로젝트에 마이그레이션 0014 적용 여부를 확인한다. `OPENAI_API_KEY`, `COACHING_MODEL`, `COACHING_HARNESS_ENABLED=true`는 호출을 허용할 준비가 됐을 때 Edge Function 비밀값으로 설정한다. JWT 검증을 켜고 `coaching-propose`를 배포한다. 키를 `NEXT_PUBLIC_*`나 GitHub Pages 빌드에 넣지 않는다. `schema_version: 2`를 사용하는 코칭 화면 배포와 함수 배포를 함께 확인한다.

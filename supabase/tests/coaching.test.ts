@@ -32,10 +32,12 @@ Deno.test("coaching provider uses bounded structured output and fails closed on 
     deadlines: [], sessions: [], existing_items: [],
   };
   let refuse = false;
+  let selected = "test-model";
   globalThis.fetch = async (input, init) => {
     assert(input === "https://api.openai.com/v1/responses");
     const body = JSON.parse(String(init?.body));
-    assert(body.store === false && body.model === "test-model");
+    assert(body.store === false && body.model === selected);
+    assert(selected === "gpt-6.1-sol" ? body.reasoning.effort === "low" : body.reasoning === undefined);
     const submitted = JSON.parse(body.input.at(-1).content);
     assert(submitted.input_schema_version === "coaching-evidence-v2");
     assert(submitted.request.day_budgets[0].minutes === 30);
@@ -62,6 +64,9 @@ Deno.test("coaching provider uses bounded structured output and fails closed on 
     assert(generated.proposal.items.length === 1);
     assert(generated.usage.input_tokens === 120 && generated.usage.cached_input_tokens === 20);
     assert(generated.usage.output_tokens === 40 && generated.usage.reasoning_tokens === 10);
+    selected = "gpt-6.1-sol";
+    await generateProposal(request, context, undefined, selected);
+    selected = "test-model";
     refuse = true;
     try { await generateProposal(request, context); throw new Error("Expected refusal"); }
     catch (error) { assert(error instanceof CoachingError && error.status === 502); }

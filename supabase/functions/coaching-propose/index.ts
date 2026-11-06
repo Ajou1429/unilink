@@ -4,7 +4,7 @@ import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.
 import { COACHING_POLICY_VERSION, CoachingError, fitProposalSchedule, parseCoachingRequest, validateProposal } from "../_shared/coaching/contract.ts";
 import { loadCoachingContext } from "../_shared/coaching/context.ts";
 import { knowledgeModels } from "../_shared/courseKnowledgeStore.ts";
-import { loadCoachingSettings, featureEnabled } from "../_shared/coachingSettings.ts";
+import { loadCoachingSettings, featureEnabled, synthesisModel } from "../_shared/coachingSettings.ts";
 import { COACHING_PROMPT_VERSION, generateProposal } from "../_shared/coaching/model.ts";
 import { coachingUsagePayload, type ModelUsage } from "../_shared/coaching/usage.ts";
 import { coachingContextSnapshot, coachingOutputPayload, coachingRequestHash, coachingRequestKey,
@@ -49,6 +49,8 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
         run_status: existing.status }, { status: 409 });
     }
     const settings = await loadCoachingSettings(admin);
+    const modelName = synthesisModel((key) => Deno.env.get(key), settings);
+    if (!modelName) throw new CoachingError("Coaching model is not configured", 503);
     const context = await loadCoachingContext(admin, user.id, request,
       featureEnabled(Deno.env.get("COURSE_KNOWLEDGE_ENABLED"), settings.knowledge_enabled) ? knowledgeModels((key) => Deno.env.get(key), settings) : undefined);
     const { data: jobId, error: reservationError } = await admin.rpc("reserve_coaching_proposal", { p_user_id: user.id });
@@ -66,14 +68,13 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
     let resultCode = "model_error";
     let itemCount = 0;
     const usageAttempts: ModelUsage[] = [];
-    const modelName = Deno.env.get("COACHING_MODEL") ?? "unknown";
     try {
       const { data: created, error: createError } = await admin.from("coaching_runs").insert({
         user_id: user.id, request_key: requestKey, intent: request.intent, status: "generating",
         request_payload: coachingRequestPayload(request, requestHash),
         context_snapshot: coachingContextSnapshot(context),
         policy_version: COACHING_POLICY_VERSION, contract_version: 2,
-        model_name: Deno.env.get("COACHING_MODEL") ?? null,
+        model_name: modelName,
         prompt_version: COACHING_PROMPT_VERSION,
       }).select("id").single();
       if (createError || !created) {
@@ -85,7 +86,7 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
       let validationFeedback: string | undefined;
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          const generated = await generateProposal(request, context, validationFeedback);
+          const generated = await generateProposal(request, context, validationFeedback, modelName);
           usageAttempts.push(generated.usage);
           proposal = validateProposal(fitProposalSchedule(generated.proposal, request, context), request, context);
           break;
@@ -124,7 +125,7 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
     } finally {
       const { error } = await admin.from("coaching_proposal_jobs").update({
         finished: true, result_code: resultCode, item_count: itemCount,
-        latency_ms: Date.now() - started, model_name: Deno.env.get("COACHING_MODEL") ?? null,
+        latency_ms: Date.now() - started, model_name: modelName,
         prompt_version: COACHING_PROMPT_VERSION, policy_version: COACHING_POLICY_VERSION,
       }).eq("id", jobId).eq("user_id", user.id);
       if (error) console.error("coaching job status update failed");

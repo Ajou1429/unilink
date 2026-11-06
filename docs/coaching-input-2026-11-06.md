@@ -2,10 +2,10 @@
 
 ## Scope and status
 
-Local implementation: `coaching-evidence-v2`, prompt `course-knowledge-v13`.
-This change does not switch the final coaching model, deploy a function, modify DB tables, or change the approval/UI contract.
-The earlier production PDF model setting is `gpt-5.4-mini`; research remains `gpt-4.1`.
-`gpt-6.1-sol` is the proposed final synthesis model, NOT yet enabled or account-verified.
+Deployed input implementation: `coaching-evidence-v2`, prompt `course-knowledge-v13`.
+The subsequent model rollout adds migration 0028 and the server-only `synthesis_model` setting. It does not change the approval/UI contract.
+Production PDF analysis is `gpt-5.4-mini`, research remains `gpt-4.1`, and final synthesis is `gpt-6.1-sol`.
+Actual production API compatibility was verified with synthetic data. See `coaching-release-2026-11-06.md` for results and limitations.
 
 ## Input contract
 

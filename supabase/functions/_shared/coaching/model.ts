@@ -61,15 +61,16 @@ function tokenCount(value: unknown): number {
   return Number.isInteger(value) && (value as number) >= 0 ? value as number : 0;
 }
 
-export async function generateProposal(request: CoachingRequest, context: CoachingContext, validationFeedback?: string): Promise<GeneratedProposal> {
+export async function generateProposal(request: CoachingRequest, context: CoachingContext, validationFeedback?: string, selectedModel?: string): Promise<GeneratedProposal> {
   const key = Deno.env.get("OPENAI_API_KEY");
-  const model = Deno.env.get("COACHING_MODEL");
+  const model = selectedModel ?? Deno.env.get("COACHING_MODEL");
   if (!key || !model) throw new CoachingError("Coaching model is not configured", 503);
   const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST", signal: AbortSignal.timeout(30_000),
+    method: "POST", signal: AbortSignal.timeout(model === "gpt-6.1-sol" ? 45_000 : 30_000),
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model, store: false, max_output_tokens: 6000,
+      ...(model === "gpt-6.1-sol" ? { reasoning: { effort: "low" } } : {}),
       instructions: COACHING_INSTRUCTIONS,
       input: [
         { role: "developer", content: intentInstructions(request.intent) },
