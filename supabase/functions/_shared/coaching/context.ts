@@ -18,8 +18,8 @@ export async function loadCoachingContext(
   knowledge?: { model: string; searchModel: string | null },
 ): Promise<CoachingContext> {
   // Every user-owned table is explicitly scoped even though this server client has service-role access.
-  const [preferences, goals, topics, methods, deadlines, sessions, existing, events, commitments, courses, schedules, plannedBlocks] = await Promise.all([
-    db.from("user_preferences").select("timezone").eq("user_id", userId).maybeSingle(),
+  const [preferences, goals, topics, methods, deadlines, sessionResults, existing, events, commitments, courses, schedules, plannedBlocks] = await Promise.all([
+    db.from("user_preferences").select("timezone,preferred_session_minutes,coaching_style").eq("user_id", userId).maybeSingle(),
     db.from("learning_goals").select("id,title,goal_type,course_id,target_date,importance,metadata")
       .eq("user_id", userId).eq("status", "active").in("id", request.goal_ids),
     db.from("goal_topics").select("id,goal_id,title,status")
@@ -28,9 +28,10 @@ export async function loadCoachingContext(
     db.from("calendar_events").select("id,goal_id,title,due_at,starts_at,event_type,description,exam_scope")
       .eq("user_id", userId).in("goal_id", request.goal_ids).eq("status", "scheduled")
       .limit(caps.deadlines + 1),
-    db.from("study_sessions").select("goal_id,topic_id,actual_minutes,completion_status,started_at,mastery_before,mastery_after,metadata")
-      .eq("user_id", userId).in("goal_id", request.goal_ids)
-      .order("started_at", { ascending: false }).limit(caps.sessions),
+    Promise.all(request.goal_ids.map((goalId) => db.from("study_sessions")
+      .select("id,plan_item_id,goal_id,topic_id,method_code,source,actual_minutes,completion_status,started_at,ended_at,created_at,mastery_before,mastery_after,metadata")
+      .eq("user_id", userId).eq("goal_id", goalId)
+      .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(20))),
     db.from("study_plan_items").select("id,goal_id,topic_id,title,planned_minutes,scheduled_start,scheduled_end,status,metadata")
       .eq("user_id", userId).in("goal_id", request.goal_ids).eq("status", "planned")
       .limit(caps.existing_items + 1),
@@ -48,13 +49,26 @@ export async function loadCoachingContext(
       .lt("scheduled_start", new Date((Date.parse(`${request.period_end}T00:00:00Z`) + 2 * 86_400_000)).toISOString())
       .gte("scheduled_end", new Date((Date.parse(`${request.period_start}T00:00:00Z`) - 86_400_000)).toISOString()).limit(caps.blocks + 1),
   ]);
-  for (const result of [preferences, goals, topics, methods, deadlines, sessions, existing, events, commitments, courses, schedules, plannedBlocks]) {
+  for (const result of [preferences, goals, topics, methods, deadlines, ...sessionResults, existing, events, commitments, courses, schedules, plannedBlocks]) {
     if (result.error) throw new CoachingError("Learning context is unavailable", 503);
   }
   if (goals.data?.length !== request.goal_ids.length) throw new CoachingError("Goal is missing or unavailable", 404);
+  // Feedback is linked through owned runs; a plan-wide opinion is never assigned to an arbitrary topic.
+  const runs = await db.from("coaching_runs").select("id,request_payload")
+    .eq("user_id", userId).order("created_at", { ascending: false }).limit(30);
+  if (runs.error) throw new CoachingError("개인 코칭 이력을 확인하지 못했습니다.", 503);
+  const relatedRuns = (runs.data ?? []).filter((run) => Array.isArray(run.request_payload?.request?.goal_ids)
+    && run.request_payload.request.goal_ids.some((id: unknown) => request.goal_ids.includes(String(id))));
+  const feedback = relatedRuns.length ? await db.from("coaching_feedback")
+    .select("id,run_id,feedback_type,explanation,created_at").eq("user_id", userId).in("run_id", relatedRuns.map((run) => run.id))
+    .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(20) : { data: [], error: null };
+  if (feedback.error) throw new CoachingError("개인 코칭 피드백을 확인하지 못했습니다.", 503);
   const courseKnowledge: Record<string, unknown>[] = [];
   if (knowledge) for (const goalId of request.goal_ids) {
-    const loaded = await loadKnowledge(db, userId, goalId, request.period_start, knowledge.model, knowledge.searchModel);
+    const focus = [request.desired_outcome, ...(request.exam_inputs ?? []).filter((e) => e.goal_id === goalId).map((e) => e.scope),
+      ...((deadlines.data ?? []).filter((d) => d.goal_id === goalId).flatMap((d) => [d.title, d.description ?? "", d.exam_scope ?? ""])),
+      ...((topics.data ?? []).filter((t) => t.goal_id === goalId).map((t) => t.title))];
+    const loaded = await loadKnowledge(db, userId, goalId, request.period_start, knowledge.model, knowledge.searchModel, focus);
     if (loaded.plan.tasks.some((task) => task.kind !== "research")) {
       throw new CoachingError("과목 자료 분석이 필요합니다. 계획 추천 화면에서 분석을 완료하거나 실패한 단계를 다시 시도해 주세요.", 409);
     }
@@ -95,9 +109,11 @@ export async function loadCoachingContext(
   }
   return {
     course_knowledge: courseKnowledge,
+    personal_preferences: { preferred_session_minutes: preferences.data?.preferred_session_minutes ?? null, coaching_style: preferences.data?.coaching_style ?? null },
+    personal_feedback: (feedback.data ?? []).map((row) => ({ ...row, goal_ids: relatedRuns.find((run) => run.id === row.run_id)?.request_payload.request.goal_ids ?? [] })),
     timezone,
     goals: goals.data ?? [], topics: topics.data ?? [], methods: methods.data ?? [],
-    deadlines: deadlines.data ?? [], sessions: sessions.data ?? [], existing_items: existing.data ?? [],
+    deadlines: deadlines.data ?? [], sessions: sessionResults.flatMap((result) => result.data ?? []), existing_items: existing.data ?? [],
     course_progress: progressResults.flatMap((result) => result.data ?? []) as CourseProgress[],
     topic_learning_states: learningStates.data ?? [],
     topic_check_states: checkStates.data ?? [],
@@ -125,6 +141,17 @@ export function modelContext(context: CoachingContext) {
   const reportedLevel = (value: unknown) => value === "상" || value === "중" || value === "하" ? value : null;
   const selectedCourses = new Set(context.goals.flatMap((goal) => goal.course_id ? [goal.course_id] : []));
   return {
+    personal_preferences: {
+      preferred_session_minutes: Number.isInteger(context.personal_preferences?.preferred_session_minutes) && Number(context.personal_preferences?.preferred_session_minutes) > 0
+        ? context.personal_preferences!.preferred_session_minutes : null,
+      coaching_style: text(context.personal_preferences?.coaching_style, 500),
+    },
+    personal_feedback: (context.personal_feedback ?? []).filter((f) => ["accepted", "modified", "rejected"].includes(f.feedback_type)
+      && f.goal_ids.some((id) => context.goals.some((g) => g.id === id))).slice(0, 20).map((f) => ({
+        feedback_id: f.id, run_id: f.run_id, goal_ids: f.goal_ids.filter((id) => context.goals.some((g) => g.id === id)),
+        feedback_type: f.feedback_type, explanation: text(f.explanation, 700), observed_at: f.created_at,
+        scope: "whole_run_not_topic_diagnosis",
+      })),
     course_knowledge: context.course_knowledge ?? [],
     timezone: context.timezone,
     topic_check_results: (context.topic_check_states ?? []).filter((state) => !state.voided_at && context.topics.some((topic) => topic.status === "confirmed" && topic.id === state.topic_id && topic.goal_id === state.goal_id)).map((state) => ({
@@ -162,6 +189,8 @@ export function modelContext(context: CoachingContext) {
       ({ id, goal_id, title: short(title), due_at, starts_at, event_type,
         description: description?.slice(0, 3000) ?? "", exam_scope: exam_scope?.slice(0, 2000) ?? "" })),
     recent_study: context.sessions.map((session) => ({
+      session_id: session.id ?? null, plan_item_id: session.plan_item_id ?? null,
+      method_code: session.method_code ?? null, source: session.source ?? null, recorded_at: session.created_at ?? null,
       goal_id: session.goal_id, topic_id: session.topic_id,
       actual_minutes: session.actual_minutes, completion_status: session.completion_status,
       recorded_mastery_before_1_to_5: level(session.mastery_before), recorded_mastery_after_1_to_5: level(session.mastery_after),

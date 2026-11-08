@@ -205,38 +205,56 @@ export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[]
     pdf_count: notes.length, pdf_ready: pdfReady, research_status: researchStatus, actual_progress: actual };
 }
 
-export function knowledgeContext(plan: KnowledgePlan) {
+export function knowledgeContext(plan: KnowledgePlan, focus: string[] = []) {
+  // This is retrieval ordering only, not a study priority/time allocation algorithm.
+  const termsFrom = (values: string[]) => [...new Set(values.join(" ").toLowerCase().match(/[\p{L}\p{N}_]{2,}/gu) ?? [])]
+    .filter((t) => !["study", "review", "learn", "lecture", "공부", "학습", "복습"].includes(t)).slice(0, 60);
+  const terms = [...new Set([...termsFrom(focus), ...termsFrom(plan.actual_progress.map((p) => p.title))])];
+  const relevance = (value: unknown) => {
+    const haystack = JSON.stringify(value).toLowerCase();
+    return terms.reduce((n, term) => n + Number(haystack.includes(term)), 0);
+  };
+  const ranked = <T>(values: T[]): T[] => values.map((value, index) => ({ value, index, score: relevance(value) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index).map((v) => v.value);
   const details = plan.active.filter((t) => t.kind === "detail");
   const overview = plan.active.filter((t) => t.kind === "overview");
   const relevant = new Set(details.map((t) => t.note_id));
-  const syllabus = overview.flatMap((t) => ((t.payload?.extraction as Extraction)?.syllabus ?? []).map((fact) => ({
-    ...fact, value: fact.value.slice(0, 350), quote: fact.quote.slice(0, 150), artifact_id: t.id, note_id: t.note_id,
-  }))).slice(0, 30);
   let remaining = 24_000; let truncated = false;
+  const clipText = (value: string, limit: number) => { if (value.length > limit) truncated = true; return value.slice(0, limit); };
+  const take = <T>(values: T[], count: number) => { if (values.length > count) truncated = true; return values.slice(0, count); };
+  const syllabus = take(ranked(overview.flatMap((t) => ((t.payload?.extraction as Extraction)?.syllabus ?? []).map((fact) => ({
+    ...fact, value: clipText(fact.value, 350), quote: clipText(fact.quote, 150), artifact_id: t.id, note_id: t.note_id,
+  })))), 30);
+  let includedUnits = 0; let includedArtifacts = 0;
   const bound = (tasks: KnowledgeTask[]) => tasks.flatMap((t) => {
     const e = t.payload?.extraction as Extraction | undefined;
-    const clip = (values: string[], count = 4) => values.slice(0, count).map((v) => v.slice(0, 220));
-    const compact = e ? { summary: e.summary.slice(0, 800), readable: e.readable, uncertainty: e.uncertainty.slice(0, 500),
-      syllabus: e.syllabus.slice(0, 10).map((s) => ({ ...s, value: s.value.slice(0, 500), quote: s.quote.slice(0, 200) })),
-      units: e.units.slice(0, t.kind === "detail" ? 4 : 3).map((u) => ({ ...u, quote: u.quote.slice(0, 250), required_depth: u.required_depth.slice(0, 500),
+    const clip = (values: string[], count = 4) => take(ranked(values), count).map((v) => clipText(v, 220));
+    const compact = e ? { summary: clipText(e.summary, 800), readable: e.readable, uncertainty: clipText(e.uncertainty, 500),
+      syllabus: take(ranked(e.syllabus), 10).map((s) => ({ ...s, value: clipText(s.value, 500), quote: clipText(s.quote, 200) })),
+      units: take(ranked(e.units), t.kind === "detail" ? 4 : 3).map((u) => ({ ...u, quote: clipText(u.quote, 250), required_depth: clipText(u.required_depth, 500),
         concepts: clip(u.concepts, 6), formulas: clip(u.formulas, 3), examples: clip(u.examples, 3), exercises: clip(u.exercises, 3),
         prerequisites: clip(u.prerequisites, 3), objectives: clip(u.objectives, 3), relationships: clip(u.relationships, 3), methods: clip(u.methods, 3) })) } : undefined;
     const r = t.payload?.research as ReturnType<typeof parseResearch> | undefined;
-    const research = r ? { ...r, required_depth: r.required_depth?.slice(0, 600), time_basis: r.time_basis?.slice(0, 700), uncertainty: r.uncertainty?.slice(0, 500),
-      sources: r.sources.slice(0, 3).map((s) => ({ ...s, relevance: s.relevance?.slice(0, 300), reliability: s.reliability?.slice(0, 300), evidence: s.evidence?.slice(0, 350) })) } : undefined;
+    const research = r ? { ...r, required_depth: clipText(r.required_depth ?? "", 600), time_basis: clipText(r.time_basis ?? "", 700), uncertainty: clipText(r.uncertainty ?? "", 500),
+      sources: take(ranked(r.sources), 3).map((s) => ({ ...s, relevance: clipText(s.relevance ?? "", 300), reliability: clipText(s.reliability ?? "", 300), evidence: clipText(s.evidence ?? "", 350) })) } : undefined;
     const item = { artifact_id: t.id, note_id: t.note_id, source_hash: t.source_hash, note_version: t.payload?.note_version, pages: [t.page_start, t.page_end], kind: t.kind, content: compact ?? research };
     const size = JSON.stringify(item).length;
-    if (size > remaining) { truncated = true; return []; } remaining -= size; return [item];
+    if (size > remaining) { truncated = true; return []; } remaining -= size;
+    includedUnits += compact?.units.length ?? 0; includedArtifacts++; return [item];
   });
   const currentTitles = new Set(details.flatMap((t) => (t.payload?.extraction as Extraction)?.units?.map((u) => normalize(u.title)) ?? []));
   const researchTasks = plan.active.filter((t) => t.kind === "research").sort((a, b) =>
     Number(currentTitles.has(normalize(String((b.payload?.concepts as { title?: string })?.title ?? "")))) - Number(currentTitles.has(normalize(String((a.payload?.concepts as { title?: string })?.title ?? "")))));
   // Reserve a separate bounded budget for supplementary research so long PDFs cannot crowd it out.
-  remaining = 8000; const research = bound(researchTasks.slice(0, 4));
-  remaining = 24000; const content = bound([...details, ...overview.filter((t) => relevant.has(t.note_id)), ...overview.filter((t) => !relevant.has(t.note_id)).slice(0, 2)]);
+  remaining = 8000; const research = bound(take(ranked(researchTasks), 4));
+  remaining = 24000; const content = bound([...ranked(details), ...ranked(overview.filter((t) => relevant.has(t.note_id))), ...take(ranked(overview.filter((t) => !relevant.has(t.note_id))), 2)]);
   return { version: KNOWLEDGE_VERSION, overview_complete: plan.overview_complete, detail_complete: plan.detail_complete,
-    research_status: plan.research_status, actual_class_progress: plan.actual_progress.slice(0, 20),
-    warnings: plan.warnings.slice(0, 10), syllabus_facts: syllabus, content, research, context_truncated: truncated || researchTasks.length > 4,
+    research_status: plan.research_status, actual_class_progress: take(plan.actual_progress, 20),
+    warnings: take(plan.warnings, 10), syllabus_facts: syllabus, content, research, context_truncated: truncated,
+    selection: { strategy: "current_progress_and_requested_scope_lexical_relevance_with_stable_fallback",
+      available_artifacts: details.length + overview.length + researchTasks.length, included_artifacts: includedArtifacts,
+      available_units: [...details, ...overview].reduce((n, t) => n + ((t.payload?.extraction as Extraction)?.units?.length ?? 0), 0),
+      included_units: includedUnits, limit_kind: "character_and_item_limits_not_full_course_coverage" },
     evidence_limits: "PDF quotations are model-extracted evidence, not independently verified OCR. Syllabus plans, uploaded materials, actual class progress, analysed ranges, learner completion and measured understanding are separate. External findings are supplementary estimates, never extra required syllabus. No PDF upload implies class progress." };
 }
 

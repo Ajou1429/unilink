@@ -244,6 +244,44 @@ test("progress queries are owner/course scoped, bounded per course and fail visi
   await assert.rejects(loadCoachingContext(db, id(100), parseCoachingRequest(body)), (error) => error.status === 503);
 });
 
+test("personal DB queries balance history by goal, scope feedback through owned runs and fail visibly", async () => {
+  const calls = []; let failFeedback = false;
+  const db = { from(table) {
+    const call = {table, filters:[]}; calls.push(call);
+    const q = {
+      select(columns) {call.columns=columns;return q;}, eq(...v) {call.filters.push(["eq",...v]);return q;},
+      in(...v) {call.filters.push(["in",...v]);return q;}, order(){return q;}, limit(n){call.limit=n;return q;},
+      lt(){return q;},gte(){return q;},lte(){return q;},not(){return q;},maybeSingle(){return q;},
+      then(resolve,reject) {
+        const goalFilter = call.filters.find(f=>f[0]==="eq"&&f[1]==="goal_id")?.[2];
+        const data = table==="learning_goals" ? [context.goals[0],{...context.goals[0],id:otherGoal}]
+          : table==="user_preferences" ? {timezone:"Asia/Seoul",preferred_session_minutes:40,coaching_style:"실습 위주"}
+          : table==="study_sessions" ? [{id:id(80),plan_item_id:id(81),goal_id:goalFilter,topic_id:null,method_code:"practice",actual_minutes:12,completion_status:"partial",metadata:{}}]
+          : table==="coaching_runs" ? [
+            {id:id(50),request_payload:{request:{goal_ids:[goal,otherGoal]}}},
+            {id:id(51),request_payload:{request:{goal_ids:[id(999)]}}},
+          ]
+          : table==="coaching_feedback" ? [{id:id(60),run_id:id(50),feedback_type:"rejected",explanation:"너무 추상적",created_at:"2026-11-08"}] : [];
+        return Promise.resolve({data,error:failFeedback&&table==="coaching_feedback"?{message:"unavailable"}:null}).then(resolve,reject);
+      },
+    };return q;
+  }};
+  const request = parseCoachingRequest({...body,goal_ids:[goal,otherGoal],desired_outcome:"",constraints:""});
+  const loaded = await loadCoachingContext(db,id(100),request);
+  const sessions = calls.filter(c=>c.table==="study_sessions");
+  assert.equal(sessions.length,2);
+  assert.deepEqual(sessions.map(c=>c.filters.find(f=>f[1]==="goal_id")[2]),[goal,otherGoal]);
+  for(const c of sessions){assert.equal(c.limit,20);assert.ok(c.columns.includes("plan_item_id"));assert.deepEqual(c.filters[0],["eq","user_id",id(100)]);}
+  const feedbackQuery = calls.find(c=>c.table==="coaching_feedback");
+  assert.deepEqual(feedbackQuery.filters,[["eq","user_id",id(100)],["in","run_id",[id(50)]]]);
+  assert.equal(feedbackQuery.limit,20);
+  assert.deepEqual(loaded.personal_feedback[0].goal_ids,[goal,otherGoal]);
+  assert.equal(modelContext(loaded).personal_preferences.preferred_session_minutes,40);
+  assert.equal(modelContext(loaded).recent_study[0].plan_item_id,id(81));
+  failFeedback=true;
+  await assert.rejects(loadCoachingContext(db,id(100),request),e=>e.status===503);
+});
+
 test("quota migration limits concurrent and repeated requests while hiding operations from users", async () => {
   const db = new PGlite();
   try {

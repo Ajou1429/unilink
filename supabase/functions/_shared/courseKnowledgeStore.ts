@@ -3,7 +3,7 @@ import { RequestError } from "./requestLimits.ts";
 import { featureEnabled, type CoachingSettings } from "./coachingSettings.ts";
 import { planKnowledge, knowledgeContext, type KnowledgeNote, type KnowledgeTask, type Progress } from "./courseKnowledge.ts";
 
-export async function loadKnowledge(db: SupabaseClient, userId: string, goalId: string, asOf: string, model: string, searchModel: string | null) {
+export async function loadKnowledge(db: SupabaseClient, userId: string, goalId: string, asOf: string, model: string, searchModel: string | null, focus: string[] = []) {
   const goal = await db.from("learning_goals").select("id,title,course_id,goal_type,metadata").eq("id", goalId).eq("user_id", userId).eq("status", "active").single();
   if (goal.error || !goal.data) throw new RequestError("학습 목표를 확인해 주세요.", 404);
   const aliases = new Set<string>([goal.data.id]);
@@ -28,7 +28,7 @@ export async function loadKnowledge(db: SupabaseClient, userId: string, goalId: 
   const notes = (notesResult.data ?? []).filter((n) => /\.pdf$/i.test(n.file_name ?? "") || n.drive_file_id || n.file_path?.toLowerCase().endsWith(".pdf")) as KnowledgeNote[];
   const progress = (progressResult.data ?? []) as Progress[];
   const plan = await planKnowledge(notes, progress, (artifacts.data ?? []) as KnowledgeTask[], model, searchModel);
-  return { goal: goal.data, notes, progress, plan, context: { goal_id: goalId, ...knowledgeContext(plan) } };
+  return { goal: goal.data, notes, progress, plan, context: { goal_id: goalId, ...knowledgeContext(plan, focus) } };
 }
 
 export function knowledgeModels(env: (key: string) => string | undefined, settings?: CoachingSettings) {

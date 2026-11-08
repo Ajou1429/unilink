@@ -51,6 +51,28 @@ test("first plan indexes ALL PDFs, persists per-slice evidence and research; sec
   assert.ok(context.research.length);
 });
 
+test("knowledge selection retrieves relevant later units, preserves source pages and reports all clipping without changing cache artifacts", () => {
+  const units = Array.from({length: 7}, (_, i) => ({...structuredClone(unit), title: `Unrelated ${i}`, concepts: [`Other ${i}`],
+    objectives: [], quote: "Original quote", required_depth: "Explain the supplied concept", page_start: i + 1, page_end: i + 1}));
+  units[6] = {...units[6], title: "Window functions", concepts: ["PARTITION BY"], quote: "Window functions PARTITION BY", required_depth: "Write a window query"};
+  const task = {id:id(900),kind:"overview",note_id:id(1),source_hash:"hash",page_start:1,page_end:10,payload:{extraction:{...structuredClone(extraction),units}}};
+  const plan = {active:[task],warnings:[],actual_progress:[],research_status:"disabled",overview_complete:true,detail_complete:true};
+  const before = JSON.stringify(plan);
+  const focused = knowledgeContext(plan, ["Window functions PARTITION BY"]);
+  assert.equal(focused.content[0].content.units[0].title, "Window functions");
+  assert.equal(focused.content[0].content.units[0].page_start, 7);
+  assert.equal(focused.content[0].artifact_id, id(900));
+  assert.equal(focused.selection.available_units, 7);
+  assert.equal(focused.selection.included_units, 3);
+  assert.equal(focused.context_truncated, true);
+  assert.equal(JSON.stringify(plan), before);
+  assert.deepEqual(knowledgeContext(plan).content[0].content.units.map(u=>u.title), ["Unrelated 0","Unrelated 1","Unrelated 2"]);
+  const complete = {...plan, active:[{...task,payload:{extraction:{...structuredClone(extraction),units:[units[6]]}}}]};
+  assert.equal(knowledgeContext(complete).context_truncated,false);
+  complete.active[0].payload.extraction.units[0].quote = "x".repeat(400);
+  assert.equal(knowledgeContext(complete).context_truncated,true);
+});
+
 test("new actual class progress on UNCHANGED PDF analyses only uncovered pages and then reuses them",async()=>{
   const h=harness(); const notes=[note(1)]; await h.run(notes,[progress(10,1,2)]);
   const before={...h.calls};

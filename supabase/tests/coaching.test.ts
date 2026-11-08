@@ -30,6 +30,8 @@ Deno.test("coaching provider uses bounded structured output and fails closed on 
     timezone: "Asia/Seoul", goals: [{ id: goal, title: "Math", goal_type: "course", target_date: null, importance: 3, metadata: { private: "omit" } }],
     topics: [], methods: [{ code: "note_review", display_name: "Review", active: true }],
     deadlines: [], sessions: [], existing_items: [],
+    personal_preferences: {preferred_session_minutes:40,coaching_style:"적용 문제 위주"},
+    personal_feedback: [{id:"f",run_id:"r",goal_ids:[goal],feedback_type:"rejected",explanation:"구체적인 작업을 원함",created_at:"2026-11-08"}],
   };
   let refuse = false;
   let selected = "test-model";
@@ -39,12 +41,15 @@ Deno.test("coaching provider uses bounded structured output and fails closed on 
     assert(body.store === false && body.model === selected);
     assert(selected === "gpt-6.1-sol" ? body.reasoning.effort === "low" : body.reasoning === undefined);
     const submitted = JSON.parse(body.input.at(-1).content);
-    assert(submitted.input_schema_version === "coaching-evidence-v2");
+    assert(submitted.input_schema_version === "coaching-evidence-v3");
     assert(submitted.request.day_budgets[0].minutes === 30);
     assert(submitted.goal_briefs[0].goal.id === goal);
     assert(submitted.goal_briefs[0].evidence_gaps.missing_records.includes("scored_checks"));
     assert(!JSON.stringify(submitted).includes("private"));
     assert(body.instructions.includes("# Decision procedure"));
+    assert(body.instructions.includes("Personalization without waiting for optional input"));
+    assert(submitted.shared_context.personal_preferences.preferred_session_minutes === 40);
+    assert(submitted.shared_context.personal_feedback[0].feedback_id === "f");
     assert(body.text.format.strict === true && body.text.format.schema.additionalProperties === false);
     const itemSchema = body.text.format.schema.properties.items.items;
     assert(itemSchema.properties.goal_id.enum.length === 1 && itemSchema.properties.goal_id.enum[0] === goal);
@@ -65,7 +70,7 @@ Deno.test("coaching provider uses bounded structured output and fails closed on 
     assert(generated.usage.input_tokens === 120 && generated.usage.cached_input_tokens === 20);
     assert(generated.usage.output_tokens === 40 && generated.usage.reasoning_tokens === 10);
     selected = "gpt-6.1-sol";
-    await generateProposal(request, context, undefined, selected);
+    await generateProposal({...request,desired_outcome:"",constraints:""}, context, undefined, selected);
     selected = "test-model";
     refuse = true;
     try { await generateProposal(request, context); throw new Error("Expected refusal"); }
