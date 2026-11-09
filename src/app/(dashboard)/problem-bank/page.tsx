@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Upload, Plus, Loader2, Trash2, FileText, BookMarked, X } from "lucide-react";
 import { Header } from "@/components/layout/Header";
+import { ProblemBankCoachingLink } from "@/components/coaching/ProblemBankCoachingLink";
 import {
   createSubject,
   deleteProblem,
@@ -268,6 +269,7 @@ export default function ProblemBankPage() {
                 </div>
               ) : (
                 <>
+                  <ProblemBankCoachingLink key={active.id} subjectId={active.id} />
                   <div className="mt-5 flex flex-wrap items-center gap-3">
                     <input
                       ref={fileRef}

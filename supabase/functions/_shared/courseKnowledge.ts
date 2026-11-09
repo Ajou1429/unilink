@@ -205,7 +205,8 @@ export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[]
     pdf_count: notes.length, pdf_ready: pdfReady, research_status: researchStatus, actual_progress: actual };
 }
 
-export function knowledgeContext(plan: KnowledgePlan, focus: string[] = []) {
+export type KnowledgeRange = { note_id: string; page_start: number; page_end: number };
+export function knowledgeContext(plan: KnowledgePlan, focus: string[] = [], ranges: KnowledgeRange[] = []) {
   // This is retrieval ordering only, not a study priority/time allocation algorithm.
   const termsFrom = (values: string[]) => [...new Set(values.join(" ").toLowerCase().match(/[\p{L}\p{N}_]{2,}/gu) ?? [])]
     .filter((t) => !["study", "review", "learn", "lecture", "공부", "학습", "복습"].includes(t)).slice(0, 60);
@@ -216,6 +217,12 @@ export function knowledgeContext(plan: KnowledgePlan, focus: string[] = []) {
   };
   const ranked = <T>(values: T[]): T[] => values.map((value, index) => ({ value, index, score: relevance(value) }))
     .sort((a, b) => b.score - a.score || a.index - b.index).map((v) => v.value);
+  const overlaps = (note: string | null, start: number | null, end: number | null) => ranges.some(r => r.note_id === note
+    && start !== null && end !== null && r.page_start <= end && r.page_end >= start);
+  const rankedTasks = (tasks: KnowledgeTask[]) => [...tasks].sort((a, b) => relevance(b) - relevance(a)
+    || Number(overlaps(b.note_id, b.page_start, b.page_end)) - Number(overlaps(a.note_id, a.page_start, a.page_end)));
+  const rankedUnits = (units: Unit[], note: string | null) => [...units].sort((a, b) => relevance(b) - relevance(a)
+    || Number(overlaps(note, b.page_start, b.page_end)) - Number(overlaps(note, a.page_start, a.page_end)));
   const details = plan.active.filter((t) => t.kind === "detail");
   const overview = plan.active.filter((t) => t.kind === "overview");
   const relevant = new Set(details.map((t) => t.note_id));
@@ -224,14 +231,18 @@ export function knowledgeContext(plan: KnowledgePlan, focus: string[] = []) {
   const take = <T>(values: T[], count: number) => { if (values.length > count) truncated = true; return values.slice(0, count); };
   const syllabus = take(ranked(overview.flatMap((t) => ((t.payload?.extraction as Extraction)?.syllabus ?? []).map((fact) => ({
     ...fact, value: clipText(fact.value, 350), quote: clipText(fact.quote, 150), artifact_id: t.id, note_id: t.note_id,
-  })))), 30);
+  })))).sort((a, b) => Number(["assessment", "assignment_dates", "exam_dates", "prerequisites", "objectives"].includes(b.field))
+    - Number(["assessment", "assignment_dates", "exam_dates", "prerequisites", "objectives"].includes(a.field))), 30);
   let includedUnits = 0; let includedArtifacts = 0;
   const bound = (tasks: KnowledgeTask[]) => tasks.flatMap((t) => {
     const e = t.payload?.extraction as Extraction | undefined;
     const clip = (values: string[], count = 4) => take(ranked(values), count).map((v) => clipText(v, 220));
     const compact = e ? { summary: clipText(e.summary, 800), readable: e.readable, uncertainty: clipText(e.uncertainty, 500),
       syllabus: take(ranked(e.syllabus), 10).map((s) => ({ ...s, value: clipText(s.value, 500), quote: clipText(s.quote, 200) })),
-      units: take(ranked(e.units), t.kind === "detail" ? 4 : 3).map((u) => ({ ...u, quote: clipText(u.quote, 250), required_depth: clipText(u.required_depth, 500),
+      units: take(rankedUnits(e.units, t.note_id), t.kind === "detail" ? 4 : 3).map((u) => ({ ...u,
+        unit_ref: `${t.id ?? t.source_hash}:${u.page_start}-${u.page_end}:${u.title}`,
+        section_kinds: [...new Set(e.sections.filter(s => s.page_start <= u.page_end && s.page_end >= u.page_start).map(s => s.kind))],
+        quote: clipText(u.quote, 250), required_depth: clipText(u.required_depth, 500),
         concepts: clip(u.concepts, 6), formulas: clip(u.formulas, 3), examples: clip(u.examples, 3), exercises: clip(u.exercises, 3),
         prerequisites: clip(u.prerequisites, 3), objectives: clip(u.objectives, 3), relationships: clip(u.relationships, 3), methods: clip(u.methods, 3) })) } : undefined;
     const r = t.payload?.research as ReturnType<typeof parseResearch> | undefined;
@@ -247,14 +258,15 @@ export function knowledgeContext(plan: KnowledgePlan, focus: string[] = []) {
     Number(currentTitles.has(normalize(String((b.payload?.concepts as { title?: string })?.title ?? "")))) - Number(currentTitles.has(normalize(String((a.payload?.concepts as { title?: string })?.title ?? "")))));
   // Reserve a separate bounded budget for supplementary research so long PDFs cannot crowd it out.
   remaining = 8000; const research = bound(take(ranked(researchTasks), 4));
-  remaining = 24000; const content = bound([...ranked(details), ...ranked(overview.filter((t) => relevant.has(t.note_id))), ...take(ranked(overview.filter((t) => !relevant.has(t.note_id))), 2)]);
+  remaining = 24000; const content = bound([...rankedTasks(details), ...rankedTasks(overview.filter((t) => relevant.has(t.note_id))), ...take(rankedTasks(overview.filter((t) => !relevant.has(t.note_id))), 2)]);
   return { version: KNOWLEDGE_VERSION, overview_complete: plan.overview_complete, detail_complete: plan.detail_complete,
     research_status: plan.research_status, actual_class_progress: take(plan.actual_progress, 20),
     warnings: take(plan.warnings, 10), syllabus_facts: syllabus, content, research, context_truncated: truncated,
-    selection: { strategy: "current_progress_and_requested_scope_lexical_relevance_with_stable_fallback",
+    selection: { strategy: "scope_lexical_relevance_then_linked_note_pages_with_stable_fallback",
       available_artifacts: details.length + overview.length + researchTasks.length, included_artifacts: includedArtifacts,
       available_units: [...details, ...overview].reduce((n, t) => n + ((t.payload?.extraction as Extraction)?.units?.length ?? 0), 0),
       included_units: includedUnits, limit_kind: "character_and_item_limits_not_full_course_coverage" },
+    requirement_scope: "Units describe extracted course requirements, not learner mastery. Section kinds and unit refs refer to analysed evidence only; full PDF coverage is not implied.",
     evidence_limits: "PDF quotations are model-extracted evidence, not independently verified OCR. Syllabus plans, uploaded materials, actual class progress, analysed ranges, learner completion and measured understanding are separate. External findings are supplementary estimates, never extra required syllabus. No PDF upload implies class progress." };
 }
 

@@ -86,6 +86,30 @@ test("new actual class progress on UNCHANGED PDF analyses only uncovered pages a
   assert.deepEqual(overlap.tasks.map(t=>[t.kind,t.page_start,t.page_end]),[["detail",6,7]]);
 });
 
+test("linked pages retrieve later requirements but do not override an explicit matching scope or cross note IDs", () => {
+  const units=Array.from({length:7},(_,i)=>({...structuredClone(unit),title:`Unit ${i}`,concepts:[],page_start:i+1,page_end:i+1,quote:'Same',required_depth:'Explain',objectives:[],examples:[],exercises:[],relationships:[],prerequisites:[],methods:[]}));
+  units[6].title='RANK';
+  const task={id:id(900),kind:'overview',note_id:id(1),source_hash:'same',page_start:1,page_end:10,payload:{extraction:{...structuredClone(extraction),units}}};
+  const plan={active:[task],warnings:[],actual_progress:[],research_status:'disabled',overview_complete:true,detail_complete:true};
+  const before=JSON.stringify(plan);
+  const selected=knowledgeContext(plan,[],[{note_id:id(1),page_start:7,page_end:7}]);
+  assert.equal(selected.content[0].content.units[0].title,'RANK');
+  assert.match(selected.content[0].content.units[0].unit_ref,/7-7:RANK$/);
+  assert.equal(knowledgeContext(plan,[],[{note_id:id(999),page_start:7,page_end:7}]).content[0].content.units[0].title,'Unit 0');
+  assert.equal(knowledgeContext(plan,['RANK'],[{note_id:id(1),page_start:1,page_end:1}]).content[0].content.units[0].title,'RANK');
+  assert.equal(JSON.stringify(plan),before);
+});
+
+test("assessment and prerequisite facts survive a long weekly syllabus without inventing course depth", () => {
+  const syllabus=Array.from({length:31},(_,i)=>({field:'weekly_schedule',value:`Week ${i}`,page:1,quote:'Week'}));
+  syllabus.push({field:'assessment',value:'Implement SQL queries, no multiple choice requirement',page:9,quote:'Implement SQL queries'});
+  const task={id:id(900),kind:'overview',note_id:id(1),source_hash:'same',page_start:1,page_end:10,payload:{extraction:{...structuredClone(extraction),syllabus}}};
+  const selected=knowledgeContext({active:[task],warnings:[],actual_progress:[],research_status:'disabled',overview_complete:true,detail_complete:true});
+  assert.equal(selected.syllabus_facts[0].field,'assessment');
+  assert.equal(selected.syllabus_facts[0].page,9); assert.equal(selected.context_truncated,true);
+  assert.match(selected.requirement_scope,/not learner mastery/);
+});
+
 test("only new/changed PDFs miss cache; identical-byte metadata changes reuse expensive analysis",async()=>{
   const h=harness();await h.run([note(1)]);
   await h.run([note(1),note(2)]);assert.deepEqual(h.calls,{index:2,overview:2,detail:0,research:1});

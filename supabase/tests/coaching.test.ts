@@ -41,7 +41,7 @@ Deno.test("coaching provider uses bounded structured output and fails closed on 
     assert(body.store === false && body.model === selected);
     assert(selected === "gpt-6.1-sol" ? body.reasoning.effort === "low" : body.reasoning === undefined);
     const submitted = JSON.parse(body.input.at(-1).content);
-    assert(submitted.input_schema_version === "coaching-evidence-v3");
+    assert(submitted.input_schema_version === "coaching-evidence-v4");
     assert(submitted.request.day_budgets[0].minutes === 30);
     assert(submitted.goal_briefs[0].goal.id === goal);
     assert(submitted.goal_briefs[0].evidence_gaps.missing_records.includes("scored_checks"));

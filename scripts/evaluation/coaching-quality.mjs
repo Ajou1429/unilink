@@ -7,6 +7,7 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { cases } from './coaching-quality-cases.mjs';
+import { understandingCases } from './coaching-understanding-cases.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const require = createRequire(import.meta.url);
@@ -43,8 +44,10 @@ function loader(variant, capture) {
   return load;
 }
 
-for (const fixture of cases()) {
-  for (const variant of ['baseline', 'candidate']) {
+const understanding = process.env.COACHING_EVAL_SUITE === 'understanding';
+const fixtures = understanding ? understandingCases().filter(c => c.rating !== null) : cases();
+for (const fixture of fixtures) {
+  for (const variant of understanding ? ['candidate'] : ['baseline', 'candidate']) {
     let payload;
     const load = loader(variant, value => { payload = value; });
     const context = structuredClone(fixture.context);

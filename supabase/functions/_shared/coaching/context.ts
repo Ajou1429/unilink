@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.116.0";
 import { CoachingError, type CoachingContext, type CoachingRequest, type CourseProgress } from "./contract.ts";
 import { loadKnowledge } from "../courseKnowledgeStore.ts";
+import { bankModelEvidence, loadBankEvidence } from "./problemBank.ts";
 
 const caps = { topics: 100, deadlines: 100, sessions: 100, existing_items: 100, blocks: 200 };
 
@@ -63,12 +64,21 @@ export async function loadCoachingContext(
     .select("id,run_id,feedback_type,explanation,created_at").eq("user_id", userId).in("run_id", relatedRuns.map((run) => run.id))
     .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(20) : { data: [], error: null };
   if (feedback.error) throw new CoachingError("개인 코칭 피드백을 확인하지 못했습니다.", 503);
+  const problemBank = await loadBankEvidence(db, userId, request.goal_ids);
+  const learningStates = await db.from("topic_learning_states")
+    .select("id,goal_id,topic_id,learning_status,self_rating,memo,observed_at,source,session_id,session_date,note_id,page_start,page_end")
+    .eq("user_id", userId).in("goal_id", request.goal_ids).limit(caps.topics + 1);
+  if (learningStates.error) throw new CoachingError("학습 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
+  if ((learningStates.data?.length ?? 0) > caps.topics) throw new CoachingError("학습 주제가 많습니다. 목표 범위를 나눠 주세요.", 409);
   const courseKnowledge: Record<string, unknown>[] = [];
   if (knowledge) for (const goalId of request.goal_ids) {
     const focus = [request.desired_outcome, ...(request.exam_inputs ?? []).filter((e) => e.goal_id === goalId).map((e) => e.scope),
       ...((deadlines.data ?? []).filter((d) => d.goal_id === goalId).flatMap((d) => [d.title, d.description ?? "", d.exam_scope ?? ""])),
       ...((topics.data ?? []).filter((t) => t.goal_id === goalId).map((t) => t.title))];
-    const loaded = await loadKnowledge(db, userId, goalId, request.period_start, knowledge.model, knowledge.searchModel, focus);
+    const ranges = (learningStates.data ?? []).filter(s => s.goal_id === goalId && s.note_id && s.page_start && s.page_end
+      && (topics.data ?? []).some(t => t.id === s.topic_id && t.goal_id === goalId))
+      .map(s => ({ note_id: s.note_id as string, page_start: s.page_start as number, page_end: s.page_end as number }));
+    const loaded = await loadKnowledge(db, userId, goalId, request.period_start, knowledge.model, knowledge.searchModel, focus, ranges);
     if (loaded.plan.tasks.some((task) => task.kind !== "research")) {
       throw new CoachingError("과목 자료 분석이 필요합니다. 계획 추천 화면에서 분석을 완료하거나 실패한 단계를 다시 시도해 주세요.", 409);
     }
@@ -81,11 +91,6 @@ export async function loadCoachingContext(
       .eq("user_id", userId).eq("course_id", courseId).lte("session_date", request.period_start)
       .order("session_date", { ascending: false }).order("id", { ascending: false }).limit(10)));
   if (progressResults.some((result) => result.error)) throw new CoachingError("Course progress is unavailable", 503);
-  const learningStates = await db.from("topic_learning_states")
-    .select("id,goal_id,topic_id,learning_status,self_rating,memo,observed_at,source,session_id,session_date,note_id,page_start,page_end")
-    .eq("user_id", userId).in("goal_id", request.goal_ids).limit(caps.topics + 1);
-  if (learningStates.error) throw new CoachingError("학습 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
-  if ((learningStates.data?.length ?? 0) > caps.topics) throw new CoachingError("학습 주제가 많습니다. 목표 범위를 나눠 주세요.", 409);
   const checkStates = await db.from("topic_check_states").select("id,check_id,goal_id,topic_id,correct_count,question_count,source,grader_version,created_at,note_id,note_version,source_stale,voided_at")
     .eq("user_id", userId).in("goal_id", request.goal_ids).limit(caps.topics + 1);
   if (checkStates.error) throw new CoachingError("문제풀이 결과를 확인하지 못했습니다.", 503);
@@ -108,6 +113,7 @@ export async function loadCoachingContext(
     }
   }
   return {
+    problem_bank: problemBank,
     course_knowledge: courseKnowledge,
     personal_preferences: { preferred_session_minutes: preferences.data?.preferred_session_minutes ?? null, coaching_style: preferences.data?.coaching_style ?? null },
     personal_feedback: (feedback.data ?? []).map((row) => ({ ...row, goal_ids: relatedRuns.find((run) => run.id === row.run_id)?.request_payload.request.goal_ids ?? [] })),
@@ -141,6 +147,7 @@ export function modelContext(context: CoachingContext) {
   const reportedLevel = (value: unknown) => value === "상" || value === "중" || value === "하" ? value : null;
   const selectedCourses = new Set(context.goals.flatMap((goal) => goal.course_id ? [goal.course_id] : []));
   return {
+    problem_bank: bankModelEvidence(context),
     personal_preferences: {
       preferred_session_minutes: Number.isInteger(context.personal_preferences?.preferred_session_minutes) && Number(context.personal_preferences?.preferred_session_minutes) > 0
         ? context.personal_preferences!.preferred_session_minutes : null,

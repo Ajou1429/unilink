@@ -32,6 +32,7 @@ export type BlockedInterval = { start: string; end: string; label: string };
 export type RecurringBlock = { day_of_week: number; start_time: string; end_time: string; effective_from: string | null; effective_to: string | null; label: string };
 export type TopicLearningState = { id: string; goal_id: string; topic_id: string; learning_status: string; self_rating: number | null; memo: string; observed_at: string; source: string; session_id: string | null; session_date: string | null; note_id: string | null; page_start: number | null; page_end: number | null };
 export type CoachingContext = {
+  problem_bank?: import("./problemBank.ts").BankEvidence;
   personal_preferences?: { preferred_session_minutes: number | null; coaching_style: string | null };
   personal_feedback?: PersonalFeedback[];
   course_knowledge?: Record<string, unknown>[];
