@@ -120,7 +120,9 @@ test("personal DB input keeps preferences soft, feedback scoped, and execution r
   assert.equal(out.shared_context.personal_preferences.preferred_session_minutes,45);
   assert.equal(out.shared_context.personal_feedback.length,1);
   assert.deepEqual(out.shared_context.personal_feedback[0].goal_ids,["a"]);
-  assert.equal(out.shared_context.personal_feedback[0].scope,"whole_run_not_topic_diagnosis");
+  assert.equal(out.shared_context.personal_feedback[0].scope,"one_run_decision_not_standing_preference_or_topic_diagnosis");
+  assert.equal(out.shared_context.personal_feedback[0].explanation,undefined);
+  assert.ok(!JSON.stringify(out).includes("단순 암기보다 적용 문제를 원함"));
   assert.equal(out.goal_briefs[0].study_history[0].plan_item_id,"p1");
   assert.equal(out.goal_briefs[0].study_history[0].method_code,"practice");
   assert.equal(out.goal_briefs[0].study_history[0].completion_status,"partial");

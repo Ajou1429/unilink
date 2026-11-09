@@ -34,7 +34,9 @@ export async function coachingRequestHash(request: CoachingRequest): Promise<str
 }
 
 export function coachingRequestPayload(request: CoachingRequest, requestHash: string) {
-  return { schema_version: 1, request_hash: requestHash, request };
+  return { schema_version: 1, request_hash: requestHash, text_storage_policy: "single_generation_not_persisted",
+    one_off_text_present: Boolean(request.desired_outcome.trim() || request.constraints.trim()),
+    request: { goal_ids: request.goal_ids, intent: request.intent, period_start: request.period_start, period_end: request.period_end } };
 }
 
 export function coachingContextSnapshot(context: CoachingContext) {

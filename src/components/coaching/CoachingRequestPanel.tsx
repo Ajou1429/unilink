@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { TopicLearningPanel } from "./TopicLearningPanel";
 import { CourseKnowledgePanel } from "./CourseKnowledgePanel";
+import { CoachingSatisfactionPanel } from "./CoachingSatisfactionPanel";
+import { PersonalizationEvidencePanel } from "./PersonalizationEvidencePanel";
 import { courseKnowledgeEnabled, prepareCourseKnowledge, requestCourseKnowledge, type KnowledgeStatus } from "@/lib/course-knowledge";
 import {
   Dialog,
@@ -238,6 +240,7 @@ export function CoachingRequestPanel() {
       if (!data || data.schema_version !== 2 || !data.proposal || data.persisted !== false) throw new Error("코칭 응답 형식이 예상과 다릅니다.");
       if (getStorageUser() !== user.id) throw new Error("계정이 변경됐습니다. 다시 요청해 주세요.");
       setResult(data);
+      setRequestNote("");
       setStatus("제안이 생성됐습니다. 아직 DB 계획으로 저장되지는 않았습니다.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "코칭 제안을 생성하지 못했습니다.");
@@ -283,7 +286,7 @@ export function CoachingRequestPanel() {
     <button type="button" className={styles.recommendButton} onClick={() => setOpen(true)}>
       <Sparkles size={17} /> 계획 추천
     </button>
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={next=>{setOpen(next);if(!next)setRequestNote("");}}>
       <DialogContent className={styles.coachingDialog}>
         <DialogHeader className={styles.dialogHeader}>
           <DialogTitle className={styles.dialogTitle}><Sparkles size={21} /> AI 학습 계획 추천</DialogTitle>
@@ -369,11 +372,12 @@ export function CoachingRequestPanel() {
                 {Object.keys(preferredHours).length > 0 && <button type="button" className={styles.clearPreference}
                   onClick={() => { setPreferredHours({}); setResult(null); }}>선택 초기화</button>}
               </fieldset>
-              <label>추가 요청 <span className={styles.optional}>(선택)</span><textarea maxLength={1000} rows={4}
+              <label>추가 요청 <span className={styles.optional}>(이번 계획만 · 선택)</span><textarea maxLength={1000} rows={4}
                 placeholder="예: 수요일은 가볍게 계획해줘" value={requestNote} onChange={(event) => { setRequestNote(event.target.value); setResult(null); }} /></label>
               <p className={styles.autoPlanNotice}>순공시간은 휴식·이동을 제외한 목표 공부시간입니다. 휴식·이동은 시간 계산에 반영하지만 별도 계획으로 표시하지 않습니다. 선택 시간 안에 목표량을 채우기 어려우면 가능한 분량만 추천합니다.</p>
               <button type="button" className={styles.save} disabled={busy || learningPending > 0 || !goals.length || !coachingEnabled} onClick={() => void generate()}><Sparkles size={16} />{learningPending > 0 ? "학습 상태 저장 중…" : busy ? "계획 생성 중…" : coachingEnabled ? "AI 계획 만들기" : "AI 기능 설정 후 사용 가능"}</button>
               <p role="status" className={styles.notice}>{status}</p>
+              {learningGoalIds.length>0&&<PersonalizationEvidencePanel goals={goals.filter(g=>learningGoalIds.includes(g.id))}/>}
             </div>
           </section>
           <section className={styles.resultPane} aria-label="계획 추천 결과">
@@ -405,6 +409,7 @@ export function CoachingRequestPanel() {
               <button type="button" className={styles.save} disabled={approving || Boolean(approvedPlanId) || !result.proposal_run_id}
                 onClick={() => void approve()}>{approving ? "저장 중…" : approvedPlanId ? "저장 완료" : "이 계획 사용하기"}</button>
               <p>{approvedPlanId ? "승인된 계획은 DB에 저장되며 다시 눌러도 중복 생성되지 않습니다." : "확인 후 승인하면 실행할 학습 계획으로 저장됩니다."}</p>
+              {result.proposal_run_id&&<CoachingSatisfactionPanel key={result.proposal_run_id} runId={result.proposal_run_id}/>}
             </div>}
           </section>
         </div>

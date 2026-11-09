@@ -2,6 +2,7 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.116.0";
 import { CoachingError, type CoachingContext, type CoachingRequest, type CourseProgress } from "./contract.ts";
 import { loadKnowledge } from "../courseKnowledgeStore.ts";
 import { bankModelEvidence, loadBankEvidence } from "./problemBank.ts";
+import { loadSatisfaction, loadUnderstandingHistory, satisfactionModelEvidence } from "./personalization.ts";
 
 const caps = { topics: 100, deadlines: 100, sessions: 100, existing_items: 100, blocks: 200 };
 
@@ -61,10 +62,12 @@ export async function loadCoachingContext(
   const relatedRuns = (runs.data ?? []).filter((run) => Array.isArray(run.request_payload?.request?.goal_ids)
     && run.request_payload.request.goal_ids.some((id: unknown) => request.goal_ids.includes(String(id))));
   const feedback = relatedRuns.length ? await db.from("coaching_feedback")
-    .select("id,run_id,feedback_type,explanation,created_at").eq("user_id", userId).in("run_id", relatedRuns.map((run) => run.id))
+    .select("id,run_id,feedback_type,created_at").eq("user_id", userId).in("run_id", relatedRuns.map((run) => run.id))
     .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(20) : { data: [], error: null };
   if (feedback.error) throw new CoachingError("개인 코칭 피드백을 확인하지 못했습니다.", 503);
   const problemBank = await loadBankEvidence(db, userId, request.goal_ids);
+  const satisfaction = await loadSatisfaction(db, userId, request.goal_ids);
+  const understandingHistory = await loadUnderstandingHistory(db, userId, request.goal_ids);
   const learningStates = await db.from("topic_learning_states")
     .select("id,goal_id,topic_id,learning_status,self_rating,memo,observed_at,source,session_id,session_date,note_id,page_start,page_end")
     .eq("user_id", userId).in("goal_id", request.goal_ids).limit(caps.topics + 1);
@@ -113,6 +116,8 @@ export async function loadCoachingContext(
     }
   }
   return {
+    satisfaction,
+    understanding_history:understandingHistory,
     problem_bank: problemBank,
     course_knowledge: courseKnowledge,
     personal_preferences: { preferred_session_minutes: preferences.data?.preferred_session_minutes ?? null, coaching_style: preferences.data?.coaching_style ?? null },
@@ -147,6 +152,14 @@ export function modelContext(context: CoachingContext) {
   const reportedLevel = (value: unknown) => value === "상" || value === "중" || value === "하" ? value : null;
   const selectedCourses = new Set(context.goals.flatMap((goal) => goal.course_id ? [goal.course_id] : []));
   return {
+    satisfaction: satisfactionModelEvidence(context),
+    understanding_history: {
+      truncated_goal_ids:(context.understanding_history?.truncated_goal_ids??[]).filter(id=>context.goals.some(g=>g.id===id)),
+      records:(context.understanding_history?.records??[]).filter(r=>context.goals.some(g=>g.id===r.goal_id)
+        && context.topics.some(t=>t.status==="confirmed"&&t.id===r.topic_id&&t.goal_id===r.goal_id)
+        && !(context.topic_learning_states??[]).some(s=>s.id===r.id)).map(r=>({observation_id:r.id,goal_id:r.goal_id,topic_id:r.topic_id,
+          learning_status:r.learning_status,self_rating_1_to_5:level(r.self_rating),observed_at:r.observed_at,source:"self_report_history"})),
+    },
     problem_bank: bankModelEvidence(context),
     personal_preferences: {
       preferred_session_minutes: Number.isInteger(context.personal_preferences?.preferred_session_minutes) && Number(context.personal_preferences?.preferred_session_minutes) > 0
@@ -156,8 +169,8 @@ export function modelContext(context: CoachingContext) {
     personal_feedback: (context.personal_feedback ?? []).filter((f) => ["accepted", "modified", "rejected"].includes(f.feedback_type)
       && f.goal_ids.some((id) => context.goals.some((g) => g.id === id))).slice(0, 20).map((f) => ({
         feedback_id: f.id, run_id: f.run_id, goal_ids: f.goal_ids.filter((id) => context.goals.some((g) => g.id === id)),
-        feedback_type: f.feedback_type, explanation: text(f.explanation, 700), observed_at: f.created_at,
-        scope: "whole_run_not_topic_diagnosis",
+        feedback_type: f.feedback_type, observed_at: f.created_at,
+        scope: "one_run_decision_not_standing_preference_or_topic_diagnosis",
       })),
     course_knowledge: context.course_knowledge ?? [],
     timezone: context.timezone,

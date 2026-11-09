@@ -25,13 +25,15 @@ export type Topic = { id: string; goal_id: string; title: string; status: string
 export type Method = { code: string; display_name: string; active: boolean };
 export type Deadline = { goal_id: string | null; title: string; due_at: string | null; starts_at: string | null; event_type: string; description?: string; exam_scope?: string };
 export type Session = { id?: string; plan_item_id?: string | null; method_code?: string | null; source?: string; ended_at?: string | null; created_at?: string; goal_id: string; topic_id: string | null; actual_minutes: number; completion_status: string; started_at: string | null; mastery_before?: number | null; mastery_after?: number | null; metadata: Record<string, unknown> };
-export type PersonalFeedback = { id: string; run_id: string; goal_ids: string[]; feedback_type: string; explanation: string | null; created_at: string };
+export type PersonalFeedback = { id: string; run_id: string; goal_ids: string[]; feedback_type: string; explanation?: string | null; created_at: string };
 export type CourseProgress = { id: string; course_id: string; session_date: string; pace: number | null; memo: string | null; metadata: Record<string, unknown> };
 export type ExistingItem = { goal_id: string; topic_id: string | null; title: string; planned_minutes: number; scheduled_start: string | null; status: string; metadata: Record<string, unknown> };
 export type BlockedInterval = { start: string; end: string; label: string };
 export type RecurringBlock = { day_of_week: number; start_time: string; end_time: string; effective_from: string | null; effective_to: string | null; label: string };
 export type TopicLearningState = { id: string; goal_id: string; topic_id: string; learning_status: string; self_rating: number | null; memo: string; observed_at: string; source: string; session_id: string | null; session_date: string | null; note_id: string | null; page_start: number | null; page_end: number | null };
 export type CoachingContext = {
+  satisfaction?: import("./personalization.ts").SatisfactionEvidence;
+  understanding_history?: {records:import("./personalization.ts").UnderstandingObservation[];truncated_goal_ids:string[]};
   problem_bank?: import("./problemBank.ts").BankEvidence;
   personal_preferences?: { preferred_session_minutes: number | null; coaching_style: string | null };
   personal_feedback?: PersonalFeedback[];

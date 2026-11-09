@@ -1,7 +1,7 @@
 import type { CoachingContext, CoachingRequest } from "./contract.ts";
 import { modelContext } from "./context.ts";
 import { BANK_STAGE_LABELS, SELF_RATING_LABELS } from "./problemBank.ts";
-export const MODEL_INPUT_VERSION = "coaching-evidence-v4";
+export const MODEL_INPUT_VERSION = "coaching-evidence-v5";
 
 // Group by ownership before generation; each evidence record is sent only once.
 export function buildEvidenceContext(source: CoachingContext) {
@@ -17,6 +17,8 @@ export function groupEvidenceContext(context: ReturnType<typeof modelContext>) {
       self_reports: context.topic_learning_states.filter((row) => row.goal_id === goal.id),
       scored_checks: context.topic_check_results.filter((row) => row.goal_id === goal.id),
       problem_bank_stages: (context.problem_bank?.records ?? []).filter(row => row.goal_id === goal.id),
+      satisfaction_observations: (context.satisfaction?.records ?? []).filter(row => row.goal_id === goal.id),
+      previous_understanding: (context.understanding_history?.records ?? []).filter(row=>row.goal_id===goal.id),
       deadlines: context.deadlines.filter((row) => row.goal_id === goal.id),
       study_history: context.recent_study.filter((row) => row.goal_id === goal.id),
       existing_plan: context.existing_items.filter((row) => row.goal_id === goal.id),
@@ -25,6 +27,10 @@ export function groupEvidenceContext(context: ReturnType<typeof modelContext>) {
       personalization_basis: {
         study_observations: evidence.study_history.length, self_report_observations: evidence.self_reports.length,
         sampled_checks: evidence.scored_checks.length,
+        distinct_satisfaction_runs: new Set(evidence.satisfaction_observations.map(row => row.run_id)).size,
+        previous_understanding_observations: evidence.previous_understanding.length,
+        completed_sessions: evidence.study_history.filter(row => row.completion_status === "completed").length,
+        partial_sessions: evidence.study_history.filter(row => row.completion_status === "partial").length,
         meaning: "Evidence counts, not learned weights or confidence scores. No history means a provisional recommendation, not a blocked request.",
       },
       evidence_gaps: {
@@ -41,7 +47,12 @@ export function groupEvidenceContext(context: ReturnType<typeof modelContext>) {
     problem_bank_scope: { status: context.problem_bank?.status ?? "not_loaded", truncated_goal_ids: context.problem_bank?.truncated_goal_ids ?? [],
       history: "Latest 20 problem records per selected goal, explicitly linked bank subjects only; optional topic applies to the entire bank subject." },
     personal_preferences: context.personal_preferences, personal_feedback: context.personal_feedback,
-    personalization_scope: "Only this user's DB. Feedback is run-level; preferences are soft unless repeated in the current request as a hard constraint. No cross-user training.",
+    request_scope: "request.desired_outcome and request.constraints apply only to this generation; never persist them as profile facts. Current structured deadlines/windows also are not lifetime preferences.",
+    personalization_scope: "Only this user's observed study results, understanding and structured satisfaction. Past run decisions and plan titles are not standing preferences. Repeated comparable observations may inform provisional adaptation, not permanent traits or model training. personal_preferences are explicit settings only; the current request wins.",
+    satisfaction_scope: { status: context.satisfaction?.status ?? "not_loaded", truncated_goal_ids: context.satisfaction?.truncated_goal_ids ?? [],
+      history: "Latest 20 per goal, one mutable satisfaction observation per run. Satisfaction is not mastery or learning effectiveness; had_one_off_request flags situational requests whose text is deliberately unavailable." },
+    understanding_history_scope:{truncated_goal_ids:context.understanding_history?.truncated_goal_ids??[],
+      history:"Latest 20 self-report observations per goal; latest-state observation IDs are omitted from previous_understanding to avoid double-counting. No chat or memo text."},
     history_scope: "Latest 20 recorded study sessions per selected goal; feedback from latest 30 owned runs, up to 20 events. Not a complete lifetime history.",
     blocked_events: context.blocked_events, recurring_blocks: context.recurring_blocks,
     course_progress_scope: context.course_progress_scope, evidence_limits: context.evidence_limits,
