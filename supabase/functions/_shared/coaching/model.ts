@@ -68,12 +68,13 @@ export async function generateProposal(request: CoachingRequest, context: Coachi
   const key = Deno.env.get("OPENAI_API_KEY");
   const model = selectedModel ?? Deno.env.get("COACHING_MODEL");
   if (!key || !model) throw new CoachingError("Coaching model is not configured", 503);
+  const usesLowReasoning = model === "gpt-6.1-sol" || model === "gpt-6.1-terra";
   const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST", signal: AbortSignal.timeout(model === "gpt-6.1-sol" ? 45_000 : 30_000),
+    method: "POST", signal: AbortSignal.timeout(usesLowReasoning ? 45_000 : 30_000),
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model, store: false, max_output_tokens: 6000,
-      ...(model === "gpt-6.1-sol" ? { reasoning: { effort: "low" } } : {}),
+      ...(usesLowReasoning ? { reasoning: { effort: "low" } } : {}),
       instructions: COACHING_INSTRUCTIONS,
       input: [
         { role: "developer", content: intentInstructions(request.intent) },

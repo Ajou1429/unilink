@@ -9,11 +9,12 @@ export type ModelUsage = {
 
 type Rates = { input: number; cachedInput: number; output: number; cacheWrite?: number };
 
-export const COACHING_PRICING_VERSION = "openai-standard-2026-11-06";
+export const COACHING_PRICING_VERSION = "openai-standard-2026-11-10";
 
 // USD per one million tokens. Keep this explicit and versioned; unknown models are not estimated.
 const rates: Record<string, Rates> = {
   "gpt-6.1-sol": { input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10 },
+  "gpt-6.1-terra": { input: 1, cachedInput: 0.05, cacheWrite: 1.25, output: 5 },
   "gpt-5": { input: 1.25, cachedInput: 0.125, output: 10 },
   "gpt-5.1": { input: 1.25, cachedInput: 0.125, output: 10 },
   "gpt-5.2": { input: 1.75, cachedInput: 0.175, output: 14 },
