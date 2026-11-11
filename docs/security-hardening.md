@@ -56,9 +56,9 @@ npm run test:edge
 npm audit
 ```
 
-- Node 테스트는 기존 카탈로그/커뮤니티 회귀 검사, 계정별 저장소 격리, PGlite의 실제 PostgreSQL RLS/외래 키/컬럼 권한/사용량 예약 검사를 포함한다. PGlite는 Supabase 시스템 스키마의 최소 부분을 구성하므로 실제 호스팅 API/설정까지 검증하지는 않는다.
+- Node 테스트는 기존 카탈로그 회귀 검사, 계정별 저장소 격리, PGlite의 실제 PostgreSQL RLS/외래 키/컬럼 권한/사용량 예약 검사를 포함한다. PGlite는 Supabase 시스템 스키마의 최소 부분을 구성하므로 실제 호스팅 API/설정까지 검증하지는 않는다.
 - Deno 테스트는 실제 OAuth 핸들러에 가짜 외부 응답을 주입해 계정/검증값/만료/재사용 방어를 확인하고 스트림·PDF·AI 출력 제한을 검사한다. 실제 Google 동의 화면과 토큰 교환은 배포 환경에서 확인해야 한다.
-- `tests/ajou-picker.browser.mjs`, `tests/community.browser.mjs`, `tests/security.browser.mjs`는 Supabase 미설정 데모 환경에서 실행한다. `AJOU_TEST_URL`, `AJOU_PLAYWRIGHT_MODULE`로 서버와 Playwright 경로를 지정할 수 있다.
+- `tests/ajou-picker.browser.mjs`, `tests/security.browser.mjs`는 Supabase 미설정 데모 환경에서 실행한다. `AJOU_TEST_URL`, `AJOU_PLAYWRIGHT_MODULE`로 서버와 Playwright 경로를 지정할 수 있다.
 
 PR 및 main/dev 푸시 시 `.github/workflows/security-checks.yml`에서 린트, Node/PostgreSQL 회귀 검사, Edge 타입 검사와 보안 테스트를 실행한다.
 

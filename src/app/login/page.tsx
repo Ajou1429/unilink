@@ -54,7 +54,7 @@ export default function LoginPage() {
             관리하세요.&rdquo;
           </blockquote>
           <p className="text-primary-foreground/70">
-            UniLink는 대학생을 위한 수업 커뮤니티와 학습 관리 공간입니다.
+            UniLink는 대학생을 위한 수업과 학습 관리 공간입니다.
           </p>
         </div>
         <div className="grid grid-cols-3 gap-4">

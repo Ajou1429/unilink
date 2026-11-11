@@ -6,7 +6,6 @@ import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   CalendarDays,
-  MessageSquare,
   BookOpen,
   FileText,
   GraduationCap,
@@ -45,7 +44,6 @@ import {
 const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
   { href: "/timetable", icon: CalendarDays, label: "시간표" },
-  { href: "/community", icon: MessageSquare, label: "커뮤니티" },
   { href: "/study", icon: BookOpen, label: "학습 계획" },
   { href: "/ai-coaching", icon: Sparkles, label: "AI 학습코칭" },
   { href: "/notes", icon: FileText, label: "나의 노트" },

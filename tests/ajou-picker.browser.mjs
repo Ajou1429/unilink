@@ -56,9 +56,6 @@ try {
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByText("2026년 2학기 · 총 9학점", { exact: false }).waitFor();
   await page.getByRole("button").filter({ has: page.getByText("기존 과목", { exact: true }) }).first().click();
-  const communityLink = page.locator('a').filter({ hasText: "이 수업 커뮤니티" });
-  await communityLink.waitFor();
-  assert.equal(await communityLink.getAttribute("href"), "/community?courseId=existing");
   await page.getByRole("button", { name: "수업 추가", exact: true }).click();
   await page.getByRole("textbox", { name: "과목 검색" }).fill("F126");
   assert.ok(await page.getByRole("button", { name: "F126 담기", exact: true }).isDisabled());

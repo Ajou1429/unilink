@@ -7,6 +7,7 @@ import { initializeP0Account, startP0SyncListener, stopP0Sync } from "@/lib/p0-s
 import { initializeDemoData } from "@/lib/demo-data";
 import { DEMO_MODE_KEY, isDemoMode } from "@/lib/demo-mode";
 import { GOOGLE_AUTH_RETURN_KEY } from "@/lib/google-login";
+import { removeRetiredCommunityData } from "@/lib/retired-community-data";
 
 /** Do not mount data readers until the server has verified the cached session.
  * Remount all private screens when the principal changes, including other tabs. */
@@ -16,6 +17,9 @@ export function AccountBoundary({ children }: { children: React.ReactNode }) {
   const pendingIdentity = useRef<string | null>(null);
   const loadedIdentity = useRef<string | null>(null);
   useEffect(() => {
+    // Cleanup also runs for signed-out/demo sessions before mounting readers.
+    try { removeRetiredCommunityData(window.localStorage); } catch { /* Storage may be unavailable. */ }
+    try { removeRetiredCommunityData(window.sessionStorage); } catch { /* Storage may be unavailable. */ }
     let stopped = false;
     let version = 0;
     const supabase = getSupabaseBrowserClient();

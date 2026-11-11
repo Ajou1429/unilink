@@ -37,7 +37,7 @@ export async function loadCoachingContext(
       .select("id,plan_item_id,goal_id,topic_id,method_code,source,actual_minutes,completion_status,started_at,ended_at,created_at,mastery_before,mastery_after,metadata")
       .eq("user_id", userId).eq("goal_id", goalId)
       .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(20))),
-    db.from("study_plan_items").select("id,goal_id,topic_id,title,planned_minutes,scheduled_start,scheduled_end,status,metadata")
+    db.from("study_plan_items").select("id,plan_id,goal_id,topic_id,title,planned_minutes,scheduled_start,scheduled_end,status,metadata")
       .eq("user_id", userId).in("goal_id", request.goal_ids).eq("status", "planned")
       .limit(caps.existing_items + 1),
     db.from("calendar_events").select("title,starts_at,ends_at,is_blocking")
@@ -58,6 +58,12 @@ export async function loadCoachingContext(
     if (result.error) throw new CoachingError("Learning context is unavailable", 503);
   }
   if (goals.data?.length !== request.goal_ids.length) throw new CoachingError("Goal is missing or unavailable", 404);
+  const existingPlanIds = [...new Set((existing.data ?? []).map((item) => item.plan_id))];
+  const existingPlans = existingPlanIds.length ? await db.from("study_plans").select("id,source_type")
+    .eq("user_id", userId).in("id", existingPlanIds) : { data: [], error: null };
+  if (existingPlans.error || (existingPlans.data?.length ?? 0) !== existingPlanIds.length) {
+    throw new CoachingError("기존 계획의 출처를 확인하지 못했습니다. 계획을 보호하기 위해 추천을 중단했습니다.", 503);
+  }
   // Feedback is linked through owned runs; a plan-wide opinion is never assigned to an arbitrary topic.
   const runs = await db.from("coaching_runs").select("id,request_payload")
     .eq("user_id", userId).order("created_at", { ascending: false }).limit(30);
@@ -128,7 +134,10 @@ export async function loadCoachingContext(
     personal_feedback: (feedback.data ?? []).map((row) => ({ ...row, goal_ids: relatedRuns.find((run) => run.id === row.run_id)?.request_payload.request.goal_ids ?? [] })),
     timezone,
     goals: goals.data ?? [], topics: topics.data ?? [], methods: methods.data ?? [],
-    deadlines: deadlines.data ?? [], sessions: sessionResults.flatMap((result) => result.data ?? []), existing_items: existing.data ?? [],
+    deadlines: deadlines.data ?? [], sessions: sessionResults.flatMap((result) => result.data ?? []),
+    existing_items: (existing.data ?? []).map((item) => ({ ...item,
+      source_type: existingPlans.data?.find((plan) => plan.id === item.plan_id)?.source_type ?? null,
+    })),
     course_progress: progressResults.flatMap((result) => result.data ?? []) as CourseProgress[],
     topic_learning_states: learningStates.data ?? [],
     topic_check_states: checkStates.data ?? [],
@@ -136,7 +145,7 @@ export async function loadCoachingContext(
       ...(events.data ?? []).filter((event) => event.starts_at && event.ends_at)
         .map((event) => ({ start: localStamp(event.starts_at!, timezone), end: localStamp(event.ends_at!, timezone), label: event.title })),
       ...(plannedBlocks.data ?? []).filter((item) => item.scheduled_start && item.scheduled_end)
-        .map((item) => ({ start: localStamp(item.scheduled_start!, timezone), end: localStamp(item.scheduled_end!, timezone), label: "기존 학습 계획" })),
+        .map((item) => ({ start: localStamp(item.scheduled_start!, timezone), end: localStamp(item.scheduled_end!, timezone), label: "기존 학습 계획 (변경 금지)" })),
     ],
     recurring_blocks: [
       ...(commitments.data ?? []).map((block) => ({ ...block, label: block.title })),
@@ -224,8 +233,9 @@ export function modelContext(context: CoachingContext) {
       recorded_mastery_before_1_to_5: level(session.mastery_before), recorded_mastery_after_1_to_5: level(session.mastery_after),
       started_at: session.metadata?.completed_at_estimated === true ? null : session.started_at,
     })),
-    existing_items: context.existing_items.map(({ id, goal_id, topic_id, title, planned_minutes, scheduled_start, scheduled_end, metadata }) =>
+    existing_items: context.existing_items.map(({ id, goal_id, topic_id, title, planned_minutes, scheduled_start, scheduled_end, metadata, source_type }) =>
       ({ id, goal_id, topic_id, title: short(title),
+        source_type: source_type ?? null, protected_manual_plan: source_type === "manual",
         due_date: typeof (metadata?.legacy_record as Record<string, unknown> | undefined)?.dueDate === "string" ? String((metadata.legacy_record as Record<string, unknown>).dueDate).slice(0, 10) : null,
         planned_minutes: metadata?.estimated_minutes === true ? null : planned_minutes,
         scheduled_start, scheduled_end })),

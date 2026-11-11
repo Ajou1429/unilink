@@ -44,43 +44,6 @@ export interface Timetable {
   courses: Course[];
 }
 
-export type PostCategory = "자유" | "질문" | "정보" | "수업" | "시험";
-
-export interface CourseBoardReference {
-  key: string;
-  name: string;
-  term: string;
-  university: string;
-  courseCode: string;
-  registrationNumber?: string;
-  professor?: string;
-}
-
-export interface Post {
-  id: string;
-  authorId: string;
-  authorName: string;
-  isAnonymous: boolean;
-  category: PostCategory;
-  title: string;
-  content: string;
-  likes: number;
-  commentCount: number;
-  courseId?: string;
-  courseBoard?: CourseBoardReference;
-  createdAt: string;
-}
-
-export interface Comment {
-  id: string;
-  postId: string;
-  authorName: string;
-  isAnonymous: boolean;
-  content: string;
-  likes: number;
-  createdAt: string;
-}
-
 export interface StudyPlan {
   id: string;
   userId: string;

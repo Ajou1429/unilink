@@ -1835,7 +1835,6 @@ export default function TimetablePage() {
                     >
                       수업 삭제
                     </Button>
-                    <Button size="sm" variant="outline" className="w-full" nativeButton={false} render={<Link href={"/community?courseId=" + encodeURIComponent(selectedCourse.id)} />}>이 수업 커뮤니티</Button>
                   </div>
                 </CardContent>
               </Card>

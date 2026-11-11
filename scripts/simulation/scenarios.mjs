@@ -42,7 +42,7 @@ export async function runSimulation({ seed = 20260929, users: userCount = 12, di
   const report = { seed, userCount, fixtureDate: now, generatedAt: new Date().toISOString(), applied, excluded, scenarios: [],
     externalServices: 'Google OAuth/Drive/Gemini responses are simulated; actual Edge handlers, crypto, PDF parsing and SQL run locally.',
     productionGaps: ['Hosted Auth/HTTP and real Google consent/token validity are not exercised.',
-      'Grade/spec/community/notifications and some inline notes/files still use browser storage; simulation snapshots are not production persistence.',
+      'Grade/spec/notifications and some inline notes/files still use browser storage; simulation snapshots are not production persistence.',
       'Schedule overlap resolution and automatic coaching generation are not implemented in P0.',
       'Hosted cron delivery, actual object-storage signing and browser PDF rendering require separate live checks.'] };
   const files = new Map();
@@ -117,6 +117,14 @@ export async function runSimulation({ seed = 20260929, users: userCount = 12, di
     const [a, b] = users;
     const [app, other] = browsers;
     const client = createClient(db, { userId: a.id, invoke: external.invoke, files });
+    await check('current DB schema contains no community tables, views or functions', async () => {
+      const relations = await db.query(`select table_name from information_schema.tables where table_schema='public'
+        and (table_name ~ '^community_' or table_name in ('posts','comments','post_likes','comment_likes','course_boards'))`);
+      const functions = await db.query(`select routine_name from information_schema.routines where routine_schema='public'
+        and (routine_name ~ 'community' or routine_name in ('publish_post','add_comment','toggle_post_like'))`);
+      assert.deepEqual(relations.rows, []);
+      assert.deepEqual(functions.rows, []);
+    });
     await check('randomized users, weekday/weekend schedules, plans and execution records persist', async () => {
       assert.equal((await rows('courses')).length, users.reduce((sum, user) => sum + user.courses.length, 0));
       assert.equal((await rows('study_sessions')).length, userCount * 3);
@@ -344,7 +352,7 @@ export async function runSimulation({ seed = 20260929, users: userCount = 12, di
       assert.equal((await rows('problem_bank_problems', b.id)).length, count);
       assert.ok((await rows('problem_bank_upload_jobs', b.id)).every((job) => job.finished));
     }, 'simulated-external');
-    await check('browser-only grades/specs/community/notifications use current code and remain account-isolated', async () => {
+    await check('browser-only grades/specs/notifications use current code and remain account-isolated', async () => {
       for (const [index, browser] of browsers.entries()) {
         const user = users[index];
         const records = browser.lib('record-storage');
@@ -356,13 +364,7 @@ export async function runSimulation({ seed = 20260929, users: userCount = 12, di
         assert.ok(records.addCompletedPersonalStudySpec(completed));
         assert.equal(records.addCompletedPersonalStudySpec(completed), false);
         assert.equal(records.getSpecRecords()[0].category, 'certificate');
-        const community = browser.lib('community-storage');
-        const postId = `post-${index}`;
-        community.publishCommunityPost({ id: postId, title: '가상 질문', content: '정규화 질문입니다.', authorId: user.id, authorName: user.name, category: '질문', courseId: user.courses[0].id, createdAt: now });
-        community.addPostComment({ id: `comment-${index}`, postId, authorName: user.name, content: '가상 답변', createdAt: now });
-        community.togglePostLike(postId, user.id);
-        assert.equal(community.getCommunitySnapshot().posts[0].commentCount, 1);
-        browser.lib('notification-settings').saveNotificationSettings({ community: true, deadline: true });
+        browser.lib('notification-settings').saveNotificationSettings({ deadline: true });
         const notifications = browser.lib('notification-storage');
         notifications.upsertAppNotification({ id: `notice-${index}`, type: 'deadline', title: '목표 기한', body: '3일 남음', href: '/study', read: false, createdAt: now });
         notifications.markAppNotificationRead(`notice-${index}`);
@@ -371,7 +373,6 @@ export async function runSimulation({ seed = 20260929, users: userCount = 12, di
         stopListening();
         await browser.lib('p0-sync').initializeP0Account(user.id);
         assert.equal(personal.getPersonalStudies().find((study) => study.id === `personal-${index}`).status, 'completed');
-        assert.equal(community.getCommunitySnapshot().posts.length, 1);
       }
     }, 'browser-local-only');
     await check('service-only quotas and tokens cannot be read by a student', async () => {

@@ -4,7 +4,7 @@ export const APP_NOTIFICATIONS_CHANGED_EVENT = "unilink:appNotificationsChanged"
 
 export interface AppNotification {
   id: string;
-  type: "community" | "deadline";
+  type: "deadline";
   title: string;
   body: string;
   href: string;
@@ -34,7 +34,7 @@ function writeNotifications(notifications: AppNotification[]) {
 }
 
 export function getAppNotifications(): AppNotification[] {
-  return readJson<AppNotification[]>(APP_NOTIFICATIONS_STORAGE_KEY, []).sort(
+  return readJson<AppNotification[]>(APP_NOTIFICATIONS_STORAGE_KEY, []).filter((item) => item.type === "deadline").sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
 }

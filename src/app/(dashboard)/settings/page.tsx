@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { BellRing, CalendarClock, MessageSquare } from "lucide-react";
+import { BellRing, CalendarClock } from "lucide-react";
 import {
   AUTH_CHANGED_EVENT,
   getCurrentUser,
@@ -29,7 +29,6 @@ export default function SettingsPage() {
   const [message, setMessage] = useState("");
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>({
-      community: false,
       deadline: false,
     });
   const [notificationMessage, setNotificationMessage] = useState("");
@@ -262,26 +261,6 @@ export default function SettingsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border bg-background p-4">
-              <div className="flex gap-3">
-                <MessageSquare className="mt-0.5 h-4 w-4 text-primary" />
-                <div>
-                  <p className="font-medium">커뮤니티 알림</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    새 커뮤니티 글이 올라오면 알림을 받습니다.
-                  </p>
-                </div>
-              </div>
-              <input
-                type="checkbox"
-                className="mt-1 h-5 w-5 accent-primary"
-                checked={notificationSettings.community}
-                onChange={(event) =>
-                  updateNotificationSetting("community", event.target.checked)
-                }
-              />
-            </label>
-
             <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border bg-background p-4">
               <div className="flex gap-3">
                 <CalendarClock className="mt-0.5 h-4 w-4 text-primary" />

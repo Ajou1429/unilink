@@ -1,40 +1,29 @@
 "use client";
 
 import { useCurrentTime } from "@/lib/use-current-time";
+import { TodayPlans } from "@/components/dashboard/TodayPlans";
+import { ExamAssignments } from "@/components/dashboard/ExamAssignments";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import {
   CalendarDays,
-  MessageSquare,
-  BookOpen,
-  Sparkles,
   ArrowRight,
   Circle,
   Clock,
-  Target,
 } from "lucide-react";
 import { mockCourses, mockStudyPlans } from "@/lib/mock-data";
-import { getCommunityPosts, COMMUNITY_POSTS_CHANGED_EVENT } from "@/lib/community-storage";
 import { getStoredCourses } from "@/lib/course-storage";
-import {
-  getPersonalStudies,
-  PERSONAL_STUDIES_CHANGED_EVENT,
-  PersonalStudy,
-} from "@/lib/personal-study-storage";
 import {
   getWeeklyStudyPlans,
   saveWeeklyStudyPlans,
   STUDY_PLANS_CHANGED_EVENT,
 } from "@/lib/study-storage";
-import { Course, DayOfWeek, StudyPlan, Post } from "@/lib/types";
+import { Course, DayOfWeek, StudyPlan } from "@/lib/types";
 import {
-  CourseSessionProgress,
-  getCourseSessions,
   TIMETABLE_CHANGED_EVENT,
 } from "@/lib/timetable-storage";
 import {
@@ -99,39 +88,28 @@ export default function DashboardPage() {
   const now = useCurrentTime();
   const [courses, setCourses] = useState<Course[]>(mockCourses);
   const [plans, setPlans] = useState<StudyPlan[]>(mockStudyPlans);
-  const [personalStudies, setPersonalStudies] = useState<PersonalStudy[]>([]);
-  const [courseSessions, setCourseSessions] = useState<CourseSessionProgress[]>([]);
   const [koreanToday, setKoreanToday] = useState(getKoreanToday);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-  const [recentPosts, setRecentPosts] = useState<Post[]>([]);
 
   useEffect(() => {
     function loadDashboardData() {
       setCourses(getStoredCourses());
       setPlans(getWeeklyStudyPlans(mockStudyPlans));
-      setPersonalStudies(getPersonalStudies());
-      setCourseSessions(getCourseSessions());
       setKoreanToday(getKoreanToday());
       setCurrentUser(getCurrentUser());
-      try { setRecentPosts(getCommunityPosts().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 3)); }
-      catch { setRecentPosts([]); }
     }
 
     window.setTimeout(loadDashboardData, 0);
     window.addEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
-    window.addEventListener(PERSONAL_STUDIES_CHANGED_EVENT, loadDashboardData);
     window.addEventListener(TIMETABLE_CHANGED_EVENT, loadDashboardData);
     window.addEventListener(AUTH_CHANGED_EVENT, loadDashboardData);
     window.addEventListener("storage", loadDashboardData);
-    window.addEventListener(COMMUNITY_POSTS_CHANGED_EVENT, loadDashboardData);
 
     return () => {
       window.removeEventListener(STUDY_PLANS_CHANGED_EVENT, loadDashboardData);
-      window.removeEventListener(PERSONAL_STUDIES_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener(TIMETABLE_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener(AUTH_CHANGED_EVENT, loadDashboardData);
       window.removeEventListener("storage", loadDashboardData);
-      window.removeEventListener(COMMUNITY_POSTS_CHANGED_EVENT, loadDashboardData);
     };
   }, []);
 
@@ -155,15 +133,6 @@ export default function DashboardPage() {
       ? `${currentUser.university} ${currentUser.department}`.trim()
       : "로그인 후 회원 정보의 학과가 표시됩니다";
   const academicTermLabel = getCurrentAcademicTermLabel();
-  const recentProgressCourseCount = new Set(
-    courseSessions
-      .filter((session) => {
-        const updatedAt = new Date(session.updatedAt || session.createdAt).getTime();
-        return Number.isFinite(updatedAt) && now - updatedAt <= 604800000;
-      })
-      .map((session) => session.courseId),
-  ).size;
-
   function completePlan(planId: string) {
     const nextPlans = plans.map((plan) =>
       plan.id === planId ? { ...plan, isCompleted: true } : plan,
@@ -192,89 +161,11 @@ export default function DashboardPage() {
           </Badge>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {[
-            {
-              label: "수강 중인 수업",
-              value: String(courses.length),
-              icon: BookOpen,
-              color: "text-blue-600 bg-blue-50",
-            },
-            {
-              label: "진행중인 개인 학습",
-              value: String(personalStudies.length),
-              icon: Target,
-              color: "text-green-600 bg-green-50",
-            },
-            {
-              label: "반영된 강의 진도",
-              value: String(courseSessions.length),
-              icon: Clock,
-              color: "text-violet-600 bg-violet-50",
-            },
-            {
-              label: "새로 반영된 진도 강의",
-              value: String(recentProgressCourseCount),
-              icon: Sparkles,
-              color: "text-amber-600 bg-amber-50",
-            },
-          ].map((stat) => (
-            <Card key={stat.label} className="border-0 shadow-sm">
-              <CardContent className="p-4">
-                <div className={`inline-flex p-2 rounded-lg mb-3 ${stat.color}`}>
-                  <stat.icon className="h-4 w-4" />
-                </div>
-                <div className="text-2xl font-bold">{stat.value}</div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  {stat.label}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <TodayPlans date={new Intl.DateTimeFormat("sv-SE", { timeZone: KOREA_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now))} plans={plans} />
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          <Card className="border-0 shadow-sm">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">오늘 수업</CardTitle>
-                <Button
-                  render={<Link href="/timetable" />}
-                  nativeButton={false}
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs gap-1 text-primary"
-                >
-                  시간표 <ArrowRight className="h-3 w-3" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {todaySchedule.length > 0 ? (
-                todaySchedule.map((course) => (
-                  <div key={course.id} className="flex items-start gap-3">
-                    <div
-                      className="w-1 h-12 rounded-full shrink-0 mt-0.5"
-                      style={{ backgroundColor: course.color }}
-                    />
-                    <div className="min-w-0">
-                      <p className="font-medium text-sm truncate">{course.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {course.startTime} - {course.endTime}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{course.location}</p>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-muted-foreground py-4 text-center">
-                  오늘 수업이 없어요.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="border-0 shadow-sm">
+          <div className="grid min-w-0 gap-6 sm:grid-cols-2">
+          <Card className="min-w-0 border-0 shadow-sm">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">이번 주 학습 계획</CardTitle>
@@ -324,79 +215,53 @@ export default function DashboardPage() {
               )}
             </CardContent>
           </Card>
-
-          <Card className="border-0 shadow-sm bg-linear-to-br from-primary/5 to-violet-50">
+          <Card className="min-w-0 border-0 shadow-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary" />
-                AI 학습코칭
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="bg-white rounded-lg p-3 shadow-sm">
-                <p className="text-sm font-medium">학습 계획 제안 받기</p>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                  목표와 하루 학습 시간을 고르면 AI가 일정을 반영해 계획을 제안합니다.
-                </p>
-                <Button size="sm" className="mt-3 h-7 text-xs w-full gap-1" nativeButton={false} render={<Link href="/ai-coaching" />}>
-                  학습 계획 생성 <Sparkles className="h-3 w-3" />
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">오늘 수업</CardTitle>
+                <Button
+                  render={<Link href="/timetable" />}
+                  nativeButton={false}
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs gap-1 text-primary"
+                >
+                  시간표 <ArrowRight className="h-3 w-3" />
                 </Button>
               </div>
-              <div className="bg-white rounded-lg p-3 shadow-sm">
-                <p className="text-sm font-medium">놓치지 마세요</p>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                  알고리즘 과제 제출 마감이 3일 남았습니다.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Card className="border-0 shadow-sm">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">커뮤니티 최신 글</CardTitle>
-              <Button
-                render={<Link href="/community" />}
-                nativeButton={false}
-                variant="ghost"
-                size="sm"
-                className="h-7 text-xs gap-1 text-primary"
-              >
-                전체 보기 <ArrowRight className="h-3 w-3" />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-0">
-              {recentPosts.map((post, idx) => (
-                <div key={post.id}>
-                  <Link href={"/community?postId=" + encodeURIComponent(post.id)}>
-                    <div className="py-3 flex items-center gap-3 hover:bg-accent/50 -mx-2 px-2 rounded-lg transition-colors cursor-pointer">
-                      <Badge variant="outline" className="text-[10px] shrink-0">
-                        {post.category}
-                      </Badge>
-                      <p className="text-sm font-medium truncate flex-1">{post.title}</p>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-                        <span className="flex items-center gap-1">
-                          <MessageSquare className="h-3 w-3" />
-                          {post.commentCount}
-                        </span>
-                        <span>
-                          {new Date(post.createdAt).toLocaleDateString("ko-KR", {
-                            month: "short",
-                            day: "numeric",
-                          })}
-                        </span>
-                      </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {todaySchedule.length > 0 ? (
+                todaySchedule.map((course) => (
+                  <Link
+                    key={course.id}
+                    href={`/course?courseId=${encodeURIComponent(course.id)}`}
+                    aria-label={`${course.name} 수업 페이지로 이동`}
+                    className="flex items-start gap-3 rounded-lg p-2 -m-2 transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <div
+                      className="w-1 h-12 rounded-full shrink-0 mt-0.5"
+                      style={{ backgroundColor: course.color }}
+                    />
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate">{course.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {course.startTime} - {course.endTime}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{course.location}</p>
                     </div>
                   </Link>
-                  {idx < recentPosts.length - 1 && <Separator />}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  오늘 수업이 없어요.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+          </div>
+        </div>
+        <ExamAssignments now={now} />
       </div>
     </div>
   );

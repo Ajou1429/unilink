@@ -4,12 +4,10 @@ export const NOTIFICATION_SETTINGS_CHANGED_EVENT =
   "unilink:notificationSettingsChanged";
 
 export interface NotificationSettings {
-  community: boolean;
   deadline: boolean;
 }
 
 const defaultSettings: NotificationSettings = {
-  community: false,
   deadline: false,
 };
 
@@ -22,7 +20,6 @@ export function getNotificationSettings(): NotificationSettings {
     const parsed = JSON.parse(raw) as Partial<NotificationSettings>;
 
     return {
-      community: Boolean(parsed.community),
       deadline: Boolean(parsed.deadline),
     };
   } catch {
@@ -35,7 +32,7 @@ export function saveNotificationSettings(settings: NotificationSettings) {
 
   privateStorage.setItem(
     NOTIFICATION_SETTINGS_STORAGE_KEY,
-    JSON.stringify(settings),
+    JSON.stringify({ deadline: Boolean(settings.deadline) }),
   );
   window.dispatchEvent(new Event(NOTIFICATION_SETTINGS_CHANGED_EVENT));
 }

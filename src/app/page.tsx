@@ -4,8 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   CalendarDays,
-  Users,
-  MessageSquare,
+  FileText,
+  BookOpen,
   Sparkles,
   GraduationCap,
   ArrowRight,
@@ -17,21 +17,21 @@ const features = [
     icon: CalendarDays,
     title: "스마트 시간표",
     description:
-      "수업을 등록하고 같은 강의를 듣는 친구들과 자연스럽게 연결하세요.",
+      "수업과 개인 일정을 등록하고 한눈에 확인하세요.",
     color: "bg-blue-50 text-blue-600",
   },
   {
-    icon: Users,
-    title: "수업 커뮤니티",
+    icon: FileText,
+    title: "강의 노트",
     description:
-      "과제, 시험 범위, 강의 자료와 같은 정보를 수업별로 모아볼 수 있습니다.",
+      "강의 자료와 필기를 수업별로 정리하고 필요한 노트를 찾아보세요.",
     color: "bg-violet-50 text-violet-600",
   },
   {
-    icon: MessageSquare,
-    title: "익명 게시판",
+    icon: BookOpen,
+    title: "학습 일정 관리",
     description:
-      "학교생활의 고민과 정보를 부담 없이 나누는 커뮤니티 공간입니다.",
+      "과제 제출과 시험 일정을 관리하고 학습 계획에 반영하세요.",
     color: "bg-pink-50 text-pink-600",
   },
   {
@@ -93,11 +93,11 @@ export default function LandingPage() {
           <h1 className="text-5xl md:text-6xl font-bold tracking-tight text-foreground leading-tight mb-6">
             시간표로 시작하는
             <br />
-            <span className="text-primary">대학생활 커뮤니티</span>
+            <span className="text-primary">나만의 학습 관리</span>
           </h1>
           <p className="text-xl text-muted-foreground mb-10 max-w-2xl mx-auto leading-relaxed">
-            같은 강의를 듣는 사람들과 연결되고, 익명으로 소통하며, AI가
-            도와주는 학습 계획으로 성적까지 관리하세요.
+            수업과 강의 자료를 정리하고, AI가 도와주는
+            학습 계획으로 공부와 일정을 관리하세요.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Link href="/signup">
@@ -150,7 +150,7 @@ export default function LandingPage() {
               대학생활에 필요한 모든 것
             </h2>
             <p className="text-muted-foreground text-lg">
-              하나의 앱으로 수업, 커뮤니티, 학습을 관리하세요.
+              하나의 앱으로 수업, 노트, 학습을 관리하세요.
             </p>
           </div>
           <div className="grid md:grid-cols-2 gap-6">
@@ -187,17 +187,17 @@ export default function LandingPage() {
               {
                 step: "01",
                 title: "학교 이메일로 가입",
-                desc: "재학생 인증을 바탕으로 신뢰할 수 있는 커뮤니티를 만듭니다.",
+                desc: "학교와 학과 정보를 등록하고 나만의 학습 관리를 시작하세요.",
               },
               {
                 step: "02",
                 title: "시간표 입력",
-                desc: "이번 학기 수업을 입력하면 같은 수업 친구들과 연결됩니다.",
+                desc: "이번 학기 수업을 입력하고 학습 가능한 시간을 확인하세요.",
               },
               {
                 step: "03",
-                title: "함께 공부 시작",
-                desc: "커뮤니티에 참여하고 AI 학습 계획으로 성적을 관리하세요.",
+                title: "학습 계획 시작",
+                desc: "자료와 진도를 정리하고 AI 학습 계획으로 공부를 시작하세요.",
               },
             ].map((item) => (
               <div key={item.step} className="text-center">
@@ -231,7 +231,7 @@ export default function LandingPage() {
                   <span className="text-sm font-normal text-muted-foreground">/월</span>
                 </div>
                 <ul className="space-y-3 mb-6">
-                  {["시간표 생성", "수업 커뮤니티", "익명 게시판", "기본 학습 노트"].map(
+                  {["시간표 생성", "수업별 자료 관리", "과제·시험 일정", "기본 학습 노트"].map(
                     (f) => (
                       <li key={f} className="flex items-center gap-2 text-sm">
                         <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />

@@ -5,7 +5,7 @@ export class CoachingError extends Error {
   constructor(message: string, status = 400) { super(message); this.status = status; }
 }
 
-export const COACHING_POLICY_VERSION = "time-window-v5";
+export const COACHING_POLICY_VERSION = "manual-plan-preservation-v6";
 
 export type TimeWindow = { start: string; end: string };
 export type DayBudget = { date: string; minutes: number; windows: TimeWindow[] };
@@ -32,7 +32,7 @@ export type Deadline = { goal_id: string | null; title: string; due_at: string |
 export type Session = { id?: string; plan_item_id?: string | null; method_code?: string | null; source?: string; ended_at?: string | null; created_at?: string; goal_id: string; topic_id: string | null; actual_minutes: number; completion_status: string; started_at: string | null; mastery_before?: number | null; mastery_after?: number | null; metadata: Record<string, unknown> };
 export type PersonalFeedback = { id: string; run_id: string; goal_ids: string[]; feedback_type: string; explanation?: string | null; created_at: string };
 export type CourseProgress = { id: string; course_id: string; session_date: string; pace: number | null; memo: string | null; metadata: Record<string, unknown> };
-export type ExistingItem = { goal_id: string; topic_id: string | null; title: string; planned_minutes: number; scheduled_start: string | null; status: string; metadata: Record<string, unknown> };
+export type ExistingItem = { goal_id: string; topic_id: string | null; title: string; planned_minutes: number; scheduled_start: string | null; status: string; metadata: Record<string, unknown>; source_type?: string | null };
 export type BlockedInterval = { start: string; end: string; label: string };
 export type RecurringBlock = { day_of_week: number; start_time: string; end_time: string; effective_from: string | null; effective_to: string | null; label: string };
 export type TopicLearningState = { id: string; goal_id: string; topic_id: string; learning_status: string; self_rating: number | null; memo: string; observed_at: string; source: string; session_id: string | null; session_date: string | null; note_id: string | null; page_start: number | null; page_end: number | null };
@@ -281,6 +281,11 @@ export function validateProposal(value: unknown, request: CoachingRequest, conte
       throw new CoachingError("Plan item violates goal, topic, method or date constraints", 502);
     }
     const date = raw.planned_date;
+    const normalizedTitle = (title: string) => title.normalize("NFKC").replace(/\s+/g, "").toLocaleLowerCase("ko-KR");
+    if (context.existing_items.some((existing) => existing.source_type === "manual" && existing.status === "planned" &&
+      existing.goal_id === raw.goal_id && normalizedTitle(existing.title) === normalizedTitle(raw.title as string))) {
+      throw new CoachingError("직접 추가한 계획과 같은 작업을 다시 추천할 수 없습니다. 기존 계획을 유지하고 다른 학습만 빈 시간에 추가해 주세요.", 502);
+    }
     const start = minuteOfDay(raw.start_time);
     const end = start + (raw.planned_minutes as number);
     const exam = request.exam_inputs?.find((entry) => entry.goal_id === raw.goal_id);

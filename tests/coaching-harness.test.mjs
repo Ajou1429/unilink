@@ -212,6 +212,29 @@ test("course progress and recorded understanding reach the model without arbitra
   assert.equal(invalid.recent_study[0].recorded_mastery_after_1_to_5, null);
 });
 
+test("manual work is preserved while distinct AI work fits around its reserved time", () => {
+  const proposal = (items) => ({ summary: "Plan", items, deferred_goals: [] });
+  const request = parseCoachingRequest(body);
+  const manual = { id: id(91), goal_id: goal, topic_id: topic, title: "Review", planned_minutes: 30,
+    scheduled_start: null, scheduled_end: null, status: "planned", metadata: {}, source_type: "manual" };
+  const protectedContext = { ...context, existing_items: [manual], blocked_events: [
+    { start: "2026-10-01T09:00", end: "2026-10-01T10:00", label: "수동 계획" },
+  ] };
+  const before = structuredClone(protectedContext);
+  rejects(() => validateProposal(proposal([{ ...item, title: "Ｒｅｖｉｅｗ", start_time: "10:10" }]), request, protectedContext), 502);
+  rejects(() => validateProposal(proposal([{ ...item, title: "Distinct exercise" }]), request, protectedContext), 502);
+  const fitted = fitProposalSchedule(proposal([{ ...item, title: "Distinct exercise" }]), request, protectedContext);
+  assert.equal(fitted.items[0].start_time, "10:10");
+  validateProposal(fitted, request, protectedContext);
+  assert.deepEqual(protectedContext, before);
+  const evidence = modelContext(protectedContext).existing_items[0];
+  assert.equal(evidence.protected_manual_plan, true);
+  assert.equal(evidence.scheduled_start, null);
+  // The same title for another goal is not the user's original task.
+  validateProposal(proposal([{ ...item, start_time: "10:10" }]), request,
+    { ...protectedContext, existing_items: [{ ...manual, goal_id: otherGoal }] });
+});
+
 test("progress queries are owner/course scoped, bounded per course and fail visibly", async () => {
   const course = id(10), calls = [];
   let failProgress = false;
@@ -228,7 +251,11 @@ test("progress queries are owner/course scoped, bounded per course and fail visi
         return Promise.resolve({ error: table === "course_sessions" && failProgress ? { message: "failed" } : null,
           data: table === "learning_goals" ? [{ ...context.goals[0], course_id: course }]
             : table === "user_preferences" ? { timezone: "Asia/Seoul" }
-              : table === "course_sessions" ? [{ id: id(11), course_id: course, session_date: "2026-09-30", pace: null, memo: "Progress", metadata: {} }] : [],
+              : table === "course_sessions" ? [{ id: id(11), course_id: course, session_date: "2026-09-30", pace: null, memo: "Progress", metadata: {} }]
+                : table === "study_plan_items" ? call.columns.startsWith("id,")
+                  ? [{ id: id(91), plan_id: id(92), goal_id: goal, title: "Manual", status: "planned", metadata: {} }]
+                  : [{ title: "Other goal manual work", scheduled_start: "2026-10-01T00:00:00Z", scheduled_end: "2026-10-01T00:45:00Z" }]
+                  : table === "study_plans" ? [{ id: id(92), source_type: "manual" }] : [],
         }).then(resolve, reject);
       },
     };
@@ -236,6 +263,10 @@ test("progress queries are owner/course scoped, bounded per course and fail visi
   } };
   const loaded = await loadCoachingContext(db, id(100), parseCoachingRequest(body));
   assert.equal(loaded.course_progress.length, 1);
+  assert.equal(loaded.existing_items[0].source_type, "manual");
+  assert.deepEqual(loaded.blocked_events, [{ start: "2026-10-01T09:00", end: "2026-10-01T09:45", label: "기존 학습 계획 (변경 금지)" }]);
+  const plannedQuery = calls.find(c => c.table === "study_plan_items" && c.columns.startsWith("title,"));
+  assert.deepEqual(plannedQuery.filters, [["eq", "user_id", id(100)], ["eq", "status", "planned"]]);
   const progressQuery = calls.find((c) => c.table === "course_sessions");
   assert.deepEqual(progressQuery.filters, [["eq", "user_id", id(100)], ["eq", "course_id", course], ["lte", "session_date", body.period_start]]);
   assert.equal(progressQuery.limit, 10);

@@ -3,12 +3,8 @@
 import { privateStorage } from "@/lib/private-storage";
 
 
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  COMMUNITY_POSTS_CHANGED_EVENT,
-  getCommunityPosts as readCommunityPosts,
-} from "@/lib/community-storage";
 import {
   getNotificationSettings,
   NOTIFICATION_SETTINGS_CHANGED_EVENT,
@@ -30,10 +26,6 @@ import {
 } from "@/lib/notification-storage";
 
 const NOTIFICATION_HISTORY_STORAGE_KEY = "unilink:notification-history";
-
-function getCommunityPosts() {
-  try { return readCommunityPosts(); } catch { return []; }
-}
 
 interface NotificationToast {
   id: string;
@@ -74,7 +66,6 @@ function saveNotificationHistory(history: string[]) {
 export function NotificationBridge() {
   const router = useRouter();
   const [toasts, setToasts] = useState<NotificationToast[]>([]);
-  const seenPostIdsRef = useRef<Set<string> | null>(null);
 
   function openNotification(notification: AppNotification) {
     markAppNotificationRead(notification.id);
@@ -112,36 +103,6 @@ export function NotificationBridge() {
       setToasts((prev) => prev.filter((toast) => toast.id !== id));
     }, 5200);
   }
-
-  const checkCommunityNotifications = useEffectEvent(() => {
-    const settings = getNotificationSettings();
-    const posts = getCommunityPosts();
-    const previousPostIds = seenPostIdsRef.current;
-
-    seenPostIdsRef.current = new Set(posts.map((post) => post.id));
-
-    if (!previousPostIds || !settings.community) return;
-
-    const newPosts = posts
-      .filter((post) => !previousPostIds.has(post.id))
-      .sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      );
-    const latestPost = newPosts[0];
-
-    if (!latestPost) return;
-
-    showNotification({
-      id: `community-${latestPost.id}`,
-      type: "community",
-      title: "새 커뮤니티 글",
-      body: `${latestPost.category} · ${latestPost.title}`,
-      href: `/community?postId=${encodeURIComponent(latestPost.id)}`,
-      read: false,
-      createdAt: new Date().toISOString(),
-    });
-  });
 
   const checkDeadlineNotifications = useEffectEvent(() => {
     const settings = getNotificationSettings();
@@ -215,15 +176,12 @@ export function NotificationBridge() {
   });
 
   useEffect(() => {
-    seenPostIdsRef.current = new Set(getCommunityPosts().map((post) => post.id));
     checkDeadlineNotifications();
 
     function handleStorage() {
-      checkCommunityNotifications();
       checkDeadlineNotifications();
     }
 
-    window.addEventListener(COMMUNITY_POSTS_CHANGED_EVENT, checkCommunityNotifications);
     window.addEventListener(STUDY_PLANS_CHANGED_EVENT, checkDeadlineNotifications);
     window.addEventListener(PERSONAL_STUDIES_CHANGED_EVENT, checkDeadlineNotifications);
     window.addEventListener(
@@ -239,10 +197,6 @@ export function NotificationBridge() {
     const interval = window.setInterval(checkDeadlineNotifications, 60 * 60 * 1000);
 
     return () => {
-      window.removeEventListener(
-        COMMUNITY_POSTS_CHANGED_EVENT,
-        checkCommunityNotifications,
-      );
       window.removeEventListener(STUDY_PLANS_CHANGED_EVENT, checkDeadlineNotifications);
       window.removeEventListener(
         PERSONAL_STUDIES_CHANGED_EVENT,

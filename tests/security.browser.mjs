@@ -16,8 +16,8 @@ try {
     localStorage.setItem("unilink:courses", courses);
     localStorage.setItem("unilink:private:user:previous:unilink:courses", courses);
   });
-  await page.goto(base + "/community");
-  await page.getByRole("button", { name: "내 수업 0", exact: true }).waitFor();
+  await page.goto(base + "/dashboard");
+  await page.getByText("안녕하세요, 게스트님", { exact: true }).waitFor();
   assert.ok(!(await page.locator("body").innerText()).includes("FORGED_IDENTITY"));
   assert.ok(!(await page.locator("body").innerText()).includes("PRIVATE_LEGACY_COURSE"));
   assert.equal(await page.evaluate(() => localStorage.getItem("unilink:current-user")), null);
