@@ -21,7 +21,7 @@ const PAD = { top: 12, right: 16, bottom: 28, left: 32 };
 const TICKS = [0, 1.5, 3, 4.5];
 
 function shortTerm(term: string) {
-  const match = /^(\d)학년 (\d)학기$/.exec(term);
+  const match = /^(\d+)학년 (\d|여름|겨울)학기$/.exec(term);
   return match ? `${match[1]}-${match[2]}` : term;
 }
 

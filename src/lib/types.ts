@@ -26,6 +26,8 @@ export interface Course {
   originalSchedule?: string;
   term?: string;
   courseType?: "major" | "non-major";
+  /** 이수구분 (전필·전선·교선 등). 직접 추가한 과목에만 있다. */
+  category?: string;
   name: string;
   professor: string;
   location: string;

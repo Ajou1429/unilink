@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { TimetableGrid } from "@/components/timetable/TimetableGrid";
 import { AjouCoursePicker } from "@/components/timetable/AjouCoursePicker";
+import { ManualCourseDialog } from "@/components/timetable/ManualCourseDialog";
 import {
   ScheduleDialog,
   buildEvent,
@@ -440,6 +441,28 @@ export default function TimetablePage() {
     setTermDialogOpen(false);
   }
 
+  function deleteTimetable() {
+    const term = selectedTerm;
+    const count = getStoredCourses(term).length;
+    const message = count
+      ? `${term} 시간표와 등록된 ${count}개 과목을 삭제할까요?`
+      : `${term} 시간표를 삭제할까요?`;
+    if (!window.confirm(message)) return;
+    saveStoredCourses([], term);
+    saveTimetableTerms(getTimetableTerms().filter((item) => item !== term));
+    // 현재 학기는 기본 시간표라 목록에 남고 과목만 비워진다
+    setTermOptions((previous) => previous.filter((item) => item !== term || item === currentTerm));
+    if (term === AJOU_TERM) setAjouCourses([]);
+    setCourses([]);
+    changeSelectedTerm(currentTerm);
+    setActionFeedback(`${term} 시간표를 삭제했습니다.`);
+  }
+
+  function addManualCourse(course: Course) {
+    persistCourses([...courses, course]);
+    setActionFeedback(`${course.name} 과목을 ${selectedTerm} 시간표에 추가했습니다.`);
+  }
+
   function toggleEditingDay(day: DayOfWeek) {
     setEditingCourse((prev) => {
       if (!prev) return prev;
@@ -795,6 +818,17 @@ export default function TimetablePage() {
                 </Button>
               </DialogContent>
             </Dialog>
+            <Button
+              variant="outline"
+              size="icon"
+              className="bg-white text-muted-foreground hover:text-destructive"
+              aria-label="시간표 삭제"
+              title="시간표 삭제"
+              disabled={selectedTerm === currentTerm && courses.length === 0}
+              onClick={deleteTimetable}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" className="gap-2" onClick={() => openScheduleDialog()}>
@@ -814,6 +848,12 @@ export default function TimetablePage() {
               onSubmit={saveSchedule}
             />
 
+            <ManualCourseDialog
+              term={selectedTerm}
+              existingCourses={courses}
+              workSchedules={workSchedules}
+              onAdd={addManualCourse}
+            />
             <AjouCoursePicker
               selectedTerm={selectedTerm}
               existingCourses={selectedTerm === AJOU_TERM ? courses : ajouCourses}
@@ -1625,7 +1665,7 @@ export default function TimetablePage() {
                         <div className="min-w-0">
                           <p className="text-sm font-medium truncate">{course.name}</p>
                           <p className="text-xs text-muted-foreground">
-                            {COURSE_TYPE_LABELS[course.courseType ?? "major"]} ·{" "}
+                            {course.category ?? COURSE_TYPE_LABELS[course.courseType ?? "major"]} ·{" "}
                             {formatCourseDays(course)} · {course.credits}학점
                           </p>
                         </div>

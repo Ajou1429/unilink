@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, CalendarDays, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, CalendarDays, Plus, Trash2, X } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +25,13 @@ import {
   saveGradeSettings,
   STANDARD_GRADE_TERMS,
   summarizeGrades,
+  summarizeTerm,
+  supersededIds,
+  clearCompletedRetakes,
+  formatGradeTerm,
+  GRADE_TERM_SEASONS,
+  MAX_GRADE_YEAR,
+  type GradeTermSeason,
   type GradeRecord,
   type GradeValue,
 } from "@/lib/record-storage";
@@ -60,6 +67,9 @@ export default function GradeCalculatorPage() {
   const [records, setRecords] = useState<GradeRecord[]>([]);
   const [requiredCredits, setRequiredCredits] = useState(150);
   const [requiredDraft, setRequiredDraft] = useState("150");
+  const [extraTerms, setExtraTerms] = useState<string[]>([]);
+  const [termOpen, setTermOpen] = useState(false);
+  const [newTerm, setNewTerm] = useState<{ year: number; season: GradeTermSeason }>({ year: 1, season: "여름학기" });
   const [selectedTerm, setSelectedTerm] = useState(STANDARD_GRADE_TERMS[0]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [importOpen, setImportOpen] = useState(false);
@@ -71,6 +81,7 @@ export default function GradeCalculatorPage() {
       const settings = getGradeSettings();
       setRequiredCredits(settings.requiredCredits);
       setRequiredDraft(String(settings.requiredCredits));
+      setExtraTerms(settings.extraTerms);
       setCourses(getAllStoredCourses());
     }
     const timeout = window.setTimeout(sync, 0);
@@ -85,15 +96,16 @@ export default function GradeCalculatorPage() {
     };
   }, []);
 
-  const terms = gradeTerms(records);
+  const terms = gradeTerms(records, extraTerms);
+  const superseded = supersededIds(records);
   const termRecords = records.filter((record) => record.term === selectedTerm);
   const total = summarizeGrades(records);
   const totalRetake = summarizeGrades(records, true);
   const showRetake = hasRetakePlan(records);
-  const termSummary = summarizeGrades(termRecords);
+  const termSummary = summarizeTerm(records, selectedTerm);
   const chartPoints = terms
-    .map((term) => ({ term, ...summarizeGrades(records.filter((record) => record.term === term)) }))
-    .filter((point, index) => index < STANDARD_GRADE_TERMS.length || point.gpa !== null);
+    .map((term) => ({ term, ...summarizeTerm(records, term) }))
+    .filter((point) => STANDARD_GRADE_TERMS.includes(point.term) || point.gpa !== null);
   const distribution = gradeDistribution(records);
   const timetableTerms = useMemo(
     () => sortAcademicTerms([getCurrentAcademicTermLabel(), ...courses.map((course) => course.term).filter(Boolean) as string[]]),
@@ -101,8 +113,27 @@ export default function GradeCalculatorPage() {
   );
 
   function persist(next: GradeRecord[]) {
-    setRecords(next);
-    saveGradeRecords(next);
+    // 나중 학기에 같은 과목 성적이 들어오면 앞 학기의 "재수강 예정"은 자동으로 끈다
+    const resolved = clearCompletedRetakes(next);
+    setRecords(resolved);
+    saveGradeRecords(resolved);
+  }
+
+  function saveExtraTerms(next: string[]) {
+    setExtraTerms(next);
+    saveGradeSettings({ requiredCredits, extraTerms: next });
+  }
+
+  function addTerm() {
+    const term = formatGradeTerm(newTerm.year, newTerm.season);
+    if (!terms.includes(term)) saveExtraTerms([...extraTerms, term]);
+    setSelectedTerm(term);
+    setTermOpen(false);
+  }
+
+  function removeTerm(term: string) {
+    saveExtraTerms(extraTerms.filter((item) => item !== term));
+    setSelectedTerm(STANDARD_GRADE_TERMS[0]);
   }
 
   function update(id: string, patch: Partial<GradeRecord>) {
@@ -131,7 +162,7 @@ export default function GradeCalculatorPage() {
     const value = Number(requiredDraft);
     if (Number.isInteger(value) && value > 0 && value <= 300) {
       setRequiredCredits(value);
-      saveGradeSettings({ requiredCredits: value });
+      saveGradeSettings({ requiredCredits: value, extraTerms });
     } else setRequiredDraft(String(requiredCredits));
   }
 
@@ -147,7 +178,8 @@ export default function GradeCalculatorPage() {
           </Button>
         </div>
 
-        <div className="flex gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="학기 선택">
+        <div className="flex items-start gap-2">
+        <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="학기 선택">
           {terms.map((term) => {
             const has = records.some((record) => record.term === term);
             return (
@@ -165,6 +197,24 @@ export default function GradeCalculatorPage() {
               </button>
             );
           })}
+        </div>
+          <Dialog open={termOpen} onOpenChange={setTermOpen}>
+            <DialogTrigger render={<Button variant="outline" size="icon-sm" className="mt-0.5 shrink-0 rounded-full bg-white" aria-label="학기 추가" title="학기 추가" />}>
+              <Plus className="h-4 w-4" />
+            </DialogTrigger>
+            <DialogContent className="max-w-xs">
+              <DialogHeader><DialogTitle>학기 추가</DialogTitle></DialogHeader>
+              <div className="grid grid-cols-2 gap-2">
+                <select aria-label="학년" className={`${selectClass} h-9 w-full`} value={newTerm.year} onChange={(event) => setNewTerm((prev) => ({ ...prev, year: Number(event.target.value) }))}>
+                  {Array.from({ length: MAX_GRADE_YEAR }, (_, index) => index + 1).map((year) => <option key={year} value={year}>{year}학년</option>)}
+                </select>
+                <select aria-label="학기" className={`${selectClass} h-9 w-full`} value={newTerm.season} onChange={(event) => setNewTerm((prev) => ({ ...prev, season: event.target.value as GradeTermSeason }))}>
+                  {GRADE_TERM_SEASONS.map((season) => <option key={season} value={season}>{season}</option>)}
+                </select>
+              </div>
+              <Button onClick={addTerm}>{terms.includes(formatGradeTerm(newTerm.year, newTerm.season)) ? "이 학기로 이동" : "추가"}</Button>
+            </DialogContent>
+          </Dialog>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-3">
@@ -212,6 +262,11 @@ export default function GradeCalculatorPage() {
               <CardTitle className="text-base">
                 {selectedTerm}
                 {termSummary.gpa !== null && <span className="ml-2 text-sm font-normal text-muted-foreground">평점 {formatGpa(termSummary.gpa)} · {termSummary.earnedCredits}학점</span>}
+                {extraTerms.includes(selectedTerm) && termRecords.length === 0 && (
+                  <Button variant="ghost" size="icon-sm" className="ml-1 align-middle" aria-label="학기 삭제" title="학기 삭제" onClick={() => removeTerm(selectedTerm)}>
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                )}
               </CardTitle>
               <div className="flex gap-2">
                 <Dialog open={importOpen} onOpenChange={setImportOpen}>
@@ -250,7 +305,7 @@ export default function GradeCalculatorPage() {
                   </thead>
                   <tbody>
                     {termRecords.map((record) => (
-                      <tr key={record.id} className="border-b last:border-0">
+                      <tr key={record.id} className={`border-b last:border-0 ${superseded.has(record.id) ? "opacity-50" : ""}`} title={superseded.has(record.id) ? "재수강한 성적으로 대체되어 계산에서 빠졌어요" : undefined}>
                         <td className="py-1.5 pr-2">
                           <Input aria-label="과목명" className="h-8" value={record.courseName} onChange={(event) => update(record.id, { courseName: event.target.value })} />
                         </td>
@@ -272,7 +327,9 @@ export default function GradeCalculatorPage() {
                         </td>
                         <td className="px-1">
                           <div className="flex items-center gap-2">
-                            <input type="checkbox" aria-label="재수강 예정" checked={Boolean(record.retake)} onChange={(event) => update(record.id, { retake: event.target.checked })} />
+                            <input type="checkbox" aria-label="재수강 예정" checked={Boolean(record.retake)} onChange={(event) => update(record.id, event.target.checked
+                              ? { retake: true, retakeGrade: record.retakeGrade || "A0" }
+                              : { retake: false, retakeGrade: "" })} />
                             {record.retake && <GradeSelect label="재수강 예상 성적" value={record.retakeGrade ?? ""} onChange={(retakeGrade) => update(record.id, { retakeGrade })} />}
                           </div>
                         </td>

@@ -7,12 +7,16 @@ import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SpecDialog, emptySpecDraft } from "@/components/records/SpecDialog";
+import { GpaLineChart } from "@/components/records/GradeCharts";
 import {
   formatGpa,
   getGradeRecords,
   getGradeSettings,
   getSpecRecords,
+  gradeTerms,
   hasRetakePlan,
+  STANDARD_GRADE_TERMS,
+  summarizeTerm,
   MAX_GPA,
   RECORDS_CHANGED_EVENT,
   saveSpecRecords,
@@ -52,10 +56,10 @@ function specDetail(spec: SpecRecord) {
 
 function Stat({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
   return (
-    <div>
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-0.5 text-xl font-bold">{value}</p>
-      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+    <div className="rounded-xl bg-muted/40 p-4">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="mt-1 text-3xl font-bold">{value}</p>
+      {sub && <p className="mt-0.5 text-xs text-muted-foreground">{sub}</p>}
     </div>
   );
 }
@@ -63,6 +67,7 @@ function Stat({ label, value, sub }: { label: string; value: React.ReactNode; su
 export default function RecordsPage() {
   const [grades, setGrades] = useState<GradeRecord[]>([]);
   const [requiredCredits, setRequiredCredits] = useState(150);
+  const [extraTerms, setExtraTerms] = useState<string[]>([]);
   const [specs, setSpecs] = useState<SpecRecord[]>([]);
   const [dialog, setDialog] = useState<{ open: boolean; editing: SpecRecord | null; category: SpecCategory }>({
     open: false, editing: null, category: "certificate",
@@ -71,7 +76,9 @@ export default function RecordsPage() {
   useEffect(() => {
     function sync() {
       setGrades(getGradeRecords());
-      setRequiredCredits(getGradeSettings().requiredCredits);
+      const settings = getGradeSettings();
+      setRequiredCredits(settings.requiredCredits);
+      setExtraTerms(settings.extraTerms);
       setSpecs(getSpecRecords());
     }
     const timeout = window.setTimeout(sync, 0);
@@ -88,6 +95,9 @@ export default function RecordsPage() {
   const retake = summarizeGrades(grades, true);
   const showRetake = hasRetakePlan(grades);
   const progress = Math.min(summary.earnedCredits / requiredCredits, 1);
+  const chartPoints = gradeTerms(grades, extraTerms)
+    .map((term) => ({ term, ...summarizeTerm(grades, term) }))
+    .filter((point) => STANDARD_GRADE_TERMS.includes(point.term) || point.gpa !== null);
 
   function persistSpecs(next: SpecRecord[]) {
     setSpecs(next);
@@ -108,25 +118,36 @@ export default function RecordsPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <Header title="성적 및 스펙" />
-      <div className="mx-auto grid w-full max-w-6xl flex-1 gap-4 p-6 lg:h-[calc(100dvh-4rem)] lg:grid-cols-[300px_1fr] lg:overflow-hidden">
-        <Card className="h-fit border-0 shadow-sm">
-          <CardHeader className="pb-3"><CardTitle className="text-base">나의 학점</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
+      <div className="mx-auto grid w-full max-w-6xl flex-1 gap-4 p-6 lg:h-[calc(100dvh-4rem)] lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:overflow-hidden">
+        <Card className="flex min-h-0 flex-col border-0 shadow-sm">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">나의 학점</CardTitle>
+              <Button render={<Link href="/records/calculator" />} nativeButton={false} size="sm" className="gap-1.5">
+                <Calculator className="h-4 w-4" /> 학점계산기
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+            <div className="grid gap-3 sm:grid-cols-3">
             <Stat
               label="전체 평점"
               value={<>{formatGpa(summary.gpa)} <span className="text-sm font-normal text-muted-foreground">/ {MAX_GPA}</span></>}
               sub={showRetake ? `재수강 시 ${formatGpa(retake.gpa)} / ${MAX_GPA}` : undefined}
             />
-            <Stat label="전공 평점" value={<>{formatGpa(summary.majorGpa)} <span className="text-sm font-normal text-muted-foreground">/ {MAX_GPA}</span></>} />
+            <Stat
+              label="전공 평점"
+              value={<>{formatGpa(summary.majorGpa)} <span className="text-sm font-normal text-muted-foreground">/ {MAX_GPA}</span></>}
+              sub={showRetake ? `재수강 시 ${formatGpa(retake.majorGpa)} / ${MAX_GPA}` : undefined}
+            />
             <div>
               <Stat label="취득 학점" value={<>{summary.earnedCredits} <span className="text-sm font-normal text-muted-foreground">/ {requiredCredits}</span></>} />
               <div className="mt-2 h-1.5 rounded-full bg-muted" role="progressbar" aria-valuenow={summary.earnedCredits} aria-valuemax={requiredCredits} aria-label="졸업 학점 진행">
                 <div className="h-1.5 rounded-full bg-primary" style={{ width: `${progress * 100}%` }} />
               </div>
             </div>
-            <Button render={<Link href="/records/calculator" />} nativeButton={false} className="w-full gap-2">
-              <Calculator className="h-4 w-4" /> 학점계산기
-            </Button>
+            </div>
+            <GpaLineChart points={chartPoints} />
           </CardContent>
         </Card>
 
@@ -143,7 +164,7 @@ export default function RecordsPage() {
             {specs.length === 0 ? (
               <p className="py-10 text-center text-sm text-muted-foreground">등록한 스펙이 없어요.</p>
             ) : (
-              <ul className="grid gap-2 sm:grid-cols-2">
+              <ul className="grid gap-2">
                 {specs.map((spec) => (
                   <li key={spec.id} className="group flex items-start gap-3 rounded-lg border p-3">
                     <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold ${CATEGORY_STYLES[spec.category]}`}>
