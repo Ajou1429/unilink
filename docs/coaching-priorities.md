@@ -14,6 +14,8 @@
 
 같은 날 3차로 대시보드를 개편했다(이번 주 학습 계획 → 시험·과제 D-day 박스, 오늘 계획 날짜 이동·다음날 미루기, 헤더 검색창 제거). AI 계획 항목 미루기는 `study_plan_items.scheduled_*`를 하루 옮기고 `metadata.postpone_count`를 남긴다. 5번 실행 기록(미완료 사유) 구현 때 이 미룸 횟수를 입력 신호로 쓸 수 있다. `problembanknewversion`(dc061a9)을 main에 병합하며 마이그레이션을 0033으로 재번호했다. **운영 DB 0033 미적용**: 적용 전에는 같은 과목·다른 PDF의 같은 문제 번호 저장이 실패한다. 상세는 [changelog/2026-11-12-dashboard-problem-bank.md](changelog/2026-11-12-dashboard-problem-bank.md). 우선순위 0(운영 DB 적용 확인)에 0033 적용을 함께 묶는다.
 
+같은 날 4차로 성적 및 스펙 페이지를 다시 만들고 학점계산기(`/records/calculator`)를 추가했다. 시간표 연도 범위도 넓혔다. 성적·스펙은 로컬 전용 데이터라 DB 변경은 없다. 상세는 [changelog/2026-11-12-records-calculator.md](changelog/2026-11-12-records-calculator.md). 코칭 우선순위는 변경 없음.
+
 ## 2026-11-11 로컬 최신 코드 통합
 
 - 후속 사용자 요청으로 커뮤니티 페이지·링크·알림·게시판 저장 코드·샘플을 제거했다. 기존 커뮤니티는 브라우저 전용이었고 로컬 DB 스키마에 관련 객체가 없어 DB 삭제 마이그레이션은 필요하지 않다. 앱 시작 시 기존 브라우저 커뮤니티 데이터만 정리한다. 상세는 `community-removal.md`. 로컬 수정이며 코칭 운영 확인·실행 기록 연결의 우선순위는 유지한다.

@@ -1,1189 +1,186 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Calculator, Pencil, Plus, Trash2 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { SpecDialog, emptySpecDraft } from "@/components/records/SpecDialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
-import { Award, BookOpen, Briefcase, Plus, Target, Trash2 } from "lucide-react";
-import {
-  COURSES_CHANGED_EVENT,
-  getStoredCourses,
-} from "@/lib/course-storage";
-import {
-  getAcademicTermOptions,
-  getCurrentAcademicTermLabel,
-} from "@/lib/academic-term";
-import {
+  formatGpa,
   getGradeRecords,
+  getGradeSettings,
   getSpecRecords,
-  GradeRecord,
+  hasRetakePlan,
+  MAX_GPA,
   RECORDS_CHANGED_EVENT,
-  saveGradeRecords,
   saveSpecRecords,
-  SpecRecord,
+  SPEC_CATEGORY_LABELS,
+  summarizeGrades,
+  type GradeRecord,
+  type SpecCategory,
+  type SpecRecord,
 } from "@/lib/record-storage";
-import {
-  getPersonalStudies,
-  PersonalStudy,
-  PERSONAL_STUDIES_CHANGED_EVENT,
-} from "@/lib/personal-study-storage";
-import { Course } from "@/lib/types";
-import { UNSCHEDULED_LABEL, isUnscheduledCourse } from "@/lib/ajou-catalog";
 
-const GRADE_OPTIONS = ["A+", "A0", "B+", "B0", "C+", "C0", "D+", "D0", "F", "P", "미정"];
-const STATUS_LABELS: Record<SpecRecord["status"], string> = {
-  planned: "예정",
-  "in-progress": "진행 중",
-  done: "완료",
-};
-const COURSE_TYPE_LABELS: Record<NonNullable<GradeRecord["courseType"]>, string> = {
-  major: "전공",
-  "non-major": "비전공",
-};
-const SPEC_CATEGORY_LABELS: Record<SpecRecord["category"], string> = {
-  certificate: "자격증",
-  competition: "공모전",
-  experience: "기타 경험",
-};
-const AWARD_STATUS_LABELS: Record<SpecRecord["awardStatus"], string> = {
-  awarded: "수상",
-  "not-awarded": "미수상",
-  "not-applicable": "수상 활동 아님",
+const CATEGORY_STYLES: Record<SpecCategory, string> = {
+  certificate: "bg-blue-50 text-blue-700",
+  language: "bg-violet-50 text-violet-700",
+  competition: "bg-amber-50 text-amber-700",
+  other: "bg-slate-100 text-slate-700",
 };
 
-function makeId(prefix: string) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function formatMonth(value?: string) {
+  if (!value) return "";
+  const [year, month] = value.split("-");
+  return month ? `${year}.${month}` : year;
 }
 
-function getGradePoint(grade: string) {
-  const points: Record<string, number> = {
-    "A+": 4.5,
-    A0: 4,
-    "B+": 3.5,
-    B0: 3,
-    "C+": 2.5,
-    C0: 2,
-    "D+": 1.5,
-    D0: 1,
-    F: 0,
-  };
-
-  return points[grade];
+function specDetail(spec: SpecRecord) {
+  const parts: string[] = [];
+  if (spec.category === "certificate" || spec.category === "language") {
+    if (spec.acquiredAt) parts.push(`${formatMonth(spec.acquiredAt)} 취득`);
+    if (spec.lifetime) parts.push("평생");
+    else if (spec.expiresAt) parts.push(`${formatMonth(spec.expiresAt)} 만료`);
+  }
+  if (spec.category === "language" && spec.score) parts.unshift(spec.score);
+  if ((spec.category === "certificate" || spec.category === "competition") && spec.issuer) parts.push(spec.issuer);
+  if (spec.category === "competition" && spec.award) parts.unshift(spec.award);
+  if (spec.category === "other" && spec.content) parts.push(spec.content);
+  return parts.join(" · ");
 }
 
-function getSpecCategoryFromText(category: string): SpecRecord["category"] {
-  if (category.includes("자격")) return "certificate";
-  if (category.includes("공모")) return "competition";
-  return "experience";
+function Stat({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-0.5 text-xl font-bold">{value}</p>
+      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+    </div>
+  );
 }
 
 export default function RecordsPage() {
-  const currentTerm = getCurrentAcademicTermLabel();
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [personalStudies, setPersonalStudies] = useState<PersonalStudy[]>([]);
-  const [gradeRecords, setGradeRecords] = useState<GradeRecord[]>([]);
-  const [specRecords, setSpecRecords] = useState<SpecRecord[]>([]);
-  const [selectedTerm, setSelectedTerm] = useState(currentTerm);
-  const [gradeMessage, setGradeMessage] = useState("");
-  const [specMessage, setSpecMessage] = useState("");
-  const [newGrade, setNewGrade] = useState({
-    courseId: "custom",
-    courseType: "major" as NonNullable<GradeRecord["courseType"]>,
-    courseName: "",
-    credits: "3",
-    grade: "미정",
-    score: "",
-    memo: "",
-  });
-  const [newSpec, setNewSpec] = useState({
-    personalStudyId: "custom",
-    title: "",
-    category: "certificate" as SpecRecord["category"],
-    status: "planned" as SpecRecord["status"],
-    awardStatus: "not-applicable" as SpecRecord["awardStatus"],
-    awardRank: "",
-    completedAt: "",
-    memo: "",
+  const [grades, setGrades] = useState<GradeRecord[]>([]);
+  const [requiredCredits, setRequiredCredits] = useState(150);
+  const [specs, setSpecs] = useState<SpecRecord[]>([]);
+  const [dialog, setDialog] = useState<{ open: boolean; editing: SpecRecord | null; category: SpecCategory }>({
+    open: false, editing: null, category: "certificate",
   });
 
   useEffect(() => {
-    function syncData() {
-      setCourses(getStoredCourses(selectedTerm));
-      setPersonalStudies(getPersonalStudies());
-      setGradeRecords(getGradeRecords());
-      setSpecRecords(getSpecRecords());
+    function sync() {
+      setGrades(getGradeRecords());
+      setRequiredCredits(getGradeSettings().requiredCredits);
+      setSpecs(getSpecRecords());
     }
-
-    syncData();
-    window.addEventListener(COURSES_CHANGED_EVENT, syncData);
-    window.addEventListener(PERSONAL_STUDIES_CHANGED_EVENT, syncData);
-    window.addEventListener(RECORDS_CHANGED_EVENT, syncData);
-    window.addEventListener("storage", syncData);
-
+    const timeout = window.setTimeout(sync, 0);
+    window.addEventListener(RECORDS_CHANGED_EVENT, sync);
+    window.addEventListener("storage", sync);
     return () => {
-      window.removeEventListener(COURSES_CHANGED_EVENT, syncData);
-      window.removeEventListener(PERSONAL_STUDIES_CHANGED_EVENT, syncData);
-      window.removeEventListener(RECORDS_CHANGED_EVENT, syncData);
-      window.removeEventListener("storage", syncData);
+      window.clearTimeout(timeout);
+      window.removeEventListener(RECORDS_CHANGED_EVENT, sync);
+      window.removeEventListener("storage", sync);
     };
-  }, [selectedTerm]);
+  }, []);
 
-  const terms = getAcademicTermOptions(
-    new Date(),
-    gradeRecords.map((record) => record.term),
-  );
+  const summary = summarizeGrades(grades);
+  const retake = summarizeGrades(grades, true);
+  const showRetake = hasRetakePlan(grades);
+  const progress = Math.min(summary.earnedCredits / requiredCredits, 1);
 
-  const currentGrades = gradeRecords.filter((record) => record.term === selectedTerm);
-  const linkedCourseIds = new Set(
-    currentGrades.map((record) => record.courseId).filter(Boolean),
-  );
-  const unlinkedCourses = courses.filter((course) => !linkedCourseIds.has(course.id));
-  const linkedStudyIds = new Set(
-    specRecords.map((record) => record.personalStudyId).filter(Boolean),
-  );
-  const unlinkedStudies = personalStudies.filter(
-    (study) => !linkedStudyIds.has(study.id),
-  );
-  const selectedNewGradeCourse = courses.find(
-    (course) => course.id === newGrade.courseId,
-  );
-  const selectedNewSpecStudy = personalStudies.find(
-    (study) => study.id === newSpec.personalStudyId,
-  );
-  const gradedCredits = currentGrades.reduce(
-    (sum, record) => sum + Number(record.credits || 0),
-    0,
-  );
-  const gpaBase = currentGrades.reduce((sum, record) => {
-    const point = getGradePoint(record.grade);
-    return point === undefined ? sum : sum + point * Number(record.credits || 0);
-  }, 0);
-  const gpaCredits = currentGrades.reduce((sum, record) => {
-    const point = getGradePoint(record.grade);
-    return point === undefined ? sum : sum + Number(record.credits || 0);
-  }, 0);
-  const gpa = gpaCredits > 0 ? (gpaBase / gpaCredits).toFixed(2) : "-";
-
-  function persistGrades(nextRecords: GradeRecord[]) {
-    setGradeRecords(nextRecords);
-    saveGradeRecords(nextRecords);
+  function persistSpecs(next: SpecRecord[]) {
+    setSpecs(next);
+    saveSpecRecords(next);
   }
 
-  function persistSpecs(nextRecords: SpecRecord[]) {
-    setSpecRecords(nextRecords);
-    saveSpecRecords(nextRecords);
-  }
-
-  function addCourseGrade(course: Course) {
+  function saveSpec(draft: Omit<SpecRecord, "id" | "createdAt" | "updatedAt">) {
     const now = new Date().toISOString();
-    const record: GradeRecord = {
-      id: makeId("grade"),
-      term: selectedTerm,
-      courseId: course.id,
-      courseType: course.courseType ?? "major",
-      courseName: course.name,
-      credits: course.credits,
-      grade: "미정",
-      score: "",
-      memo: "",
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    persistGrades([record, ...gradeRecords]);
-    setGradeMessage(`${course.name} 과목을 ${selectedTerm} 성적 항목에 추가했습니다.`);
-  }
-
-  function addAllCourseGrades() {
-    if (unlinkedCourses.length === 0) return;
-
-    const now = new Date().toISOString();
-    const records = unlinkedCourses.map<GradeRecord>((course) => ({
-      id: makeId("grade"),
-      term: selectedTerm,
-      courseId: course.id,
-      courseType: course.courseType ?? "major",
-      courseName: course.name,
-      credits: course.credits,
-      grade: "미정",
-      score: "",
-      memo: "",
-      createdAt: now,
-      updatedAt: now,
-    }));
-
-    persistGrades([...records, ...gradeRecords]);
-    setGradeMessage(`${unlinkedCourses.length}개 시간표 과목을 성적 항목에 추가했습니다.`);
-  }
-
-  function addCustomGrade(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const linkedCourse = courses.find((course) => course.id === newGrade.courseId);
-    const courseName = linkedCourse?.name ?? newGrade.courseName.trim();
-
-    if (!courseName) {
-      setGradeMessage("과목명을 입력하거나 시간표 과목을 선택해주세요.");
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const record: GradeRecord = {
-      id: makeId("grade"),
-      term: selectedTerm,
-      courseId: linkedCourse?.id,
-      courseType: linkedCourse?.courseType ?? newGrade.courseType,
-      courseName,
-      credits: Number(newGrade.credits) || linkedCourse?.credits || 0,
-      grade: newGrade.grade,
-      score: newGrade.score.trim(),
-      memo: newGrade.memo.trim(),
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    persistGrades([record, ...gradeRecords]);
-    setSelectedTerm(record.term);
-    setNewGrade({
-      courseId: "custom",
-      courseType: "major",
-      courseName: "",
-      credits: "3",
-      grade: "미정",
-      score: "",
-      memo: "",
-    });
-    setGradeMessage(`${courseName} 성적 항목을 추가했습니다.`);
-  }
-
-  function updateGrade(id: string, patch: Partial<GradeRecord>) {
-    persistGrades(
-      gradeRecords.map((record) =>
-        record.id === id
-          ? { ...record, ...patch, updatedAt: new Date().toISOString() }
-          : record,
-      ),
-    );
-  }
-
-  function removeGrade(id: string) {
-    const target = gradeRecords.find((record) => record.id === id);
-    persistGrades(gradeRecords.filter((record) => record.id !== id));
-    setGradeMessage(
-      target
-        ? `${target.courseName} 성적 항목이 삭제되었습니다.`
-        : "성적 항목이 삭제되었습니다.",
-    );
-  }
-
-  function addStudySpec(study: PersonalStudy) {
-    const now = new Date().toISOString();
-    const record: SpecRecord = {
-      id: makeId("spec"),
-      personalStudyId: study.id,
-      title: study.title,
-      category: getSpecCategoryFromText(study.category),
-      status: "in-progress",
-      awardStatus: "not-applicable",
-      awardRank: "",
-      completedAt: "",
-      memo: study.goal,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    persistSpecs([record, ...specRecords]);
-    setSpecMessage(`${study.title} 개인 학습을 스펙 항목에 추가했습니다.`);
-  }
-
-  function addAllStudySpecs() {
-    if (unlinkedStudies.length === 0) return;
-
-    const now = new Date().toISOString();
-    const records = unlinkedStudies.map<SpecRecord>((study) => ({
-      id: makeId("spec"),
-      personalStudyId: study.id,
-      title: study.title,
-      category: getSpecCategoryFromText(study.category),
-      status: "in-progress",
-      awardStatus: "not-applicable",
-      awardRank: "",
-      completedAt: "",
-      memo: study.goal,
-      createdAt: now,
-      updatedAt: now,
-    }));
-
-    persistSpecs([...records, ...specRecords]);
-    setSpecMessage(`${unlinkedStudies.length}개 개인 학습을 스펙 항목에 추가했습니다.`);
-  }
-
-  function addCustomSpec(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const linkedStudy = personalStudies.find(
-      (study) => study.id === newSpec.personalStudyId,
-    );
-    const title = linkedStudy?.title ?? newSpec.title.trim();
-
-    if (!title) {
-      setSpecMessage("스펙 이름을 입력하거나 개인 학습을 선택해주세요.");
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const record: SpecRecord = {
-      id: makeId("spec"),
-      personalStudyId: linkedStudy?.id,
-      title,
-      category: linkedStudy
-        ? getSpecCategoryFromText(linkedStudy.category)
-        : newSpec.category,
-      status: newSpec.status,
-      awardStatus: newSpec.awardStatus,
-      awardRank:
-        newSpec.awardStatus === "awarded" ? newSpec.awardRank.trim() : "",
-      completedAt: newSpec.completedAt,
-      memo: linkedStudy?.goal || newSpec.memo.trim(),
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    persistSpecs([record, ...specRecords]);
-    setNewSpec({
-      personalStudyId: "custom",
-      title: "",
-      category: "certificate",
-      status: "planned",
-      awardStatus: "not-applicable",
-      awardRank: "",
-      completedAt: "",
-      memo: "",
-    });
-    setSpecMessage(`${title} 스펙 항목을 추가했습니다.`);
-  }
-
-  function updateSpec(id: string, patch: Partial<SpecRecord>) {
+    const editing = dialog.editing;
     persistSpecs(
-      specRecords.map((record) =>
-        record.id === id
-          ? { ...record, ...patch, updatedAt: new Date().toISOString() }
-          : record,
-      ),
+      editing
+        ? specs.map((spec) => (spec.id === editing.id ? { ...spec, ...draft, updatedAt: now } : spec))
+        : [{ ...draft, id: `spec-${Date.now()}`, createdAt: now, updatedAt: now }, ...specs],
     );
-  }
-
-  function removeSpec(id: string) {
-    const target = specRecords.find((record) => record.id === id);
-    persistSpecs(specRecords.filter((record) => record.id !== id));
-    setSpecMessage(
-      target
-        ? `${target.title} 스펙 항목이 삭제되었습니다.`
-        : "스펙 항목이 삭제되었습니다.",
-    );
+    setDialog((prev) => ({ ...prev, open: false, editing: null }));
   }
 
   return (
     <div className="flex min-h-screen flex-col">
       <Header title="성적 및 스펙" />
-      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 p-6">
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card className="border-0 shadow-sm">
-            <CardContent className="p-4">
-              <div className="mb-3 inline-flex rounded-lg bg-blue-50 p-2 text-blue-600">
-                <BookOpen className="h-4 w-4" />
+      <div className="mx-auto grid w-full max-w-6xl flex-1 gap-4 p-6 lg:h-[calc(100dvh-4rem)] lg:grid-cols-[300px_1fr] lg:overflow-hidden">
+        <Card className="h-fit border-0 shadow-sm">
+          <CardHeader className="pb-3"><CardTitle className="text-base">나의 학점</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <Stat
+              label="전체 평점"
+              value={<>{formatGpa(summary.gpa)} <span className="text-sm font-normal text-muted-foreground">/ {MAX_GPA}</span></>}
+              sub={showRetake ? `재수강 시 ${formatGpa(retake.gpa)} / ${MAX_GPA}` : undefined}
+            />
+            <Stat label="전공 평점" value={<>{formatGpa(summary.majorGpa)} <span className="text-sm font-normal text-muted-foreground">/ {MAX_GPA}</span></>} />
+            <div>
+              <Stat label="취득 학점" value={<>{summary.earnedCredits} <span className="text-sm font-normal text-muted-foreground">/ {requiredCredits}</span></>} />
+              <div className="mt-2 h-1.5 rounded-full bg-muted" role="progressbar" aria-valuenow={summary.earnedCredits} aria-valuemax={requiredCredits} aria-label="졸업 학점 진행">
+                <div className="h-1.5 rounded-full bg-primary" style={{ width: `${progress * 100}%` }} />
               </div>
-              <p className="text-2xl font-bold">{currentGrades.length}</p>
-              <p className="text-sm text-muted-foreground">이번 학기 성적 항목</p>
-            </CardContent>
-          </Card>
-          <Card className="border-0 shadow-sm">
-            <CardContent className="p-4">
-              <div className="mb-3 inline-flex rounded-lg bg-emerald-50 p-2 text-emerald-600">
-                <Award className="h-4 w-4" />
-              </div>
-              <p className="text-2xl font-bold">{gpa}</p>
-              <p className="text-sm text-muted-foreground">평균 평점</p>
-            </CardContent>
-          </Card>
-          <Card className="border-0 shadow-sm">
-            <CardContent className="p-4">
-              <div className="mb-3 inline-flex rounded-lg bg-violet-50 p-2 text-violet-600">
-                <Briefcase className="h-4 w-4" />
-              </div>
-              <p className="text-2xl font-bold">{specRecords.length}</p>
-              <p className="text-sm text-muted-foreground">스펙 항목</p>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+            <Button render={<Link href="/records/calculator" />} nativeButton={false} className="w-full gap-2">
+              <Calculator className="h-4 w-4" /> 학점계산기
+            </Button>
+          </CardContent>
+        </Card>
 
-        <Tabs defaultValue="grades" className="gap-4">
-          <TabsList className="w-fit">
-            <TabsTrigger value="grades">성적</TabsTrigger>
-            <TabsTrigger value="specs">스펙</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="grades" className="space-y-4">
-            <Card className="border-0 shadow-sm">
-              <CardHeader className="pb-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <CardTitle>학기별 성적</CardTitle>
-                  <Select
-                    value={selectedTerm}
-                    onValueChange={(value) => value && setSelectedTerm(value)}
-                  >
-                    <SelectTrigger className="w-44">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {terms.map((term) => (
-                        <SelectItem key={term} value={term}>
-                          {term}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 md:grid-cols-3">
-                  <div>
-                    <p className="text-sm font-medium">총 학점</p>
-                    <p className="text-xl font-bold">{gradedCredits}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">평점 반영 학점</p>
-                    <p className="text-xl font-bold">{gpaCredits}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">현재 평균</p>
-                    <p className="text-xl font-bold">{gpa}</p>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border p-4">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="font-medium">시간표 과목 연동</p>
-                      <p className="text-sm text-muted-foreground">
-                        현재 입력된 시간표 과목을 {selectedTerm} 성적 항목으로 가져옵니다.
-                      </p>
+        <Card className="flex min-h-0 flex-col border-0 shadow-sm">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">스펙</CardTitle>
+              <Button size="sm" className="gap-1" onClick={() => setDialog({ open: true, editing: null, category: "certificate" })}>
+                <Plus className="h-4 w-4" /> 스펙 추가
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="min-h-0 flex-1 overflow-y-auto">
+            {specs.length === 0 ? (
+              <p className="py-10 text-center text-sm text-muted-foreground">등록한 스펙이 없어요.</p>
+            ) : (
+              <ul className="grid gap-2 sm:grid-cols-2">
+                {specs.map((spec) => (
+                  <li key={spec.id} className="group flex items-start gap-3 rounded-lg border p-3">
+                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold ${CATEGORY_STYLES[spec.category]}`}>
+                      {SPEC_CATEGORY_LABELS[spec.category]}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="break-words text-sm font-medium">{spec.title}</p>
+                      {specDetail(spec) && <p className="mt-0.5 line-clamp-2 break-words text-xs text-muted-foreground">{specDetail(spec)}</p>}
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={addAllCourseGrades}
-                      disabled={unlinkedCourses.length === 0}
-                    >
-                      전체 추가
-                    </Button>
-                  </div>
-                  <div className="grid gap-2 md:grid-cols-2">
-                    {unlinkedCourses.length > 0 ? (
-                      unlinkedCourses.map((course) => (
-                        <div
-                          key={course.id}
-                          className="flex items-center justify-between rounded-md border bg-background p-3"
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate font-medium">{course.name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {COURSE_TYPE_LABELS[course.courseType ?? "major"]} ·{" "}
-                              {course.credits}학점 · {isUnscheduledCourse(course) ? UNSCHEDULED_LABEL : course.days.join(", ")}
-                            </p>
-                          </div>
-                          <Button size="sm" onClick={() => addCourseGrade(course)}>
-                            추가
-                          </Button>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        이 학기에 추가할 새 시간표 과목이 없습니다.
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <form className="rounded-lg border p-4" onSubmit={addCustomGrade}>
-                  <div className="mb-3 flex items-center gap-2">
-                    <Plus className="h-4 w-4 text-primary" />
-                    <p className="font-medium">성적 직접 추가</p>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="space-y-2">
-                      <Label>학기</Label>
-                      <Select
-                        value={selectedTerm}
-                        onValueChange={(value) => value && setSelectedTerm(value)}
+                    <div className="flex shrink-0 opacity-60 transition-opacity group-hover:opacity-100">
+                      <Button size="icon-sm" variant="ghost" aria-label={`${spec.title} 수정`} onClick={() => setDialog({ open: true, editing: spec, category: spec.category })}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={`${spec.title} 삭제`}
+                        onClick={() => window.confirm(`${spec.title}을(를) 삭제할까요?`) && persistSpecs(specs.filter((item) => item.id !== spec.id))}
                       >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {terms.map((term) => (
-                            <SelectItem key={term} value={term}>
-                              {term}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      </Button>
                     </div>
-                    <div className="space-y-2">
-                      <Label>시간표 과목 연결</Label>
-                      <Select
-                        value={newGrade.courseId}
-                        onValueChange={(value) => {
-                          if (!value) return;
-                          const course = courses.find((item) => item.id === value);
-                          setNewGrade((prev) => ({
-                            ...prev,
-                            courseId: value,
-                            courseName: course?.name ?? "",
-                            courseType: course?.courseType ?? prev.courseType,
-                            credits: course ? String(course.credits) : prev.credits,
-                          }));
-                        }}
-                      >
-                        <SelectTrigger className="w-full">
-                          {selectedNewGradeCourse ? (
-                            <span className="truncate text-left">
-                              {selectedNewGradeCourse.name}
-                            </span>
-                          ) : (
-                            <SelectValue />
-                          )}
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="custom">직접 입력</SelectItem>
-                          {courses.map((course) => (
-                            <SelectItem key={course.id} value={course.id}>
-                              {course.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>과목명</Label>
-                      <Input
-                        value={newGrade.courseName}
-                        disabled={newGrade.courseId !== "custom"}
-                        onChange={(event) =>
-                          setNewGrade((prev) => ({
-                            ...prev,
-                            courseName: event.target.value,
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>구분</Label>
-                      <Select
-                        value={newGrade.courseType}
-                        disabled={newGrade.courseId !== "custom"}
-                        onValueChange={(value) => {
-                          if (!value) return;
-                          setNewGrade((prev) => ({
-                            ...prev,
-                            courseType: value as NonNullable<GradeRecord["courseType"]>,
-                          }));
-                        }}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue>
-                            {COURSE_TYPE_LABELS[newGrade.courseType]}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Object.entries(COURSE_TYPE_LABELS).map(([value, label]) => (
-                            <SelectItem key={value} value={value}>
-                              {label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>학점</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={newGrade.credits}
-                        onChange={(event) =>
-                          setNewGrade((prev) => ({
-                            ...prev,
-                            credits: event.target.value,
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>등급</Label>
-                      <Select
-                        value={newGrade.grade}
-                        onValueChange={(value) => {
-                          if (!value) return;
-                          setNewGrade((prev) => ({ ...prev, grade: value }));
-                        }}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {GRADE_OPTIONS.map((grade) => (
-                            <SelectItem key={grade} value={grade}>
-                              {grade}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>점수</Label>
-                      <Input
-                        placeholder="예: 95"
-                        value={newGrade.score}
-                        onChange={(event) =>
-                          setNewGrade((prev) => ({ ...prev, score: event.target.value }))
-                        }
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    <Label>메모</Label>
-                    <Textarea
-                      value={newGrade.memo}
-                      onChange={(event) =>
-                        setNewGrade((prev) => ({ ...prev, memo: event.target.value }))
-                      }
-                    />
-                  </div>
-                  <div className="mt-4 flex items-center justify-between gap-3">
-                    <p className="text-sm text-primary">{gradeMessage}</p>
-                    <Button type="submit">성적 추가</Button>
-                  </div>
-                </form>
-
-                <div className="grid gap-3">
-                  {currentGrades.length > 0 ? (
-                    currentGrades.map((record) => (
-                      <Card key={record.id} className="border shadow-none">
-                        <CardContent className="p-4">
-                          <div className="grid gap-3 lg:grid-cols-[1fr_120px_120px_120px]">
-                            <div>
-                              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="font-semibold">{record.courseName}</p>
-                                  <Badge variant="secondary">
-                                    {COURSE_TYPE_LABELS[record.courseType ?? "major"]}
-                                  </Badge>
-                                  {record.courseId && (
-                                    <Badge variant="secondary">시간표 연동</Badge>
-                                  )}
-                                </div>
-                                <Button
-                                  size="icon-sm"
-                                  variant="ghost"
-                                  onClick={() => removeGrade(record.id)}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                                </Button>
-                              </div>
-                              <div className="mb-2 grid gap-2 sm:grid-cols-[1fr_120px]">
-                                <Input
-                                  value={record.courseName}
-                                  onChange={(event) =>
-                                    updateGrade(record.id, {
-                                      courseName: event.target.value,
-                                    })
-                                  }
-                                />
-                                <Select
-                                  value={record.courseType ?? "major"}
-                                  onValueChange={(value) => {
-                                    if (!value) return;
-                                    updateGrade(record.id, {
-                                      courseType:
-                                        value as NonNullable<GradeRecord["courseType"]>,
-                                    });
-                                  }}
-                                >
-                                  <SelectTrigger className="w-full">
-                                    <SelectValue>
-                                      {COURSE_TYPE_LABELS[record.courseType ?? "major"]}
-                                    </SelectValue>
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {Object.entries(COURSE_TYPE_LABELS).map(
-                                      ([value, label]) => (
-                                        <SelectItem key={value} value={value}>
-                                          {label}
-                                        </SelectItem>
-                                      ),
-                                    )}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <Textarea
-                                value={record.memo}
-                                placeholder="성적 관련 메모"
-                                onChange={(event) =>
-                                  updateGrade(record.id, { memo: event.target.value })
-                                }
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>학점</Label>
-                              <Input
-                                type="number"
-                                min="0"
-                                value={record.credits}
-                                onChange={(event) =>
-                                  updateGrade(record.id, {
-                                    credits: Number(event.target.value) || 0,
-                                  })
-                                }
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>등급</Label>
-                              <Select
-                                value={record.grade}
-                                onValueChange={(value) => {
-                                  if (!value) return;
-                                  updateGrade(record.id, { grade: value });
-                                }}
-                                >
-                                  <SelectTrigger className="w-full">
-                                    <SelectValue>{record.grade}</SelectValue>
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {GRADE_OPTIONS.map((grade) => (
-                                    <SelectItem key={grade} value={grade}>
-                                      {grade}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>점수</Label>
-                              <Input
-                                value={record.score}
-                                onChange={(event) =>
-                                  updateGrade(record.id, { score: event.target.value })
-                                }
-                              />
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))
-                  ) : (
-                    <Card className="border-dashed shadow-none">
-                      <CardContent className="p-6 text-sm text-muted-foreground">
-                        아직 {selectedTerm}에 등록된 성적 항목이 없습니다.
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="specs" className="space-y-4">
-            <Card className="border-0 shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle>스펙 관리</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-lg border p-4">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="font-medium">개인 학습 연동</p>
-                      <p className="text-sm text-muted-foreground">
-                        시간표 하단의 개인 학습을 스펙 항목으로 가져옵니다.
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={addAllStudySpecs}
-                      disabled={unlinkedStudies.length === 0}
-                    >
-                      전체 추가
-                    </Button>
-                  </div>
-                  <div className="grid gap-2 md:grid-cols-2">
-                    {unlinkedStudies.length > 0 ? (
-                      unlinkedStudies.map((study) => (
-                        <div
-                          key={study.id}
-                          className="flex items-center justify-between rounded-md border bg-background p-3"
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate font-medium">{study.title}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {study.category || "분류 없음"}
-                            </p>
-                          </div>
-                          <Button size="sm" onClick={() => addStudySpec(study)}>
-                            추가
-                          </Button>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        스펙으로 추가할 새 개인 학습이 없습니다.
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <form className="rounded-lg border p-4" onSubmit={addCustomSpec}>
-                  <div className="mb-3 flex items-center gap-2">
-                    <Target className="h-4 w-4 text-primary" />
-                    <p className="font-medium">스펙 직접 추가</p>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>개인 학습 연결</Label>
-                      <Select
-                        value={newSpec.personalStudyId}
-                        onValueChange={(value) => {
-                          if (!value) return;
-                          const study = personalStudies.find((item) => item.id === value);
-                          setNewSpec((prev) => ({
-                            ...prev,
-                            personalStudyId: value,
-                            title: study?.title ?? "",
-                            category: study
-                              ? getSpecCategoryFromText(study.category)
-                              : prev.category,
-                            memo: study?.goal ?? prev.memo,
-                          }));
-                        }}
-                      >
-                        <SelectTrigger className="w-full">
-                          {selectedNewSpecStudy ? (
-                            <span className="truncate text-left">
-                              {selectedNewSpecStudy.title}
-                            </span>
-                          ) : (
-                            <SelectValue />
-                          )}
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="custom">직접 입력</SelectItem>
-                          {personalStudies.map((study) => (
-                            <SelectItem key={study.id} value={study.id}>
-                              {study.title}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>스펙 이름</Label>
-                      <Input
-                        value={newSpec.title}
-                        disabled={newSpec.personalStudyId !== "custom"}
-                        onChange={(event) =>
-                          setNewSpec((prev) => ({ ...prev, title: event.target.value }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>분류</Label>
-                      <Select
-                        value={newSpec.category}
-                        onValueChange={(value) => {
-                          if (!value) return;
-                          setNewSpec((prev) => ({
-                            ...prev,
-                            category: value as SpecRecord["category"],
-                          }));
-                        }}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue>{SPEC_CATEGORY_LABELS[newSpec.category]}</SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Object.entries(SPEC_CATEGORY_LABELS).map(([value, label]) => (
-                            <SelectItem key={value} value={value}>
-                              {label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>상태</Label>
-                      <Select
-                        value={newSpec.status}
-                        onValueChange={(value) => {
-                          if (!value) return;
-                          setNewSpec((prev) => ({
-                            ...prev,
-                            status: value as SpecRecord["status"],
-                          }));
-                        }}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue>{STATUS_LABELS[newSpec.status]}</SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                            <SelectItem key={value} value={value}>
-                              {label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>완료일</Label>
-                      <Input
-                        type="date"
-                        value={newSpec.completedAt}
-                        onChange={(event) =>
-                          setNewSpec((prev) => ({
-                            ...prev,
-                            completedAt: event.target.value,
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>수상 여부</Label>
-                      <Select
-                        value={newSpec.awardStatus}
-                        onValueChange={(value) => {
-                          if (!value) return;
-                          setNewSpec((prev) => ({
-                            ...prev,
-                            awardStatus: value as SpecRecord["awardStatus"],
-                            awardRank:
-                              value === "awarded" ? prev.awardRank : "",
-                          }));
-                        }}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue>{AWARD_STATUS_LABELS[newSpec.awardStatus]}</SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Object.entries(AWARD_STATUS_LABELS).map(([value, label]) => (
-                            <SelectItem key={value} value={value}>
-                              {label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {newSpec.awardStatus === "awarded" && (
-                      <div className="space-y-2">
-                        <Label>수상 등수</Label>
-                        <Input
-                          placeholder="예: 대상, 최우수상, 1등"
-                          value={newSpec.awardRank}
-                          onChange={(event) =>
-                            setNewSpec((prev) => ({
-                              ...prev,
-                              awardRank: event.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-                    )}
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    <Label>메모</Label>
-                    <Textarea
-                      value={newSpec.memo}
-                      onChange={(event) =>
-                        setNewSpec((prev) => ({ ...prev, memo: event.target.value }))
-                      }
-                    />
-                  </div>
-                  <div className="mt-4 flex items-center justify-between gap-3">
-                    <p className="text-sm text-primary">{specMessage}</p>
-                    <Button type="submit">스펙 추가</Button>
-                  </div>
-                </form>
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  {specRecords.length > 0 ? (
-                    specRecords.map((record) => (
-                      <Card key={record.id} className="border shadow-none">
-                        <CardContent className="space-y-3 p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="truncate font-semibold">{record.title}</p>
-                              <p className="text-sm text-muted-foreground">
-                                {SPEC_CATEGORY_LABELS[record.category] ?? "기타 경험"}
-                              </p>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-1">
-                              {record.personalStudyId && (
-                                <Badge variant="secondary">개인 학습 연동</Badge>
-                              )}
-                              <Button
-                                size="icon-sm"
-                                variant="ghost"
-                                onClick={() => removeSpec(record.id)}
-                              >
-                                <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                              </Button>
-                            </div>
-                          </div>
-                          <div className="space-y-2">
-                            <Label>스펙 이름</Label>
-                            <Input
-                              value={record.title}
-                              onChange={(event) =>
-                                updateSpec(record.id, { title: event.target.value })
-                              }
-                            />
-                          </div>
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <div className="space-y-2">
-                              <Label>분류</Label>
-                              <Select
-                                value={record.category ?? "experience"}
-                                onValueChange={(value) => {
-                                  if (!value) return;
-                                  updateSpec(record.id, {
-                                    category: value as SpecRecord["category"],
-                                  });
-                                }}
-                              >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue>{SPEC_CATEGORY_LABELS[record.category]}</SelectValue>
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {Object.entries(SPEC_CATEGORY_LABELS).map(
-                                    ([value, label]) => (
-                                      <SelectItem key={value} value={value}>
-                                        {label}
-                                      </SelectItem>
-                                    ),
-                                  )}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>상태</Label>
-                              <Select
-                                value={record.status}
-                                onValueChange={(value) => {
-                                  if (!value) return;
-                                  updateSpec(record.id, {
-                                    status: value as SpecRecord["status"],
-                                  });
-                                }}
-                              >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue>{STATUS_LABELS[record.status]}</SelectValue>
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                                    <SelectItem key={value} value={value}>
-                                      {label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>완료일</Label>
-                              <Input
-                                type="date"
-                                value={record.completedAt}
-                                onChange={(event) =>
-                                  updateSpec(record.id, {
-                                    completedAt: event.target.value,
-                                  })
-                                }
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>수상 여부</Label>
-                              <Select
-                                value={record.awardStatus ?? "not-applicable"}
-                                onValueChange={(value) => {
-                                  if (!value) return;
-                                  updateSpec(record.id, {
-                                    awardStatus: value as SpecRecord["awardStatus"],
-                                    awardRank:
-                                      value === "awarded" ? record.awardRank : "",
-                                  });
-                                }}
-                              >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue>
-                                    {AWARD_STATUS_LABELS[record.awardStatus ?? "not-applicable"]}
-                                  </SelectValue>
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {Object.entries(AWARD_STATUS_LABELS).map(
-                                    ([value, label]) => (
-                                      <SelectItem key={value} value={value}>
-                                        {label}
-                                      </SelectItem>
-                                    ),
-                                  )}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            {(record.awardStatus ?? "not-applicable") === "awarded" && (
-                              <div className="space-y-2">
-                                <Label>수상 등수</Label>
-                                <Input
-                                  placeholder="예: 대상, 1등"
-                                  value={record.awardRank ?? ""}
-                                  onChange={(event) =>
-                                    updateSpec(record.id, {
-                                      awardRank: event.target.value,
-                                    })
-                                  }
-                                />
-                              </div>
-                            )}
-                          </div>
-                          <Textarea
-                            value={record.memo}
-                            placeholder="스펙 관련 메모"
-                            onChange={(event) =>
-                              updateSpec(record.id, { memo: event.target.value })
-                            }
-                          />
-                        </CardContent>
-                      </Card>
-                    ))
-                  ) : (
-                    <Card className="border-dashed shadow-none md:col-span-2">
-                      <CardContent className="p-6 text-sm text-muted-foreground">
-                        아직 등록된 스펙 항목이 없습니다.
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
       </div>
+
+      <SpecDialog
+        open={dialog.open}
+        editing={Boolean(dialog.editing)}
+        initial={dialog.editing ? { ...emptySpecDraft(), ...dialog.editing } : emptySpecDraft(dialog.category)}
+        onOpenChange={(open) => setDialog((prev) => ({ ...prev, open, editing: open ? prev.editing : null }))}
+        onSubmit={saveSpec}
+      />
     </div>
   );
 }

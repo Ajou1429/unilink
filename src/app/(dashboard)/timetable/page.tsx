@@ -118,7 +118,8 @@ const COURSE_TYPE_LABELS = {
 const LEVELS: PaceLevel[] = ["상", "중", "하"];
 const TERM_YEAR_OPTIONS = (() => {
   const year = new Date().getFullYear();
-  return Array.from({ length: 6 }, (_, index) => year - 3 + index);
+  // 최근 연도가 위로: 내년 → 10년 전
+  return Array.from({ length: 12 }, (_, index) => year + 1 - index);
 })();
 const MAX_CREDIT_OPTIONS = Array.from(
   { length: MAX_CREDITS_RANGE.max - MAX_CREDITS_RANGE.min + 1 },
@@ -725,7 +726,7 @@ export default function TimetablePage() {
               <SelectTrigger className="w-44 bg-white" aria-label="시간표 선택">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent alignItemWithTrigger={false} align="start">
                 {termOptions.map((term) => (
                   <SelectItem key={term} value={term}>
                     {term}
@@ -761,7 +762,7 @@ export default function TimetablePage() {
                     <SelectTrigger className="w-full" aria-label="연도">
                       <SelectValue>{`${newTerm.year}년`}</SelectValue>
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent alignItemWithTrigger={false} className="max-h-72">
                       {TERM_YEAR_OPTIONS.map((year) => (
                         <SelectItem key={year} value={String(year)}>
                           {year}년
@@ -778,7 +779,7 @@ export default function TimetablePage() {
                     <SelectTrigger className="w-full" aria-label="학기">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent alignItemWithTrigger={false}>
                       {TERM_SEASONS.map((season) => (
                         <SelectItem key={season} value={season}>
                           {season}
