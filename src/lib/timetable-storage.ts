@@ -19,6 +19,8 @@ export interface MonthlyEvent {
   memo: string;
   color: string;
   createdAt: string;
+  /** 하루 종일 일정: 시간 격자 대신 상단 종일 영역에 표시 */
+  allDay?: boolean;
   kind?: "manual" | "personal-deadline" | "personal-plan-deadline";
   personalStudyId?: string;
 }
@@ -60,6 +62,9 @@ export interface WorkSchedule {
   location: string;
   color: string;
   createdAt: string;
+  memo?: string;
+  /** 하루 종일 반복 일정: 시간 겹침 검사에서 제외하고 상단 종일 영역에 표시 */
+  allDay?: boolean;
 }
 
 function readJson<T>(key: string, fallback: T): T {
@@ -149,3 +154,18 @@ export function getMaxCredits(): number {
 export function saveMaxCredits(value: number) {
   writeJson(MAX_CREDITS_STORAGE_KEY, value);
 }
+
+export const TIMETABLE_TERMS_STORAGE_KEY = "unilink:timetable-terms";
+
+/** 사용자가 직접 만든 시간표(학기) 목록. 과목이 없는 빈 시간표도 유지하기 위해 따로 저장한다. */
+export function getTimetableTerms(): string[] {
+  const value = readJson<unknown>(TIMETABLE_TERMS_STORAGE_KEY, []);
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+export function saveTimetableTerms(terms: string[]) {
+  writeJson(TIMETABLE_TERMS_STORAGE_KEY, [...new Set(terms)]);
+}
+
+export const ALL_DAY_START = "00:00";
+export const ALL_DAY_END = "23:59";

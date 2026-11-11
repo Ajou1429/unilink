@@ -127,7 +127,8 @@ async function collect(userId: string, preferredBucket?: string, changedIds: str
     add("calendar_events", { id: await uid("calendar-events", event.id), user_id: userId,
       goal_id: event.personalStudyId ? goalIds.get(`personal:${event.personalStudyId}`) ?? null : null,
       event_type: "other", title: event.title, starts_at: deadline ? null : start, ends_at: deadline ? null : end, due_at: deadline ? end : null,
-      is_blocking: !deadline, importance: null, status: "scheduled", metadata: legacy(event, "monthly-event", MONTHLY_EVENTS_STORAGE_KEY) });
+      // 하루 종일 일정은 시간 점유(blocking)로 보지 않는다.
+      is_blocking: !deadline && !event.allDay, importance: null, status: "scheduled", metadata: legacy(event, "monthly-event", MONTHLY_EVENTS_STORAGE_KEY) });
   }
 
   for (const work of works) {
@@ -139,7 +140,7 @@ async function collect(userId: string, preferredBucket?: string, changedIds: str
       add("recurring_commitments", { id: await uid("recurring-commitments", `${work.id}:${day}:${slot.startTime}:${slot.endTime}`),
         user_id: userId, title: work.title, commitment_type: "other", day_of_week: day,
         start_time: slot.startTime, end_time: slot.endTime, effective_from: null, effective_to: null,
-        is_blocking: true, metadata: legacy({ work, slot }, "work-schedule", WORK_SCHEDULES_STORAGE_KEY) });
+        is_blocking: !work.allDay, metadata: legacy({ work, slot }, "work-schedule", WORK_SCHEDULES_STORAGE_KEY) });
     }
   }
 

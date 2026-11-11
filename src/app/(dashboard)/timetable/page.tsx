@@ -6,7 +6,17 @@ import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { TimetableGrid } from "@/components/timetable/TimetableGrid";
 import { AjouCoursePicker } from "@/components/timetable/AjouCoursePicker";
+import {
+  ScheduleDialog,
+  buildEvent,
+  buildWork,
+  emptyScheduleForm,
+  formFromEvent,
+  formFromWork,
+  type ScheduleForm,
+} from "@/components/timetable/ScheduleDialog";
 import { ScheduleColorPicker } from "@/components/timetable/ScheduleColorPicker";
+import { TimeField } from "@/components/timetable/TimeField";
 import { AJOU_TERM, UNSCHEDULED_LABEL, courseSchedules, isUnscheduledCourse, sameCatalogSubject, schedulesOverlap } from "@/lib/ajou-catalog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,7 +52,7 @@ import {
   X,
   Target,
   Award,
-  Briefcase,
+  Repeat,
   Pencil,
   Trash2,
 } from "lucide-react";
@@ -79,6 +89,8 @@ import {
   saveMonthlyEvents,
   getWorkSchedules,
   saveWorkSchedules,
+  getTimetableTerms,
+  saveTimetableTerms,
   getMaxCredits,
   saveMaxCredits,
   MAX_CREDITS_RANGE,
@@ -87,8 +99,12 @@ import {
 } from "@/lib/timetable-storage";
 import { getMyNotes, MyNote } from "@/lib/my-notes-storage";
 import {
-  getAcademicTermOptions,
+  formatAcademicTerm,
   getCurrentAcademicTermLabel,
+  parseAcademicTerm,
+  sortAcademicTerms,
+  TERM_SEASONS,
+  type TermSeason,
 } from "@/lib/academic-term";
 
 import { flushP0Changes } from "@/lib/p0-sync";
@@ -100,6 +116,10 @@ const COURSE_TYPE_LABELS = {
   "non-major": "비전공",
 } as const;
 const LEVELS: PaceLevel[] = ["상", "중", "하"];
+const TERM_YEAR_OPTIONS = (() => {
+  const year = new Date().getFullYear();
+  return Array.from({ length: 6 }, (_, index) => year - 3 + index);
+})();
 const MAX_CREDIT_OPTIONS = Array.from(
   { length: MAX_CREDITS_RANGE.max - MAX_CREDITS_RANGE.min + 1 },
   (_, index) => MAX_CREDITS_RANGE.min + index,
@@ -107,92 +127,6 @@ const MAX_CREDIT_OPTIONS = Array.from(
 
 function formatCourseDays(course: Course) {
   return isUnscheduledCourse(course) ? UNSCHEDULED_LABEL : course.days.join("");
-}
-const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
-  const hour = Math.floor(index / 2);
-  const minute = index % 2 === 0 ? "00" : "30";
-  return `${String(hour).padStart(2, "0")}:${minute}`;
-});
-
-function formatTimeOption(time: string) {
-  const [hourText, minute] = time.split(":");
-  const hour = Number(hourText);
-  const period = hour < 12 ? "오전" : "오후";
-  const displayHour = hour % 12 || 12;
-  return `${period} ${displayHour}:${minute} (${time})`;
-}
-
-function formatTimeShort(time: string) {
-  const [hourText, minute] = time.split(":");
-  const hour = Number(hourText);
-  const period = hour < 12 ? "오전" : "오후";
-  const displayHour = hour % 12 || 12;
-  return `${period} ${displayHour}:${minute}`;
-}
-
-function normalizeTimeInput(value: string, fallback: string) {
-  const trimmed = value.trim();
-  const colonParts = trimmed.split(":");
-  let hour = 0;
-  let minute = 0;
-
-  if (colonParts.length === 2) {
-    hour = Number(colonParts[0]);
-    minute = Number(colonParts[1]);
-  } else {
-    const digits = trimmed.replace(/\D/g, "");
-    if (digits.length <= 2) {
-      hour = Number(digits);
-    } else if (digits.length === 3) {
-      hour = Number(digits.slice(0, 1));
-      minute = Number(digits.slice(1));
-    } else if (digits.length >= 4) {
-      hour = Number(digits.slice(0, 2));
-      minute = Number(digits.slice(2, 4));
-    }
-  }
-
-  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour > 23 || minute > 59) {
-    return fallback;
-  }
-
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
-
-function TimeField({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="flex min-w-0">
-      <Input
-        value={value}
-        placeholder="09:00"
-        inputMode="numeric"
-        className="min-w-0 flex-1 rounded-r-none"
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={() => onChange(normalizeTimeInput(value, "09:00"))}
-      />
-      <select
-        aria-label="시간 선택"
-        value={TIME_OPTIONS.includes(value) ? value : ""}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-20 cursor-pointer rounded-r-md border border-l-0 bg-background px-1.5 text-foreground outline-none focus:ring-2 focus:ring-ring"
-      >
-        <option value="" disabled>
-          시간 선택
-        </option>
-        {TIME_OPTIONS.map((time) => (
-          <option key={time} value={time}>
-            {formatTimeShort(time)}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
 }
 const KOREA_2026_HOLIDAYS: Record<string, string[]> = {
   "2026-01-01": ["신정"],
@@ -322,13 +256,13 @@ export default function TimetablePage() {
   const currentTerm = getCurrentAcademicTermLabel();
   const [courses, setCourses] = useState<Course[]>([]);
   const [workSchedules, setWorkSchedules] = useState<WorkSchedule[]>([]);
-  const [termOptions, setTermOptions] = useState<string[]>(() =>
-    getAcademicTermOptions(),
-  );
+  const [termOptions, setTermOptions] = useState<string[]>(() => [currentTerm]);
   const [selectedTerm, setSelectedTerm] = useState(currentTerm);
-  const [courseFilter, setCourseFilter] = useState<"all" | "major" | "non-major">(
-    "all",
-  );
+  const [termDialogOpen, setTermDialogOpen] = useState(false);
+  const [newTerm, setNewTerm] = useState<{ year: number; season: TermSeason }>(() => {
+    const parsed = parseAcademicTerm(currentTerm);
+    return parsed ?? { year: new Date().getFullYear(), season: "1학기" };
+  });
   const [personalStudies, setPersonalStudies] = useState<PersonalStudy[]>([]);
   const [personalStudyPlans, setPersonalStudyPlans] = useState<PersonalStudyPlan[]>([]);
   const [monthlyEvents, setMonthlyEvents] = useState<MonthlyEvent[]>([]);
@@ -350,35 +284,16 @@ export default function TimetablePage() {
   const [actionFeedback, setActionFeedback] = useState("");
   const [ajouCourses, setAjouCourses] = useState<Course[]>([]);
   const [personalOpen, setPersonalOpen] = useState(false);
-  const [eventOpen, setEventOpen] = useState(false);
-  const [editingMonthlyEventId, setEditingMonthlyEventId] = useState<string | null>(null);
+  const [scheduleDialog, setScheduleDialog] = useState<{
+    open: boolean;
+    initial: ScheduleForm;
+    editing: { kind: "event" | "work"; id: string } | null;
+  }>(() => ({ open: false, initial: emptyScheduleForm(), editing: null }));
   const [newPersonalStudy, setNewPersonalStudy] = useState({
     title: "",
     category: "자격증",
     goal: "",
     targetDate: "",
-    color: SCHEDULE_COLORS[0],
-  });
-  const [workDayTimes, setWorkDayTimes] = useState<
-    Partial<Record<DayOfWeek, { startTime: string; endTime: string }>>
-  >({});
-  const [workOpen, setWorkOpen] = useState(false);
-  const [editingWorkScheduleId, setEditingWorkScheduleId] = useState<string | null>(null);
-  const [newWorkSchedule, setNewWorkSchedule] = useState({
-    title: "기타 일정",
-    location: "",
-    days: [] as DayOfWeek[],
-    startTime: "18:00",
-    endTime: "22:00",
-    color: SCHEDULE_COLORS[SCHEDULE_COLORS.length - 1],
-  });
-  const [newEvent, setNewEvent] = useState({
-    title: "",
-    date: formatDateKey(new Date()),
-    startTime: "09:00",
-    endTime: "10:00",
-    location: "",
-    memo: "",
     color: SCHEDULE_COLORS[0],
   });
   const [sessionForm, setSessionForm] = useState({
@@ -395,10 +310,12 @@ export default function TimetablePage() {
     function syncData() {
       const allCourses = getAllStoredCourses();
       setTermOptions(
-        getAcademicTermOptions(
-          new Date(),
-          allCourses.map((course) => course.term).filter(Boolean) as string[],
-        ),
+        sortAcademicTerms([
+          currentTerm,
+          selectedTerm,
+          ...getTimetableTerms(),
+          ...(allCourses.map((course) => course.term).filter(Boolean) as string[]),
+        ]),
       );
       setCourses(getStoredCourses(selectedTerm));
       setAjouCourses(getStoredCourses(AJOU_TERM));
@@ -428,7 +345,7 @@ export default function TimetablePage() {
       window.removeEventListener(PERSONAL_STUDY_PLANS_CHANGED_EVENT, syncData);
       window.removeEventListener(WORK_SCHEDULES_CHANGED_EVENT, syncData);
     };
-  }, [selectedTerm]);
+  }, [selectedTerm, currentTerm]);
 
   useEffect(() => {
     if (!sessionFeedback && !actionFeedback) return;
@@ -440,16 +357,11 @@ export default function TimetablePage() {
     return () => window.clearTimeout(timeout);
   }, [sessionFeedback, actionFeedback]);
 
-  const filteredCourses = courses.filter((course) =>
-    courseFilter === "all" ? true : (course.courseType ?? "major") === courseFilter,
-  );
   const totalCredits = courses.reduce((sum, c) => sum + c.credits, 0);
-  const majorCredits = courses
-    .filter((course) => (course.courseType ?? "major") === "major")
-    .reduce((sum, c) => sum + c.credits, 0);
-  const nonMajorCredits = totalCredits - majorCredits;
   const remainingCredits = maxCredits - totalCredits;
-  const unscheduledCourses = filteredCourses.filter(isUnscheduledCourse);
+  const unscheduledCourses = courses.filter(isUnscheduledCourse);
+  // 하루 종일 일정은 시간 겹침 검사 대상이 아니다.
+  const timedWorkSchedules = workSchedules.filter((work) => !work.allDay);
 
   function changeMaxCredits(value: number) {
     setMaxCredits(value);
@@ -465,7 +377,7 @@ export default function TimetablePage() {
     const owner = getStorageUser();
     // Re-read at commit time: another tab may have edited the timetable while the picker was open.
     const next = [...getStoredCourses(AJOU_TERM)];
-    const currentWork = getWorkSchedules();
+    const currentWork = getWorkSchedules().filter((work) => !work.allDay);
     for (const course of additions) {
       // A failed sync keeps the local record queued. Retry the queue without duplicating it.
       if (next.some(item => item.id === course.id)) continue;
@@ -489,7 +401,7 @@ export default function TimetablePage() {
     }
     setAjouCourses(next);
     changeSelectedTerm(AJOU_TERM);
-    setTermOptions((previous) => [...new Set([...previous, AJOU_TERM])]);
+    setTermOptions((previous) => sortAcademicTerms([...previous, AJOU_TERM]));
     setCourses(next);
     setActionFeedback(owner
       ? `${additions.length}개 과목·학습 목표·수업시간을 DB에 저장했습니다.`
@@ -517,7 +429,14 @@ export default function TimetablePage() {
     setSelectedOccurrence(null);
     setSelectedEvent(null);
     setEditingCourse(null);
-    setCourseFilter("all");
+  }
+
+  function addTimetableTerm() {
+    const term = formatAcademicTerm(newTerm.year, newTerm.season);
+    saveTimetableTerms([...getTimetableTerms(), term]);
+    setTermOptions((previous) => sortAcademicTerms([...previous, term]));
+    changeSelectedTerm(term);
+    setTermDialogOpen(false);
   }
 
   function toggleEditingDay(day: DayOfWeek) {
@@ -533,111 +452,64 @@ export default function TimetablePage() {
     });
   }
 
-  function toggleWorkDay(day: DayOfWeek) {
-    setNewWorkSchedule((prev) => ({
-      ...prev,
-      days: prev.days.includes(day)
-        ? prev.days.filter((item) => item !== day)
-        : [...prev.days, day],
-    }));
-    setWorkDayTimes((prev) => {
-      if (prev[day]) {
-        const next = { ...prev };
-        delete next[day];
-        return next;
+  function openScheduleDialog(
+    overrides: Partial<ScheduleForm> = {},
+    editing: { kind: "event" | "work"; id: string } | null = null,
+    initial?: ScheduleForm,
+  ) {
+    setScheduleDialog({
+      open: true,
+      editing,
+      initial:
+        initial ??
+        emptyScheduleForm({
+          color:
+            SCHEDULE_COLORS[(monthlyEvents.length + workSchedules.length) % SCHEDULE_COLORS.length],
+          ...overrides,
+        }),
+    });
+  }
+
+  function saveSchedule(form: ScheduleForm) {
+    const editing = scheduleDialog.editing;
+    const existingEvent =
+      editing?.kind === "event" ? monthlyEvents.find((item) => item.id === editing.id) : undefined;
+    const existingWork =
+      editing?.kind === "work" ? workSchedules.find((item) => item.id === editing.id) : undefined;
+
+    if (form.repeat) {
+      const work = buildWork(form, existingWork);
+      persistWorkSchedules(
+        existingWork
+          ? workSchedules.map((item) => (item.id === work.id ? work : item))
+          : [...workSchedules, work],
+      );
+      // 날짜 일정을 요일 반복으로 바꾼 경우 기존 날짜 일정은 지운다.
+      if (existingEvent) {
+        persistMonthlyEvents(monthlyEvents.filter((item) => item.id !== existingEvent.id));
+        if (selectedEvent?.id === existingEvent.id) setSelectedEvent(null);
       }
-      return { ...prev, [day]: { startTime: "18:00", endTime: "22:00" } };
-    });
-  }
+    } else {
+      const event = buildEvent(form, existingEvent);
+      persistMonthlyEvents(
+        existingEvent
+          ? monthlyEvents.map((item) => (item.id === event.id ? event : item))
+          : [event, ...monthlyEvents],
+      );
+      if (existingWork) {
+        persistWorkSchedules(workSchedules.filter((item) => item.id !== existingWork.id));
+      }
+      if (selectedEvent && selectedEvent.id === existingEvent?.id) setSelectedEvent(event);
+    }
 
-  function openNewWorkSchedule(preset?: {
-    day: DayOfWeek;
-    startTime: string;
-    endTime: string;
-  }) {
-    const startTime = preset?.startTime ?? "18:00";
-    const endTime = preset?.endTime ?? "22:00";
-
-    setEditingWorkScheduleId(null);
-    setNewWorkSchedule({
-      title: "기타 일정",
-      location: "",
-      days: preset ? [preset.day] : [],
-      startTime,
-      endTime,
-      color: SCHEDULE_COLORS[SCHEDULE_COLORS.length - 1],
-    });
-    setWorkDayTimes(
-      preset
-        ? { [preset.day]: { startTime: preset.startTime, endTime: preset.endTime } }
-        : {},
-    );
-    setWorkOpen(true);
-  }
-
-  function addWorkSchedule() {
-    if (!newWorkSchedule.title.trim() || newWorkSchedule.days.length === 0) return;
-    const schedules = newWorkSchedule.days.map((day) => ({
-      day,
-      startTime: workDayTimes[day]?.startTime ?? newWorkSchedule.startTime,
-      endTime: workDayTimes[day]?.endTime ?? newWorkSchedule.endTime,
-    }));
-    const existingSchedule = editingWorkScheduleId
-      ? workSchedules.find((item) => item.id === editingWorkScheduleId)
-      : undefined;
-    const schedule: WorkSchedule = {
-      id: existingSchedule?.id ?? `work-${Date.now()}`,
-      title: newWorkSchedule.title.trim(),
-      location: newWorkSchedule.location.trim(),
-      days: newWorkSchedule.days,
-      schedules,
-      startTime: newWorkSchedule.startTime,
-      endTime: newWorkSchedule.endTime,
-      color: newWorkSchedule.color,
-      createdAt: existingSchedule?.createdAt ?? new Date().toISOString(),
-    };
-    persistWorkSchedules(
-      existingSchedule
-        ? workSchedules.map((item) => (item.id === schedule.id ? schedule : item))
-        : [...workSchedules, schedule],
-    );
-    setWorkOpen(false);
-    setEditingWorkScheduleId(null);
-    setNewWorkSchedule({
-      title: "기타 일정",
-      location: "",
-      days: [],
-      startTime: "18:00",
-      endTime: "22:00",
-      color: SCHEDULE_COLORS[SCHEDULE_COLORS.length - 1],
-    });
-    setWorkDayTimes({});
+    setScheduleDialog((prev) => ({ ...prev, open: false, editing: null }));
     setActionFeedback(
-      existingSchedule
-        ? `${schedule.title} 기타 일정이 수정되었습니다.`
-        : `${schedule.title} 기타 일정이 등록되었습니다.`,
+      editing ? `${form.title.trim()} 일정이 수정되었습니다.` : `${form.title.trim()} 일정이 등록되었습니다.`,
     );
   }
 
   function startEditingWorkSchedule(schedule: WorkSchedule) {
-    setEditingWorkScheduleId(schedule.id);
-    setNewWorkSchedule({
-      title: schedule.title,
-      location: schedule.location,
-      days: schedule.days,
-      startTime: schedule.startTime,
-      endTime: schedule.endTime,
-      color: schedule.color,
-    });
-    setWorkDayTimes(
-      Object.fromEntries(
-        (schedule.schedules ?? []).map((item) => [
-          item.day,
-          { startTime: item.startTime, endTime: item.endTime },
-        ]),
-      ),
-    );
-    setWorkOpen(true);
+    openScheduleDialog({}, { kind: "work", id: schedule.id }, formFromWork(schedule));
   }
 
   function addPersonalStudy() {
@@ -678,57 +550,8 @@ export default function TimetablePage() {
     setActionFeedback(`${study.title} 개인 학습이 삭제되었습니다.`);
   }
 
-  function addMonthlyEvent() {
-    if (!newEvent.title.trim()) return;
-
-    const existingEvent = editingMonthlyEventId
-      ? monthlyEvents.find((item) => item.id === editingMonthlyEventId)
-      : undefined;
-    const event: MonthlyEvent = {
-      id: existingEvent?.id ?? Date.now().toString(),
-      title: newEvent.title.trim(),
-      date: newEvent.date,
-      startTime: newEvent.startTime,
-      endTime: newEvent.endTime,
-      location: newEvent.location.trim(),
-      memo: newEvent.memo.trim(),
-      color: newEvent.color,
-      createdAt: existingEvent?.createdAt ?? new Date().toISOString(),
-    };
-
-    persistMonthlyEvents(
-      existingEvent
-        ? monthlyEvents.map((item) => (item.id === event.id ? event : item))
-        : [event, ...monthlyEvents],
-    );
-    setEventOpen(false);
-    setEditingMonthlyEventId(null);
-    setNewEvent({
-      title: "",
-      date: newEvent.date,
-      startTime: "09:00",
-      endTime: "10:00",
-      location: "",
-      memo: "",
-      color: SCHEDULE_COLORS[monthlyEvents.length % SCHEDULE_COLORS.length],
-    });
-    setActionFeedback(
-      existingEvent ? `${event.title} 일정이 수정되었습니다.` : `${event.title} 일정이 등록되었습니다.`,
-    );
-  }
-
   function startEditingMonthlyEvent(event: MonthlyEvent) {
-    setEditingMonthlyEventId(event.id);
-    setNewEvent({
-      title: event.title,
-      date: event.date,
-      startTime: event.startTime,
-      endTime: event.endTime,
-      location: event.location,
-      memo: event.memo,
-      color: event.color,
-    });
-    setEventOpen(true);
+    openScheduleDialog({}, { kind: "event", id: event.id }, formFromEvent(event));
   }
 
   function selectOccurrence(occurrence: CourseOccurrence) {
@@ -879,8 +702,7 @@ export default function TimetablePage() {
   const calendarEvents = [...monthlyEvents, ...personalStudyDeadlineEvents];
 
   function openNewEventForDate(dateKey: string) {
-    setNewEvent((prev) => ({ ...prev, date: dateKey }));
-    setEventOpen(true);
+    openScheduleDialog({ date: dateKey });
   }
 
   function openMonthlyEvent(event: MonthlyEvent) {
@@ -895,307 +717,106 @@ export default function TimetablePage() {
       <Header title="시간표" />
       <div className="flex-1 p-6 max-w-[1600px] mx-auto w-full">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-          <div className="space-y-2">
-            <p className="text-muted-foreground text-sm">
-              {selectedTerm} · 총 {totalCredits}학점 · 전공 {majorCredits}학점 · 비전공{" "}
-              {nonMajorCredits}학점
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <Select
-                value={selectedTerm}
-                onValueChange={(value) => value && changeSelectedTerm(value)}
-              >
-                <SelectTrigger className="w-44 bg-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {termOptions.map((term) => (
-                    <SelectItem key={term} value={term}>
-                      {term}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select
-                value={courseFilter}
-                onValueChange={(value) =>
-                  value &&
-                  setCourseFilter(value as "all" | "major" | "non-major")
+          <div className="flex items-center gap-2">
+            <Select
+              value={selectedTerm}
+              onValueChange={(value) => value && changeSelectedTerm(value)}
+            >
+              <SelectTrigger className="w-44 bg-white" aria-label="시간표 선택">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {termOptions.map((term) => (
+                  <SelectItem key={term} value={term}>
+                    {term}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Dialog open={termDialogOpen} onOpenChange={setTermDialogOpen}>
+              <DialogTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="bg-white"
+                    aria-label="시간표 추가"
+                    title="시간표 추가"
+                  />
                 }
               >
-                <SelectTrigger className="w-36 bg-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">전체 과목</SelectItem>
-                  <SelectItem value="major">전공</SelectItem>
-                  <SelectItem value="non-major">비전공</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+                <Plus className="h-4 w-4" />
+              </DialogTrigger>
+              <DialogContent className="max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>시간표 추가</DialogTitle>
+                </DialogHeader>
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <Select
+                    value={String(newTerm.year)}
+                    onValueChange={(value) =>
+                      value && setNewTerm((prev) => ({ ...prev, year: Number(value) }))
+                    }
+                  >
+                    <SelectTrigger className="w-full" aria-label="연도">
+                      <SelectValue>{`${newTerm.year}년`}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TERM_YEAR_OPTIONS.map((year) => (
+                        <SelectItem key={year} value={String(year)}>
+                          {year}년
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={newTerm.season}
+                    onValueChange={(value) =>
+                      value && setNewTerm((prev) => ({ ...prev, season: value as TermSeason }))
+                    }
+                  >
+                    <SelectTrigger className="w-full" aria-label="학기">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TERM_SEASONS.map((season) => (
+                        <SelectItem key={season} value={season}>
+                          {season}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button className="w-full" onClick={addTimetableTerm}>
+                  {termOptions.includes(formatAcademicTerm(newTerm.year, newTerm.season))
+                    ? "이 시간표로 이동"
+                    : "추가"}
+                </Button>
+              </DialogContent>
+            </Dialog>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Dialog
-              open={eventOpen}
-              onOpenChange={(open) => {
-                setEventOpen(open);
-                if (!open) setEditingMonthlyEventId(null);
-              }}
-            >
-              <DialogTrigger render={<Button variant="outline" className="gap-2" />}>
-                <CalendarDays className="h-4 w-4" /> 월간 일정 추가
-              </DialogTrigger>
-              <DialogContent className="max-w-md">
-                <DialogHeader>
-                  <DialogTitle>
-                    {editingMonthlyEventId ? "월간 일정 수정" : "월간 일정 추가"}
-                  </DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4 pt-2">
-                  <div className="space-y-2">
-                    <Label>일정명</Label>
-                    <Input
-                      placeholder="예: 알고리즘 과제 마감"
-                      value={newEvent.title}
-                      onChange={(event) =>
-                        setNewEvent((prev) => ({ ...prev, title: event.target.value }))
-                      }
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <Label>날짜</Label>
-                      <Input
-                        type="date"
-                        value={newEvent.date}
-                        onChange={(event) =>
-                          setNewEvent((prev) => ({ ...prev, date: event.target.value }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>장소</Label>
-                      <Input
-                        placeholder="예: 도서관"
-                        value={newEvent.location}
-                        onChange={(event) =>
-                          setNewEvent((prev) => ({
-                            ...prev,
-                            location: event.target.value,
-                          }))
-                        }
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <Label>시작 시간</Label>
-                      <TimeField
-                        value={newEvent.startTime}
-                        onChange={(value) =>
-                          setNewEvent((prev) => ({ ...prev, startTime: value }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>종료 시간</Label>
-                      <TimeField
-                        value={newEvent.endTime}
-                        onChange={(value) =>
-                          setNewEvent((prev) => ({ ...prev, endTime: value }))
-                        }
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>메모</Label>
-                    <Textarea
-                      rows={3}
-                      placeholder="세부 내용을 적어주세요"
-                      value={newEvent.memo}
-                      onChange={(event) =>
-                        setNewEvent((prev) => ({ ...prev, memo: event.target.value }))
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>색상</Label>
-                    <ScheduleColorPicker
-                      value={newEvent.color}
-                      labelPrefix="월간 일정"
-                      onChange={(color) => setNewEvent((prev) => ({ ...prev, color }))}
-                    />
-                  </div>
-                  <Button onClick={addMonthlyEvent} className="w-full">
-                    {editingMonthlyEventId ? "일정 수정" : "일정 추가"}
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-
-            <Dialog
-              open={workOpen}
-              onOpenChange={(open) => {
-                setWorkOpen(open);
-                if (!open) setEditingWorkScheduleId(null);
-              }}
-            >
-              <Button
-                variant="outline"
-                className="gap-2"
-                onClick={() => openNewWorkSchedule()}
-              >
-                <Briefcase className="h-4 w-4" /> 기타 일정 추가
-              </Button>
-              <DialogContent className="max-w-md">
-                <DialogHeader>
-                  <DialogTitle>
-                    {editingWorkScheduleId ? "기타 일정 수정" : "주간 기타 일정 추가"}
-                  </DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4 pt-2">
-                  <div className="space-y-2">
-                    <Label>일정 이름</Label>
-                    <Input
-                      value={newWorkSchedule.title}
-                      onChange={(event) =>
-                        setNewWorkSchedule((prev) => ({ ...prev, title: event.target.value }))
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>요일</Label>
-                    <div className="flex gap-2">
-                      {DAYS.map((day) => (
-                        <button
-                          key={day}
-                          type="button"
-                          onClick={() => toggleWorkDay(day)}
-                          className={`h-9 w-9 rounded-full text-sm font-medium ${
-                            newWorkSchedule.days.includes(day)
-                              ? "bg-slate-700 text-white"
-                              : "bg-muted text-muted-foreground"
-                          }`}
-                        >
-                          {day}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>요일별 시간</Label>
-                    {newWorkSchedule.days.length > 0 ? (
-                      <div className="space-y-2">
-                        {newWorkSchedule.days.map((day) => {
-                          const dayTime = workDayTimes[day] ?? {
-                            startTime: newWorkSchedule.startTime,
-                            endTime: newWorkSchedule.endTime,
-                          };
-                          return (
-                            <div key={day} className="grid grid-cols-[48px_1fr_1fr] items-center gap-2">
-                              <span className="text-sm font-medium">{day}</span>
-                              <Select
-                                value={dayTime.startTime}
-                                onValueChange={(value) =>
-                                  value &&
-                                  setWorkDayTimes((prev) => ({
-                                    ...prev,
-                                    [day]: { ...dayTime, startTime: value },
-                                  }))
-                                }
-                              >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {TIME_OPTIONS.map((time) => (
-                                    <SelectItem key={time} value={time}>
-                                      {formatTimeOption(time)}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <Select
-                                value={dayTime.endTime}
-                                onValueChange={(value) =>
-                                  value &&
-                                  setWorkDayTimes((prev) => ({
-                                    ...prev,
-                                    [day]: { ...dayTime, endTime: value },
-                                  }))
-                                }
-                              >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {TIME_OPTIONS.map((time) => (
-                                    <SelectItem key={time} value={time}>
-                                      {formatTimeOption(time)}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">요일을 먼저 선택해주세요.</p>
-                    )}
-                  </div>
-                  <div className="hidden grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <Label>시작 시간</Label>
-                      <Input
-                        type="time"
-                        value={newWorkSchedule.startTime}
-                        onChange={(event) =>
-                          setNewWorkSchedule((prev) => ({ ...prev, startTime: event.target.value }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>종료 시간</Label>
-                      <Input
-                        type="time"
-                        value={newWorkSchedule.endTime}
-                        onChange={(event) =>
-                          setNewWorkSchedule((prev) => ({ ...prev, endTime: event.target.value }))
-                        }
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>장소</Label>
-                    <Input
-                      value={newWorkSchedule.location}
-                      onChange={(event) =>
-                        setNewWorkSchedule((prev) => ({ ...prev, location: event.target.value }))
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>색상</Label>
-                    <ScheduleColorPicker
-                      value={newWorkSchedule.color}
-                      labelPrefix="기타 일정"
-                      onChange={(color) =>
-                        setNewWorkSchedule((prev) => ({ ...prev, color }))
-                      }
-                    />
-                  </div>
-                  <Button onClick={addWorkSchedule} className="w-full">
-                    {editingWorkScheduleId ? "기타 일정 수정" : "기타 일정 저장"}
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
+            <Button variant="outline" className="gap-2" onClick={() => openScheduleDialog()}>
+              <CalendarDays className="h-4 w-4" /> 일정 추가
+            </Button>
+            <ScheduleDialog
+              open={scheduleDialog.open}
+              initial={scheduleDialog.initial}
+              editing={Boolean(scheduleDialog.editing)}
+              onOpenChange={(open) =>
+                setScheduleDialog((prev) => ({
+                  ...prev,
+                  open,
+                  editing: open ? prev.editing : null,
+                }))
+              }
+              onSubmit={saveSchedule}
+            />
 
             <AjouCoursePicker
               selectedTerm={selectedTerm}
               existingCourses={selectedTerm === AJOU_TERM ? courses : ajouCourses}
-              workSchedules={workSchedules}
+              workSchedules={timedWorkSchedules}
               onApply={addCatalogCourses}
             />
           </div>
@@ -1272,18 +893,26 @@ export default function TimetablePage() {
                 <Card className="border-0 shadow-sm">
                   <CardContent className="p-4">
                     <p className="mb-3 text-xs text-muted-foreground">
-                      빈 시간대를 누르면 해당 요일과 시간으로 기타 일정을 추가할 수 있습니다.
+                      빈 시간대를 누르면 해당 요일과 시간으로 일정을 추가할 수 있습니다.
                     </p>
                     <TimetableGrid
-                      courses={filteredCourses}
+                      courses={courses}
                       workSchedules={workSchedules}
                       monthlyEvents={calendarEvents}
                       courseSessions={courseSessions}
                       weekStart={weekStart}
                       onCourseClick={selectOccurrence}
                       onEventClick={openMonthlyEvent}
-                      onTimeSlotClick={({ day, startTime, endTime }) =>
-                        openNewWorkSchedule({ day, startTime, endTime })
+                      onWorkClick={startEditingWorkSchedule}
+                      onTimeSlotClick={({ day, date, startTime, endTime }) =>
+                        openScheduleDialog({
+                          repeat: true,
+                          days: [day],
+                          date,
+                          startTime,
+                          endTime,
+                          dayTimes: { [day]: { startTime, endTime } },
+                        })
                       }
                     />
                     {unscheduledCourses.length > 0 && (
@@ -1309,9 +938,6 @@ export default function TimetablePage() {
                             />
                             <span className="min-w-0 flex-1 truncate text-sm font-semibold">
                               {course.name}
-                            </span>
-                            <span className="shrink-0 text-xs text-muted-foreground">
-                              {UNSCHEDULED_LABEL} · {course.credits}학점
                             </span>
                           </button>
                         ))}
@@ -1344,7 +970,11 @@ export default function TimetablePage() {
                         const holidays = KOREA_2026_HOLIDAYS[dateKey] ?? [];
                         const dayEvents = calendarEvents
                           .filter((event) => event.date === dateKey)
-                          .sort((a, b) => a.startTime.localeCompare(b.startTime));
+                          .sort(
+                            (a, b) =>
+                              Number(Boolean(b.allDay)) - Number(Boolean(a.allDay)) ||
+                              a.startTime.localeCompare(b.startTime),
+                          );
                         const isSundayOrHoliday = dayOfWeek === 0 || holidays.length > 0;
                         const isSaturday = dayOfWeek === 6;
 
@@ -1404,9 +1034,9 @@ export default function TimetablePage() {
                                   }}
                                   className="block w-full truncate rounded px-1.5 py-1 text-left text-[11px] font-medium text-white shadow-sm"
                                   style={{ backgroundColor: event.color }}
-                                  title={`${event.startTime} ${event.title}`}
+                                  title={event.allDay ? event.title : `${event.startTime} ${event.title}`}
                                 >
-                                  {event.startTime} {event.title}
+                                  {event.allDay ? event.title : `${event.startTime} ${event.title}`}
                                 </button>
                               ))}
                               {dayEvents.length > 3 && (
@@ -1433,7 +1063,7 @@ export default function TimetablePage() {
               <Card className="border-0 shadow-sm">
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-sm">
-                    <Briefcase className="h-4 w-4" /> 기타 일정
+                    <Repeat className="h-4 w-4" /> 반복 일정
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
@@ -1442,7 +1072,9 @@ export default function TimetablePage() {
                       <div className="min-w-0">
                         <p className="truncate font-medium">{schedule.title}</p>
                         <p className="text-xs text-muted-foreground">
-                          {schedule.schedules?.length
+                          {schedule.allDay
+                            ? `${schedule.days.join(", ")} · 하루 종일`
+                            : schedule.schedules?.length
                             ? schedule.schedules
                                 .map((item) => `${item.day} ${item.startTime}-${item.endTime}`)
                                 .join(" · ")
@@ -1453,8 +1085,8 @@ export default function TimetablePage() {
                         <Button
                           size="icon-sm"
                           variant="ghost"
-                          title="기타 일정 수정"
-                          aria-label="기타 일정 수정"
+                          title="일정 수정"
+                          aria-label="일정 수정"
                           onClick={() => startEditingWorkSchedule(schedule)}
                         >
                           <Pencil className="h-3.5 w-3.5" />
@@ -1462,11 +1094,11 @@ export default function TimetablePage() {
                         <Button
                           size="icon-sm"
                           variant="ghost"
-                          title="기타 일정 삭제"
-                          aria-label="기타 일정 삭제"
+                          title="일정 삭제"
+                          aria-label="일정 삭제"
                           onClick={() => {
                             persistWorkSchedules(workSchedules.filter((item) => item.id !== schedule.id));
-                            setActionFeedback(`${schedule.title} 기타 일정이 삭제되었습니다.`);
+                            setActionFeedback(`${schedule.title} 일정이 삭제되었습니다.`);
                           }}
                         >
                           <Trash2 className="h-3.5 w-3.5 text-destructive" />
@@ -1912,7 +1544,9 @@ export default function TimetablePage() {
                     <div className="flex items-center gap-2">
                       <Clock className="h-3.5 w-3.5" />
                       <span>
-                        {selectedEvent.startTime} - {selectedEvent.endTime}
+                        {selectedEvent.allDay
+                          ? "하루 종일"
+                          : `${selectedEvent.startTime} - ${selectedEvent.endTime}`}
                       </span>
                     </div>
                     {selectedEvent.location && (
@@ -1971,8 +1605,8 @@ export default function TimetablePage() {
                   <CardTitle className="text-sm">수강 목록</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {filteredCourses.length > 0 ? (
-                    filteredCourses.map((course) => (
+                  {courses.length > 0 ? (
+                    courses.map((course) => (
                       <button
                         key={course.id}
                         onClick={() => {

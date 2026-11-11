@@ -95,6 +95,7 @@ interface TimetableGridProps {
   weekStart: Date;
   onCourseClick?: (occurrence: CourseOccurrence) => void;
   onEventClick?: (event: MonthlyEvent) => void;
+  onWorkClick?: (schedule: WorkSchedule) => void;
   onTimeSlotClick?: (slot: {
     day: DayOfWeek;
     date: string;
@@ -111,8 +112,14 @@ export function TimetableGrid({
   weekStart,
   onCourseClick,
   onEventClick,
+  onWorkClick,
   onTimeSlotClick,
 }: TimetableGridProps) {
+  // 하루 종일 일정은 시간 격자 위에 겹치지 않도록 상단 종일 영역에 따로 표시한다.
+  const allDayWorks = workSchedules.filter((schedule) => schedule.allDay);
+  const timedWorks = workSchedules.filter((schedule) => !schedule.allDay);
+  const allDayEvents = monthlyEvents.filter((event) => event.allDay);
+  const timedEvents = monthlyEvents.filter((event) => !event.allDay);
   const weekDates = WEEK_DAYS.map((day, index) => ({
     label: day,
     date: addDays(weekStart, index),
@@ -121,8 +128,8 @@ export function TimetableGrid({
   const weekDateKeys = new Set(weekDates.map(({ dateKey }) => dateKey));
   const timeRanges = [
     ...courses.flatMap((course) => getCourseSchedules(course)),
-    ...workSchedules.flatMap((schedule) => getWorkSchedules(schedule)),
-    ...monthlyEvents
+    ...timedWorks.flatMap((schedule) => getWorkSchedules(schedule)),
+    ...timedEvents
       .filter((event) => weekDateKeys.has(event.date))
       .map((event) => ({ startTime: event.startTime, endTime: event.endTime })),
   ];
@@ -138,6 +145,15 @@ export function TimetableGrid({
   const endHour = Math.max(DEFAULT_END_HOUR, Math.ceil(latestMinutes / 60));
   const totalMinutes = (endHour - startHour) * 60;
   const totalHeight = totalMinutes * (HOUR_HEIGHT / 60);
+  const allDayByDate = weekDates.map(({ label, dateKey }) => [
+    ...allDayWorks
+      .filter((schedule) => schedule.days.includes(label))
+      .map((schedule) => ({ key: `work-${schedule.id}`, title: schedule.title, color: schedule.color, onClick: () => onWorkClick?.(schedule) })),
+    ...allDayEvents
+      .filter((event) => event.date === dateKey)
+      .map((event) => ({ key: `event-${event.id}`, title: event.title, color: event.color, onClick: () => onEventClick?.(event) })),
+  ]);
+  const hasAllDay = allDayByDate.some((items) => items.length > 0);
 
   return (
     <div className="max-h-[calc(100vh-260px)] min-h-[520px] w-full overflow-x-hidden overflow-y-auto">
@@ -153,6 +169,28 @@ export function TimetableGrid({
             </div>
           ))}
         </div>
+
+        {hasAllDay && (
+          <div className="mb-3 flex border-y">
+            <div className="w-14 shrink-0 py-1.5 pr-2 text-right text-[11px] text-muted-foreground">종일</div>
+            {allDayByDate.map((items, index) => (
+              <div key={weekDates[index].dateKey} className="min-w-0 flex-1 space-y-1 border-l bg-white p-1">
+                {items.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={item.onClick}
+                    title={item.title}
+                    className="block w-full truncate rounded px-1.5 py-0.5 text-left text-[11px] font-semibold text-white transition-opacity hover:opacity-90"
+                    style={{ backgroundColor: item.color }}
+                  >
+                    {item.title}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="flex">
           <div className="w-14 shrink-0 relative" style={{ height: totalHeight }}>
@@ -173,12 +211,12 @@ export function TimetableGrid({
                 .filter((schedule) => schedule.day === label)
                 .map((schedule) => ({ course, schedule })),
             );
-            const dayWorkSchedules = workSchedules.flatMap((schedule) =>
+            const dayWorkSchedules = timedWorks.flatMap((schedule) =>
               getWorkSchedules(schedule)
                 .filter((workSchedule) => workSchedule.day === label)
                 .map((workSchedule) => ({ schedule, workSchedule })),
             );
-            const dayEvents = monthlyEvents.filter((event) => event.date === dateKey);
+            const dayEvents = timedEvents.filter((event) => event.date === dateKey);
 
             return (
               <div
@@ -210,7 +248,7 @@ export function TimetableGrid({
                     <button
                       key={`slot-${index}`}
                       type="button"
-                      aria-label={`${label}요일 ${startTime} 기타 일정 추가`}
+                      aria-label={`${label}요일 ${startTime} 일정 추가`}
                       className="absolute inset-x-0 cursor-pointer transition-colors hover:bg-blue-50/70 focus-visible:z-20 focus-visible:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-500"
                       style={{ top: index * (HOUR_HEIGHT / 2), height: HOUR_HEIGHT / 2 }}
                       onClick={() =>
@@ -287,17 +325,19 @@ export function TimetableGrid({
                   const height = (durationMin / 60) * HOUR_HEIGHT;
 
                   return (
-                    <div
+                    <button
                       key={`${dateKey}-${schedule.id}`}
-                      className="absolute inset-x-1 rounded-md border border-dashed border-white/80 px-2 py-1.5 text-left overflow-hidden"
+                      type="button"
+                      onClick={() => onWorkClick?.(schedule)}
+                      className="absolute inset-x-1 rounded-md border border-dashed border-white/80 px-2 py-1.5 text-left overflow-hidden transition-opacity hover:opacity-90 cursor-pointer"
                       style={{ top, height, backgroundColor: schedule.color }}
                     >
                       <p className="text-white text-xs font-semibold leading-tight truncate">
                         {schedule.title}
                       </p>
-                      {height > 42 && (
+                      {height > 42 && schedule.location && (
                         <p className="text-white/80 text-[10px] leading-tight truncate mt-0.5">
-                          기타 일정{schedule.location ? ` · ${schedule.location}` : ""}
+                          {schedule.location}
                         </p>
                       )}
                       {height > 60 && (
@@ -305,7 +345,7 @@ export function TimetableGrid({
                           {workSchedule.startTime} - {workSchedule.endTime}
                         </p>
                       )}
-                    </div>
+                    </button>
                   );
                 })}
 
@@ -330,9 +370,9 @@ export function TimetableGrid({
                       <p className="text-white text-xs font-semibold leading-tight truncate">
                         {event.title}
                       </p>
-                      {height > 42 && (
+                      {height > 42 && event.location && (
                         <p className="text-white/80 text-[10px] leading-tight truncate mt-0.5">
-                          {event.location || "월간 일정"}
+                          {event.location}
                         </p>
                       )}
                       {height > 64 && (
