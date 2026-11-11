@@ -94,7 +94,7 @@ test("end to end: real PDF text, multi-page and two-column", async () => {
   assert.deepEqual(labels, ["2.27(a)", "2.27(b)", "2.28", "2.29", "2.30", "2.31", "2.32"]);
 });
 
-test("migration 0028 keeps existing rows and makes labels unique per file", async () => {
+test("migration 0033 keeps existing rows and makes labels unique per file", async () => {
   const db = new PGlite();
   const A = "11111111-1111-4111-8111-111111111111";
   const S = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -115,7 +115,7 @@ test("migration 0028 keeps existing rows and makes labels unique per file", asyn
     const directory = new URL("../supabase/migrations/", import.meta.url);
     const files = readdirSync(directory).filter((f) => !f.startsWith("0002")).sort();
     const apply = (file) => db.exec(readFileSync(new URL(file, directory), "utf8").replace('create extension if not exists "pgcrypto";', ""));
-    for (const file of files.filter((f) => f < "0028")) await apply(file);
+    for (const file of files.filter((f) => f < "0033")) await apply(file);
 
     // rows saved before files were tracked
     await db.exec(`insert into auth.users values ('${A}');
@@ -123,7 +123,7 @@ test("migration 0028 keeps existing rows and makes labels unique per file", asyn
       insert into problem_bank_problems(subject_id,user_id,label,level,source_file) values
         ('${S}','${A}','1',3,'hw1.pdf'), ('${S}','${A}','2',5,null);`);
 
-    for (const file of files.filter((f) => f >= "0028")) await apply(file);
+    for (const file of files.filter((f) => f >= "0033")) await apply(file);
 
     const { rows } = await db.query("select label, level, source_file from problem_bank_problems order by label");
     assert.deepEqual(rows, [

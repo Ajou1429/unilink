@@ -4,8 +4,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { useCurrentTime } from "@/lib/use-current-time";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, Search } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -64,15 +63,6 @@ export function Header({ title }: HeaderProps) {
     <header className="h-16 border-b bg-white flex items-center gap-3 px-4 sm:gap-4 sm:px-6">
       <Suspense fallback={<span className="size-9 shrink-0" />}><Sidebar /></Suspense>
       <h1 className="text-lg font-semibold">{title}</h1>
-      <div className="flex-1 max-w-sm ml-4 hidden md:block">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="수업, 게시글 검색..."
-            className="pl-9 h-9 bg-muted border-0"
-          />
-        </div>
-      </div>
       <div className="flex-1" />
       <DropdownMenu>
         <DropdownMenuTrigger

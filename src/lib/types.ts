@@ -56,6 +56,8 @@ export interface StudyPlan {
   dueDate: string;
   isCompleted: boolean;
   createdAt: string;
+  /** 다음날로 미룬 횟수 */
+  postponedCount?: number;
 }
 
 export interface LectureNote {
