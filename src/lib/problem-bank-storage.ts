@@ -1,15 +1,43 @@
 import { privateStorage } from "./private-storage.ts";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { MAX_LABEL_LENGTH, MAX_LABELS } from "./problem-bank-labels.ts";
+import { flushP0Changes } from "./p0-sync";
 
 export const PROBLEM_BANK_SUBJECTS_KEY = "unilink:problem-bank-subjects";
 export const PROBLEM_BANK_PROBLEMS_KEY = "unilink:problem-bank-problems";
+/** 사용자가 지운 자동 연동 과목. 다시 자동으로 만들지 않는다. */
+export const PROBLEM_BANK_DISMISSED_COURSES_KEY = "unilink:problem-bank-dismissed-courses";
 
 export interface ProblemBankSubject {
   id: string;
   name: string;
   count: number;
   createdAt: string;
+  /** 연동된 시간표 과목 id (자동 연동 과목만) */
+  courseId?: string;
+}
+
+export { EXAM_PERIODS, joinSourceFile, splitSourceFile, type ExamPeriod } from "./problem-bank-labels.ts";
+
+export interface SyncCourse {
+  id: string;
+  name: string;
+}
+
+function getDismissedCourses(): Set<string> {
+  try {
+    const raw = privateStorage.getItem(PROBLEM_BANK_DISMISSED_COURSES_KEY);
+    const value = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(value) ? value.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function dismissCourse(courseId: string) {
+  const next = getDismissedCourses();
+  next.add(courseId);
+  privateStorage.setItem(PROBLEM_BANK_DISMISSED_COURSES_KEY, JSON.stringify([...next]));
 }
 
 export interface ProblemBankProblem {
@@ -58,6 +86,7 @@ interface LocalSubject {
   id: string;
   name: string;
   createdAt: string;
+  courseId?: string;
 }
 
 function readJson<T>(key: string, fallback: T): T {
@@ -95,8 +124,28 @@ async function listLocalSubjects(): Promise<ProblemBankSubject[]> {
     id: s.id,
     name: s.name,
     createdAt: s.createdAt,
+    courseId: s.courseId,
     count: problems.filter((p) => p.subjectId === s.id).length,
   }));
+}
+
+async function syncLocalSubjects(courses: SyncCourse[]) {
+  const subjects = getLocalSubjects();
+  const dismissed = getDismissedCourses();
+  let changed = false;
+  for (const course of courses) {
+    if (dismissed.has(course.id) || subjects.some((s) => s.courseId === course.id)) continue;
+    const sameName = subjects.find((s) => !s.courseId && s.name.trim() === course.name.trim());
+    if (sameName) sameName.courseId = course.id;
+    else subjects.push({ id: `subject-${Date.now()}-${subjects.length}`, name: course.name, createdAt: new Date().toISOString(), courseId: course.id });
+    changed = true;
+  }
+  if (changed) writeJson(PROBLEM_BANK_SUBJECTS_KEY, subjects);
+}
+
+async function deleteLocalSubject(id: string) {
+  writeJson(PROBLEM_BANK_SUBJECTS_KEY, getLocalSubjects().filter((s) => s.id !== id));
+  writeJson(PROBLEM_BANK_PROBLEMS_KEY, getLocalProblems().filter((p) => p.subjectId !== id));
 }
 
 async function createLocalSubject(name: string): Promise<ProblemBankSubject> {
@@ -220,12 +269,97 @@ async function listSupabaseSubjects(): Promise<ProblemBankSubject[]> {
     counts.set(p.subject_id, (counts.get(p.subject_id) ?? 0) + 1);
   });
 
+  const courseBySubject = await loadSubjectCourses().catch(() => new Map<string, string>());
   return (subjects as SubjectRow[]).map((s) => ({
     id: s.id,
     name: s.name,
     createdAt: s.created_at,
+    courseId: courseBySubject.get(s.id),
     count: counts.get(s.id) ?? 0,
   }));
+}
+
+const missingTable = (code?: string) => code === "42P01" || code === "PGRST205";
+
+/** 과목 학습 목표(learning_goals)를 시간표 과목 id 기준으로 찾는다. */
+async function loadCourseGoals() {
+  const supabase = getSupabaseClient()!;
+  const { data, error } = await supabase.from("learning_goals").select("id,course_id,metadata")
+    .eq("goal_type", "course").eq("status", "active");
+  if (error) throw new Error(error.message);
+  const goalToCourse = new Map<string, string>();
+  for (const row of (data ?? []) as { id: string; course_id: string | null; metadata: { legacy_record?: { courseId?: string } } | null }[]) {
+    const courseId = row.metadata?.legacy_record?.courseId ?? row.course_id;
+    if (courseId) goalToCourse.set(row.id, courseId);
+  }
+  return goalToCourse;
+}
+
+/** 문제은행 과목 → 시간표 과목 (코칭 연결 problem_bank_coaching_links 기준) */
+async function loadSubjectCourses() {
+  const supabase = getSupabaseClient()!;
+  const links = await supabase.from("problem_bank_coaching_links").select("subject_id,goal_id");
+  if (links.error) {
+    if (missingTable(links.error.code)) return new Map<string, string>();
+    throw new Error(links.error.message);
+  }
+  const goalToCourse = await loadCourseGoals();
+  const result = new Map<string, string>();
+  for (const link of (links.data ?? []) as { subject_id: string; goal_id: string }[]) {
+    const courseId = goalToCourse.get(link.goal_id);
+    if (courseId) result.set(link.subject_id, courseId);
+  }
+  return result;
+}
+
+/**
+ * 시간표 과목마다 문제은행 과목을 만들고 그 과목의 학습 목표에 연결한다.
+ * 연결된 과목의 문제 이해도는 AI 코칭에 자동으로 들어간다(coaching_problem_bank_states).
+ * 이름이 같은 기존 미연결 과목이 있으면 새로 만들지 않고 그 과목을 연결한다.
+ */
+async function syncSupabaseSubjects(courses: SyncCourse[]) {
+  const supabase = getSupabaseClient()!;
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId || !courses.length) return;
+  await flushP0Changes();
+
+  const links = await supabase.from("problem_bank_coaching_links").select("subject_id,goal_id");
+  if (links.error) {
+    if (missingTable(links.error.code)) return;
+    throw new Error(links.error.message);
+  }
+  const goalToCourse = await loadCourseGoals();
+  const courseToGoal = new Map([...goalToCourse].map(([goal, course]) => [course, goal]));
+  const linkedGoals = new Set((links.data ?? []).map((l: { goal_id: string }) => l.goal_id));
+  const linkedSubjects = new Set((links.data ?? []).map((l: { subject_id: string }) => l.subject_id));
+  const { data: subjects, error } = await supabase.from("problem_bank_subjects").select("id,name");
+  if (error) throw new Error(error.message);
+  const dismissed = getDismissedCourses();
+
+  for (const course of courses) {
+    const goalId = courseToGoal.get(course.id);
+    if (!goalId || linkedGoals.has(goalId) || dismissed.has(course.id)) continue;
+    const sameName = ((subjects ?? []) as { id: string; name: string }[])
+      .find((s) => !linkedSubjects.has(s.id) && s.name.trim() === course.name.trim());
+    let subjectId = sameName?.id;
+    if (!subjectId) {
+      const created = await supabase.from("problem_bank_subjects").insert({ user_id: userId, name: course.name }).select("id").single();
+      if (created.error) throw new Error(created.error.message);
+      subjectId = (created.data as { id: string }).id;
+    }
+    const link = await supabase.from("problem_bank_coaching_links")
+      .upsert({ subject_id: subjectId, user_id: userId, goal_id: goalId, topic_id: null }, { onConflict: "subject_id,user_id" });
+    if (link.error) throw new Error(link.error.message);
+    linkedGoals.add(goalId);
+    linkedSubjects.add(subjectId);
+  }
+}
+
+async function deleteSupabaseSubject(id: string) {
+  const supabase = getSupabaseClient()!;
+  const { error } = await supabase.from("problem_bank_subjects").delete().eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
 async function createSupabaseSubject(name: string): Promise<ProblemBankSubject> {
@@ -332,6 +466,19 @@ export async function listSubjects(): Promise<ProblemBankSubject[]> {
 export async function createSubject(name: string): Promise<ProblemBankSubject> {
   if (isSupabaseConfigured) return createSupabaseSubject(name);
   return createLocalSubject(name);
+}
+
+/** 현재 학기 시간표 과목을 문제은행 과목으로 자동 연동한다. 사용자가 지운 과목은 다시 만들지 않는다. */
+export async function syncSubjectsWithCourses(courses: SyncCourse[]): Promise<void> {
+  if (isSupabaseConfigured) return syncSupabaseSubjects(courses);
+  return syncLocalSubjects(courses);
+}
+
+/** 과목과 그 과목의 모든 문항·이해도 기록을 지운다. 자동 연동 과목이면 다시 만들지 않도록 기억한다. */
+export async function deleteSubject(subject: Pick<ProblemBankSubject, "id" | "courseId">): Promise<void> {
+  if (isSupabaseConfigured) await deleteSupabaseSubject(subject.id);
+  else await deleteLocalSubject(subject.id);
+  if (subject.courseId) dismissCourse(subject.courseId);
 }
 
 export async function listProblems(subjectId: string): Promise<ProblemBankProblem[]> {

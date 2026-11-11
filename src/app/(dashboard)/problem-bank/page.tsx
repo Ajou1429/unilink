@@ -7,7 +7,6 @@ import {
   Loader2,
   Trash2,
   FileText,
-  BookMarked,
   X,
   ChevronRight,
   ImageOff,
@@ -15,10 +14,16 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
-import { ProblemBankCoachingLink } from "@/components/coaching/ProblemBankCoachingLink";
+import { getActiveTermCourses } from "@/lib/course-storage";
 import {
   createSubject,
   deleteFile,
+  deleteSubject,
+  EXAM_PERIODS,
+  joinSourceFile,
+  splitSourceFile,
+  syncSubjectsWithCourses,
+  type ExamPeriod,
   deleteProblem,
   listProblems,
   listSubjects,
@@ -229,7 +234,7 @@ function ReviewPanel({
         value={fileName}
         onChange={(e) => setFileName(e.target.value)}
         placeholder="예: 전자장론 과제1"
-        maxLength={200}
+        maxLength={180}
         className="mt-1 w-full rounded-lg border px-3 py-2 text-[14px] font-medium outline-none focus:border-indigo-400"
         style={{ borderColor: "#DDE3EC", color: INK }}
       />
@@ -502,6 +507,7 @@ export default function ProblemBankPage() {
   const [review, setReview] = useState<ReviewState | null>(null);
   const [failure, setFailure] = useState<FailureState | null>(null);
   const [openFiles, setOpenFiles] = useState<Set<string>>(() => new Set());
+  const [period, setPeriod] = useState<ExamPeriod>("midterm");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadSubjects = async () => {
@@ -517,6 +523,9 @@ export default function ProblemBankPage() {
   useEffect(() => {
     (async () => {
       try {
+        // 이번 학기 시간표 과목을 문제은행 과목으로 자동 연동 (실패해도 기존 목록은 보여준다)
+        await syncSubjectsWithCourses(getActiveTermCourses().courses.map(({ id, name }) => ({ id, name })))
+          .catch((err) => setError(messageOf(err, "시간표 과목을 연동하지 못했습니다.")));
         const subs = await loadSubjects();
         if (subs.length) setActiveId(subs[0].id);
       } catch (err) {
@@ -536,16 +545,28 @@ export default function ProblemBankPage() {
 
   const active = subjects.find((s) => s.id === activeId) || null;
 
-  // 파일별로 묶고, 최근에 올린 파일을 위로
+  // 선택한 시험 범위의 문항만 파일별로 묶고, 최근에 올린 파일을 위로. 키는 저장된 source_file 그대로.
+  const periodProblems = useMemo(
+    () => problems.filter((p) => splitSourceFile(p.sourceFile).period === period),
+    [problems, period],
+  );
   const files = useMemo(() => {
     const groups = new Map<string, ProblemBankProblem[]>();
-    for (const p of problems) {
+    for (const p of periodProblems) {
       const list = groups.get(p.sourceFile);
       if (list) list.push(p);
       else groups.set(p.sourceFile, [p]);
     }
     return groups;
-  }, [problems]);
+  }, [periodProblems]);
+  const filesByName = useMemo(
+    () => new Map([...files].map(([raw, list]) => [splitSourceFile(raw).name, list])),
+    [files],
+  );
+  const rawFor = (name: string) =>
+    [...files.keys()].find((raw) => splitSourceFile(raw).name === name) ?? joinSourceFile(period, name);
+  const periodCount = (value: ExamPeriod) =>
+    problems.filter((p) => splitSourceFile(p.sourceFile).period === value).length;
   const fileOrder = useMemo(() => {
     const firstSeen = (list: ProblemBankProblem[]) =>
       list.reduce((min, p) => (p.createdAt < min ? p.createdAt : min), list[0].createdAt);
@@ -568,8 +589,23 @@ export default function ProblemBankPage() {
     }
   };
 
+  const removeSubject = async () => {
+    if (!active) return;
+    const message = active.count
+      ? `「${active.name}」 과목과 ${active.count}문항의 이해도 기록을 모두 삭제할까요?`
+      : `「${active.name}」 과목을 삭제할까요?`;
+    if (!window.confirm(message)) return;
+    try {
+      await deleteSubject(active);
+      const subs = await loadSubjects();
+      selectSubject(subs[0]?.id ?? "");
+    } catch (err) {
+      setError(messageOf(err, "과목을 삭제하지 못했습니다."));
+    }
+  };
+
   const selectSubject = (id: string) => {
-    setActiveId(id);
+    setActiveId(id || null);
     setError("");
     setNotice("");
     setReview(null);
@@ -622,7 +658,8 @@ export default function ProblemBankPage() {
   const removeFile = async (name: string) => {
     if (!activeId) return;
     const count = files.get(name)?.length ?? 0;
-    if (!window.confirm(`「${name || "파일 정보 없음"}」의 ${count}문항과 기록한 이해도를 모두 삭제할까요?`)) return;
+    const label = splitSourceFile(name).name || "파일 정보 없음";
+    if (!window.confirm(`「${label}」의 ${count}문항과 기록한 이해도를 모두 삭제할까요?`)) return;
     try {
       await deleteFile(activeId, name);
       await reloadProblems();
@@ -673,11 +710,12 @@ export default function ProblemBankPage() {
     if (!active) return;
     setError("");
     try {
-      const result = await saveProblems(active.id, fileName, labels);
+      const raw = rawFor(fileName);
+      const result = await saveProblems(active.id, raw, labels);
       setReview(null);
       await reloadProblems();
       await loadSubjects();
-      setOpenFiles((prev) => new Set(prev).add(fileName));
+      setOpenFiles((prev) => new Set(prev).add(raw));
       setNotice(
         `「${fileName}」에 ${result.addedCount}문항을 업로드했어요.` +
           (result.skippedCount ? ` 이미 있던 ${result.skippedCount}문항은 건너뛰었어요.` : ""),
@@ -688,9 +726,9 @@ export default function ProblemBankPage() {
   };
 
   const stats = (() => {
-    if (!active || problems.length === 0) return null;
-    const mastered = problems.filter((p) => p.level === 5).length;
-    return { n: problems.length, files: files.size, percent: understandingPercent(problems), mastered };
+    if (!active || periodProblems.length === 0) return null;
+    const mastered = periodProblems.filter((p) => p.level === 5).length;
+    return { n: periodProblems.length, files: files.size, percent: understandingPercent(periodProblems), mastered };
   })();
 
   return (
@@ -698,21 +736,7 @@ export default function ProblemBankPage() {
       <Header title="문제은행" />
       <main className="w-full flex-1 font-sans" style={{ backgroundColor: "#F6F7FA", color: INK }}>
         <div className="mx-auto max-w-3xl px-5 py-8">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <div
-                className="flex items-center gap-2 text-[13px] font-medium tracking-wide"
-                style={{ color: ACCENT }}
-              >
-                <BookMarked size={15} /> MASTERY LEDGER
-              </div>
-              <h1 className="mt-1 text-[26px] font-bold leading-tight">문제 이해도 원장</h1>
-              <p className="mt-1 text-[13px] text-slate-500">
-                PDF를 넣으면 문제 번호를 인식하고, 확인을 거쳐 파일별로 저장한 뒤 각 문제의 이해도를 0–5로
-                기록합니다.
-              </p>
-            </div>
-          </div>
+          <h1 className="text-[26px] font-bold leading-tight">문제은행</h1>
 
           {!ready ? null : (
             <>
@@ -787,14 +811,42 @@ export default function ProblemBankPage() {
                   className="mt-10 rounded-2xl border border-dashed py-16 text-center"
                   style={{ borderColor: "#D2D9E3" }}
                 >
-                  <p className="text-[15px] font-medium">먼저 과목을 하나 만들어 주세요.</p>
-                  <p className="mt-1 text-[13px] text-slate-500">
-                    과목을 만들면 PDF별로 문제들이 그 과목 아래에 등록됩니다.
-                  </p>
+                  <p className="text-[15px] font-medium">시간표에 과목을 추가하거나 과목을 직접 만들어 주세요.</p>
                 </div>
               ) : (
                 <>
-                  <ProblemBankCoachingLink key={active.id} subjectId={active.id} />
+                  <div className="mt-5 flex items-center justify-between gap-3 border-b" style={{ borderColor: "#E4E9F0" }}>
+                    <div className="flex gap-1" role="tablist" aria-label="시험 범위">
+                      {(Object.keys(EXAM_PERIODS) as ExamPeriod[]).map((value) => (
+                        <button
+                          key={value}
+                          role="tab"
+                          aria-selected={period === value}
+                          onClick={() => {
+                            setPeriod(value);
+                            setReview(null);
+                            setFailure(null);
+                            setOpenFiles(new Set());
+                          }}
+                          className="-mb-px border-b-2 px-3 py-2 text-[14px] font-semibold transition-colors"
+                          style={
+                            period === value
+                              ? { borderColor: ACCENT, color: INK }
+                              : { borderColor: "transparent", color: "#8A94A3" }
+                          }
+                        >
+                          {EXAM_PERIODS[value]}
+                          <span className="ml-1.5 text-[12px] font-medium opacity-60">{periodCount(value)}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={removeSubject}
+                      className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-[12px] text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                    >
+                      <Trash2 size={13} /> 과목 삭제
+                    </button>
+                  </div>
                   <div className="mt-5 flex flex-wrap items-center gap-3">
                     <input
                       ref={fileRef}
@@ -865,7 +917,7 @@ export default function ProblemBankPage() {
                     <ReviewPanel
                       key={review.fileName + review.labels.length}
                       initial={review}
-                      existingFiles={files}
+                      existingFiles={filesByName}
                       onCancel={() => setReview(null)}
                       onSubmit={saveReview}
                     />
@@ -879,15 +931,12 @@ export default function ProblemBankPage() {
                       <div className="flex flex-col items-center gap-2 py-16 text-center">
                         <FileText size={28} className="text-slate-300" />
                         <p className="text-[14px] font-medium">아직 등록된 파일이 없어요.</p>
-                        <p className="text-[13px] text-slate-500">
-                          위 버튼으로 PDF를 넣으면 문항 번호를 인식해 확인 화면을 보여드려요.
-                        </p>
                       </div>
                     ) : (
                       fileOrder.map((name) => (
                         <FileGroup
                           key={name}
-                          name={name}
+                          name={splitSourceFile(name).name}
                           problems={files.get(name) ?? []}
                           open={openFiles.has(name)}
                           onToggle={() => toggleFile(name)}

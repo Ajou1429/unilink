@@ -280,3 +280,20 @@ export function understandingPercent(problems: { level: number }[]) {
   const sum = problems.reduce((acc, p) => acc + p.level, 0);
   return Math.round((sum / (problems.length * 5)) * 100);
 }
+
+/** 시험 범위 구분. 별도 컬럼 없이 source_file 앞에 `final::`처럼 붙여 저장한다. 접두사가 없으면 중간고사 범위. */
+export const EXAM_PERIODS = { midterm: "중간고사 범위", final: "기말고사 범위" } as const;
+export type ExamPeriod = keyof typeof EXAM_PERIODS;
+const PERIOD_SEPARATOR = "::";
+
+export function splitSourceFile(raw: string): { period: ExamPeriod; name: string } {
+  const index = raw.indexOf(PERIOD_SEPARATOR);
+  const prefix = index > 0 ? raw.slice(0, index) : "";
+  if (prefix === "midterm" || prefix === "final") return { period: prefix, name: raw.slice(index + PERIOD_SEPARATOR.length) };
+  return { period: "midterm", name: raw };
+}
+
+export function joinSourceFile(period: ExamPeriod, name: string) {
+  return `${period}${PERIOD_SEPARATOR}${name.trim()}`;
+}
+

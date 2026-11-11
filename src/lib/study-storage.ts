@@ -76,8 +76,48 @@ export function postponeWeeklyStudyPlan(planId: string, fallback: StudyPlan[] = 
       postponedCount: (plan.postponedCount ?? 0) + 1,
     };
   });
+  const moved = next.find((plan) => plan.id === planId);
+  if (moved) mirrorToMonthly(moved);
   saveWeeklyStudyPlans(next);
-  return next.find((plan) => plan.id === planId);
+  return moved;
+}
+
+function mirrorToMonthly(plan: StudyPlan) {
+  if (!plan.weekStart) return;
+  const monthly = readJson<MonthlyStudyPlan[]>(MONTHLY_STUDY_PLANS_STORAGE_KEY, []);
+  const item: MonthlyStudyPlan = {
+    id: `weekly-${plan.id}`,
+    month: plan.weekStart.slice(0, 7),
+    weekStart: plan.weekStart,
+    courseId: plan.courseId,
+    courseName: plan.courseName,
+    title: plan.title,
+    description: plan.description,
+    isCompleted: plan.isCompleted,
+    createdAt: plan.createdAt,
+  };
+  const exists = monthly.some((entry) => entry.id === item.id);
+  writeJson(MONTHLY_STUDY_PLANS_STORAGE_KEY, exists ? monthly.map((entry) => (entry.id === item.id ? item : entry)) : [item, ...monthly]);
+}
+
+/** 학습 계획 하나를 추가한다. 과목을 고르지 않으면 개인 학습으로 묶인다. 월간 보기에도 함께 반영한다. */
+export function addWeeklyStudyPlan(input: { title: string; dueDate: string; courseId?: string; courseName?: string; description?: string }) {
+  const plan: StudyPlan = {
+    id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `plan-${Date.now()}`,
+    userId: "me",
+    courseId: input.courseId || "self",
+    courseName: input.courseId ? input.courseName ?? "" : "개인 학습",
+    week: 0,
+    weekStart: sundayWeekStart(input.dueDate.slice(0, 10)),
+    title: input.title.trim(),
+    description: input.description?.trim() ?? "",
+    dueDate: input.dueDate,
+    isCompleted: false,
+    createdAt: new Date().toISOString(),
+  };
+  mirrorToMonthly(plan);
+  saveWeeklyStudyPlans([plan, ...getWeeklyStudyPlans()]);
+  return plan;
 }
 
 export function getMonthlyStudyGoals(): MonthlyStudyGoal[] {

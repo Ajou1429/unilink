@@ -16,6 +16,8 @@
 
 같은 날 4차로 성적 및 스펙 페이지를 다시 만들고 학점계산기(`/records/calculator`)를 추가했다. 시간표 연도 범위도 넓혔다. 성적·스펙은 로컬 전용 데이터라 DB 변경은 없다. 상세는 [changelog/2026-11-12-records-calculator.md](changelog/2026-11-12-records-calculator.md). 코칭 우선순위는 변경 없음.
 
+같은 날 5차: 문제은행 과목을 현재 학기 시간표 과목과 자동 연동하고, `problem_bank_coaching_links`를 과목 학습 목표로 자동 연결했다(수동 연결 UI `ProblemBankCoachingLink` 삭제). 이해도가 사용자 선택 없이 코칭 근거에 들어간다. 중간/기말 범위는 `source_file` 접두사로 구분해 새 마이그레이션은 없다. 대시보드에서 계획·시험·과제를 바로 추가한다(시험·과제는 과목 `calendar_events`). 상세는 [changelog/2026-11-12-quick-add-problem-bank-sync.md](changelog/2026-11-12-quick-add-problem-bank-sync.md). 로그인 계정 DB 왕복은 미확인. 코칭 우선순위 순서는 변경 없음.
+
 ## 2026-11-11 로컬 최신 코드 통합
 
 - 후속 사용자 요청으로 커뮤니티 페이지·링크·알림·게시판 저장 코드·샘플을 제거했다. 기존 커뮤니티는 브라우저 전용이었고 로컬 DB 스키마에 관련 객체가 없어 DB 삭제 마이그레이션은 필요하지 않다. 앱 시작 시 기존 브라우저 커뮤니티 데이터만 정리한다. 상세는 `community-removal.md`. 로컬 수정이며 코칭 운영 확인·실행 기록 연결의 우선순위는 유지한다.

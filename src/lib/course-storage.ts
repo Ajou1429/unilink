@@ -1,6 +1,6 @@
 import { privateStorage } from "./private-storage.ts";
-import { Course, LectureNote, StudyPlan } from "./types";
-import { getCurrentAcademicTermLabel } from "./academic-term";
+import type { Course, LectureNote, StudyPlan } from "./types";
+import { getCurrentAcademicTermLabel, parseAcademicTerm, sortAcademicTerms } from "./academic-term.ts";
 
 export const COURSES_STORAGE_KEY = "unilink:courses";
 export const COURSE_NOTES_STORAGE_KEY = "unilink:course-notes";
@@ -49,6 +49,21 @@ export function getAllStoredCourses(): Course[] {
 
 export function getStoredCourses(term = getCurrentAcademicTermLabel()): Course[] {
   return getAllStoredCourses().filter((course) => course.term === term);
+}
+
+/**
+ * 지금 학기 수업. 현재 학기에 수업이 없으면(방학 중 계절학기 등) 지금보다 이전인 학기 중
+ * 가장 최근에 수업이 있는 학기를 대신 쓴다. 학기가 바뀌면 자동으로 그 학기 수업으로 바뀐다.
+ */
+export function getActiveTermCourses(now = new Date()): { term: string; courses: Course[] } {
+  const current = getCurrentAcademicTermLabel(now);
+  const all = getAllStoredCourses();
+  const currentCourses = all.filter((course) => course.term === current);
+  if (currentCourses.length) return { term: current, courses: currentCourses };
+  const ordered = sortAcademicTerms([current, ...all.map((course) => course.term ?? "")].filter((term) => parseAcademicTerm(term)));
+  const earlier = ordered.slice(0, ordered.indexOf(current)).reverse();
+  const term = earlier.find((item) => all.some((course) => course.term === item));
+  return term ? { term, courses: all.filter((course) => course.term === term) } : { term: current, courses: [] };
 }
 
 export function saveStoredCourses(courses: Course[], term?: string) {

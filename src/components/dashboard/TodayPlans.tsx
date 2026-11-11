@@ -2,14 +2,17 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Redo2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Redo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { getSupabaseBrowserClient } from "@/lib/supabase-client";
 import { getStorageUser } from "@/lib/private-storage";
 import { flushP0Changes } from "@/lib/p0-sync";
-import { postponeWeeklyStudyPlan } from "@/lib/study-storage";
-import type { StudyPlan } from "@/lib/types";
+import { addWeeklyStudyPlan, postponeWeeklyStudyPlan } from "@/lib/study-storage";
+import type { Course, StudyPlan } from "@/lib/types";
 
 type PlanItem = {
   id: string;
@@ -49,7 +52,46 @@ function postponeCountOf(metadata: PlanItem["metadata"]) {
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
-export function TodayPlans({ date: today, plans }: { date: string; plans: StudyPlan[] }) {
+function AddPlanDialog({ open, onOpenChange, date, courses }: { open: boolean; onOpenChange: (open: boolean) => void; date: string; courses: Course[] }) {
+  const [title, setTitle] = useState("");
+  const [courseId, setCourseId] = useState("");
+  const [dueDate, setDueDate] = useState(date);
+  function submit() {
+    const course = courses.find((item) => item.id === courseId);
+    addWeeklyStudyPlan({ title, dueDate, courseId: course?.id, courseName: course?.name });
+    onOpenChange(false);
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader><DialogTitle>계획 추가</DialogTitle></DialogHeader>
+        <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); if (title.trim() && dueDate) submit(); }}>
+          <div className="space-y-1.5">
+            <Label>할 일</Label>
+            <Input autoFocus aria-label="할 일" value={title} onChange={(event) => setTitle(event.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>과목</Label>
+              <select aria-label="과목" className="h-8 w-full rounded-lg border bg-white px-2 text-sm" value={courseId} onChange={(event) => setCourseId(event.target.value)}>
+                <option value="">개인 학습</option>
+                {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>날짜</Label>
+              <Input type="date" aria-label="날짜" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+            </div>
+          </div>
+          <Button type="submit" className="w-full" disabled={!title.trim() || !dueDate}>추가</Button>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function TodayPlans({ date: today, plans, courses }: { date: string; plans: StudyPlan[]; courses: Course[] }) {
+  const [adding, setAdding] = useState(false);
   // 오늘 기준 며칠 앞/뒤를 보고 있는지. 자정이 지나면 자연히 새 오늘 기준이 된다.
   const [offset, setOffset] = useState(0);
   const date = shiftDateKey(today, offset);
@@ -128,6 +170,9 @@ export function TodayPlans({ date: today, plans }: { date: string; plans: StudyP
       <div className="flex items-center justify-between gap-2">
         <CardTitle className="text-base">{offset === 0 ? "오늘 계획" : "계획"}</CardTitle>
         <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon-sm" aria-label="계획 추가" title="계획 추가" onClick={() => setAdding(true)}>
+            <Plus className="h-4 w-4" />
+          </Button>
           <Button variant="ghost" size="icon-sm" aria-label="이전 날" onClick={() => setOffset((value) => value - 1)}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -168,5 +213,6 @@ export function TodayPlans({ date: today, plans }: { date: string; plans: StudyP
       {message && <p role="status" className="text-xs text-muted-foreground">{message}</p>}
       {!rows.length && !message && <p className="py-6 text-center text-sm text-muted-foreground">예정된 계획이 없어요.</p>}
     </CardContent>
+    {adding && <AddPlanDialog open={adding} onOpenChange={setAdding} date={date} courses={courses} />}
   </Card>;
 }

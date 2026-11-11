@@ -15,6 +15,7 @@ import {
   Target,
   Award,
   BookMarked,
+  ChevronDown,
   Menu,
   X,
 } from "lucide-react";
@@ -26,7 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { Course } from "@/lib/types";
 import {
   COURSES_CHANGED_EVENT,
-  getStoredCourses,
+  getActiveTermCourses,
 } from "@/lib/course-storage";
 import {
   getPersonalStudies,
@@ -57,7 +58,7 @@ function useSidebarData() {
 
   useEffect(() => {
     function syncData() {
-      setCourses(getStoredCourses());
+      setCourses(getActiveTermCourses().courses);
       setPersonalStudies(
         getPersonalStudies().filter((study) => (study.status ?? "active") === "active"),
       );
@@ -76,6 +77,32 @@ function useSidebarData() {
   }, []);
 
   return { courses, personalStudies };
+}
+
+function SidebarSection({
+  title,
+  defaultOpen,
+  children,
+}: {
+  title: string;
+  defaultOpen: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="pt-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        {title}
+        <ChevronDown className={cn("ml-auto h-3.5 w-3.5 transition-transform", open ? "" : "-rotate-90")} />
+      </button>
+      {open && <div className="mt-1">{children}</div>}
+    </div>
+  );
 }
 
 export function Sidebar() {
@@ -168,10 +195,7 @@ export function Sidebar() {
           );
         })}
 
-        <div className="pt-4 pb-1">
-          <p className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-            내 수업
-          </p>
+        <SidebarSection title="내 수업" defaultOpen={pathname === "/course"}>
           {courses.length > 0 ? (
             courses.map((course) => {
               const href = `/course?courseId=${encodeURIComponent(course.id)}`;
@@ -201,12 +225,9 @@ export function Sidebar() {
               시간표에서 수업을 추가하세요.
             </p>
           )}
-        </div>
+        </SidebarSection>
 
-        <div className="pt-4 pb-1">
-          <p className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-            개인 학습
-          </p>
+        <SidebarSection title="개인 학습" defaultOpen={pathname === "/personal-study"}>
           {personalStudies.length > 0 ? (
             personalStudies.map((study) => {
               const href = `/personal-study?studyId=${encodeURIComponent(study.id)}`;
@@ -239,7 +260,7 @@ export function Sidebar() {
               시간표에서 개인 학습을 추가하세요.
             </p>
           )}
-        </div>
+        </SidebarSection>
       </nav>
 
       <div className="px-3 py-3 border-t space-y-1">

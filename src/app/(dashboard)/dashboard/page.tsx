@@ -10,7 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import { mockCourses, mockStudyPlans } from "@/lib/mock-data";
-import { getStoredCourses } from "@/lib/course-storage";
+import { getActiveTermCourses, getStoredCourses } from "@/lib/course-storage";
+import { getGreeting } from "@/lib/greeting";
 import {
   getWeeklyStudyPlans,
   STUDY_PLANS_CHANGED_EVENT,
@@ -25,7 +26,6 @@ import {
   type CurrentUser,
 } from "@/lib/auth-storage";
 import {
-  getCurrentAcademicTermLabel,
   KOREA_TIME_ZONE,
 } from "@/lib/academic-term";
 
@@ -56,6 +56,8 @@ function getKoreanToday() {
 export default function DashboardPage() {
   const now = useCurrentTime();
   const [courses, setCourses] = useState<Course[]>(mockCourses);
+  // 시험·과제·계획을 붙일 과목 (방학 중에는 직전 학기)
+  const [termCourses, setTermCourses] = useState<Course[]>([]);
   const [plans, setPlans] = useState<StudyPlan[]>(mockStudyPlans);
   const [koreanToday, setKoreanToday] = useState(getKoreanToday);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
@@ -63,6 +65,7 @@ export default function DashboardPage() {
   useEffect(() => {
     function loadDashboardData() {
       setCourses(getStoredCourses());
+      setTermCourses(getActiveTermCourses().courses);
       setPlans(getWeeklyStudyPlans(mockStudyPlans));
       setKoreanToday(getKoreanToday());
       setCurrentUser(getCurrentUser());
@@ -89,29 +92,23 @@ export default function DashboardPage() {
   );
   const displayName =
     currentUser?.displayName || currentUser?.username || "게스트";
-  const schoolLabel =
-    currentUser && (currentUser.university || currentUser.department)
-      ? `${currentUser.university} ${currentUser.department}`.trim()
-      : "로그인 후 회원 정보의 학과가 표시됩니다";
-  const academicTermLabel = getCurrentAcademicTermLabel();
+  // 정적 빌드 시각과 접속 시각의 인사말이 다를 수 있어 h2에 suppressHydrationWarning을 둔다.
+  const greeting = getGreeting(displayName, new Date(now));
   return (
     <div className="flex flex-col min-h-screen">
       <Header title="대시보드" />
       <div className="flex-1 p-6 flex flex-col gap-6 max-w-6xl mx-auto w-full">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold">안녕하세요, {displayName}님</h2>
-            <p className="text-muted-foreground mt-1">
-              {academicTermLabel} · {schoolLabel}
-            </p>
+            <h2 className="text-2xl font-bold" suppressHydrationWarning>{greeting}</h2>
           </div>
         </div>
 
         <div className="grid flex-1 gap-6 lg:grid-cols-2">
-          <TodayPlans date={new Intl.DateTimeFormat("sv-SE", { timeZone: KOREA_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now))} plans={plans} />
+          <TodayPlans date={new Intl.DateTimeFormat("sv-SE", { timeZone: KOREA_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now))} plans={plans} courses={termCourses} />
 
           <div className="grid min-w-0 gap-6 sm:grid-cols-2">
-          <ExamAssignments now={now} />
+          <ExamAssignments now={now} courses={termCourses} />
           <Card className="min-w-0 border-0 shadow-sm">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
