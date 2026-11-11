@@ -97,13 +97,15 @@ function ranges(start: number, end: number, size: number): [number, number][] {
 const normalize = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 function researchIdentity(value: unknown) {
   const v = record(value);
-  return { title: normalize(String(v.title)), concepts: [...new Set(texts(v.concepts).map(normalize))].sort(), depth: normalize(String(v.depth)) };
+  return { title: normalize(String(v.title)), concepts: [...new Set(texts(v.concepts).map(normalize))].sort(), depth: normalize(String(v.depth)),
+    ...(v.basis === "public_goal_without_material" ? { basis: v.basis, period: String(v.period) } : {}) };
 }
 const legacy = (p: Progress) => p.metadata?.legacy_record && typeof p.metadata.legacy_record === "object" ? p.metadata.legacy_record as Record<string, unknown> : {};
 export type KnowledgePlan = { tasks: KnowledgeTask[]; active: KnowledgeTask[]; warnings: string[]; overview_complete: boolean; detail_complete: boolean; pdf_count: number; pdf_ready: number; research_status: "disabled" | "unavailable" | "pending" | "ready" | "failed"; actual_progress: { id: string; date: string; title: string; mapped: boolean }[] };
 
 // Index keys track note revisions; expensive model results track bytes + model + prompt.
-export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[], saved: KnowledgeTask[], model: string, searchModel: string | null): Promise<KnowledgePlan> {
+export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[], saved: KnowledgeTask[], model: string, searchModel: string | null,
+  researchGoal?: { title: string; goal_type: string; as_of: string }): Promise<KnowledgePlan> {
   const ready = saved.filter((t) => t.status === "ready");
   const tasks: KnowledgeTask[] = []; const active: KnowledgeTask[] = []; const warnings: string[] = [];
   const actual: KnowledgePlan["actual_progress"] = [];
@@ -197,7 +199,14 @@ export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[]
       const result = await add("research", null, null, null, null, concepts);
       if (!result) researchStatus = "pending";
     }
-    if (!seen.size) researchStatus = "unavailable";
+    if (!seen.size && !notes.length && researchGoal?.title.trim()) {
+      const concepts = { title: researchGoal.title.slice(0, 200), concepts: [researchGoal.title.slice(0, 200)],
+        depth: `Provisional ${researchGoal.goal_type} scope; no lecture material supplied. Verify official curriculum/exam identity and uncertainty.`,
+        basis: "public_goal_without_material", period: researchGoal.as_of.slice(0, 7) };
+      const result = await add("research", null, null, null, null, concepts);
+      if (!result) researchStatus = "pending";
+      warnings.push("강의자료 없이 목표명으로 조사한 잠정 범위입니다. 실제 수업·시험 범위와 개인 이해도가 확인된 것은 아닙니다.");
+    } else if (!seen.size) researchStatus = "unavailable";
   } else if (!overviewComplete && searchModel) researchStatus = "pending";
   const unique = [...new Map(tasks.map((t) => [t.task_key, t])).values()];
   if (unique.some((t) => t.kind === "research" && t.status === "failed")) researchStatus = "failed";
@@ -246,7 +255,7 @@ export function knowledgeContext(plan: KnowledgePlan, focus: string[] = [], rang
         concepts: clip(u.concepts, 6), formulas: clip(u.formulas, 3), examples: clip(u.examples, 3), exercises: clip(u.exercises, 3),
         prerequisites: clip(u.prerequisites, 3), objectives: clip(u.objectives, 3), relationships: clip(u.relationships, 3), methods: clip(u.methods, 3) })) } : undefined;
     const r = t.payload?.research as ReturnType<typeof parseResearch> | undefined;
-    const research = r ? { ...r, required_depth: clipText(r.required_depth ?? "", 600), time_basis: clipText(r.time_basis ?? "", 700), uncertainty: clipText(r.uncertainty ?? "", 500),
+    const research = r ? { ...r, basis: (t.payload?.concepts as { basis?: string })?.basis ?? "extracted_material_concepts", required_depth: clipText(r.required_depth ?? "", 600), time_basis: clipText(r.time_basis ?? "", 700), uncertainty: clipText(r.uncertainty ?? "", 500),
       sources: take(ranked(r.sources), 3).map((s) => ({ ...s, relevance: clipText(s.relevance ?? "", 300), reliability: clipText(s.reliability ?? "", 300), evidence: clipText(s.evidence ?? "", 350) })) } : undefined;
     const item = { artifact_id: t.id, note_id: t.note_id, source_hash: t.source_hash, note_version: t.payload?.note_version, pages: [t.page_start, t.page_end], kind: t.kind, content: compact ?? research };
     const size = JSON.stringify(item).length;

@@ -2,6 +2,7 @@ import { CoachingError, type CoachingRequest, type Proposal } from "./contract.t
 import { modelContext } from "./context.ts";
 import { MODEL_INPUT_VERSION } from "./input.ts";
 import type { CoachingContext } from "./contract.ts";
+import { executionContract } from "./execution.ts";
 
 const requestKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 
@@ -39,9 +40,10 @@ export function coachingRequestPayload(request: CoachingRequest, requestHash: st
     request: { goal_ids: request.goal_ids, intent: request.intent, period_start: request.period_start, period_end: request.period_end } };
 }
 
-export function coachingContextSnapshot(context: CoachingContext) {
+export function coachingContextSnapshot(context: CoachingContext, request?: CoachingRequest) {
   // Keep the approval RPC's context.timezone path; grouping is reproducible without a second copy.
-  return { schema_version: 1, context: modelContext(context), model_input_schema_version: MODEL_INPUT_VERSION };
+  return { schema_version: 1, context: modelContext(context), model_input_schema_version: MODEL_INPUT_VERSION,
+    ...(request ? { execution_contract: executionContract(request, context) } : {}) };
 }
 
 export function coachingOutputPayload(proposal: Proposal) {

@@ -1,3 +1,5 @@
+import { evidenceIds } from "./diagnosis.ts";
+
 export class CoachingError extends Error {
   status: number;
   constructor(message: string, status = 400) { super(message); this.status = status; }
@@ -9,6 +11,9 @@ export type TimeWindow = { start: string; end: string };
 export type DayBudget = { date: string; minutes: number; windows: TimeWindow[] };
 export type PlanningRules = { transition_minutes: number; break_minutes: number; break_after_minutes: number; method_minimums: Record<string, number>; max_focus_goals: number; carryover: boolean };
 export type CoachingRequest = {
+  review_other_goals?: boolean;
+  use_related_learning?: boolean;
+  preparation_end?: string;
   daily_sources?: { kind: string; id: string }[];
   exam_inputs?: { goal_id: string; scope: string; exam_at: string; priority: number; difficulty: number }[];
   goal_ids: string[];
@@ -32,6 +37,8 @@ export type BlockedInterval = { start: string; end: string; label: string };
 export type RecurringBlock = { day_of_week: number; start_time: string; end_time: string; effective_from: string | null; effective_to: string | null; label: string };
 export type TopicLearningState = { id: string; goal_id: string; topic_id: string; learning_status: string; self_rating: number | null; memo: string; observed_at: string; source: string; session_id: string | null; session_date: string | null; note_id: string | null; page_start: number | null; page_end: number | null };
 export type CoachingContext = {
+  review?: import("./diagnosis.ts").CoachingReview;
+  approval_revision?: number;
   satisfaction?: import("./personalization.ts").SatisfactionEvidence;
   understanding_history?: {records:import("./personalization.ts").UnderstandingObservation[];truncated_goal_ids:string[]};
   problem_bank?: import("./problemBank.ts").BankEvidence;
@@ -52,6 +59,7 @@ export type CoachingContext = {
   recurring_blocks?: RecurringBlock[];
 };
 export type ProposedItem = {
+  completion_criteria?: { schema_version: 1; task_scope: string; observable_check: string; evidence_ids: string[] };
   goal_id: string;
   topic_id: string | null;
   method_code: string;
@@ -62,7 +70,8 @@ export type ProposedItem = {
   reason: string;
 };
 export type DeferredGoal = { goal_id: string; reason: string; reconsider_on: string };
-export type Proposal = { summary: string; items: ProposedItem[]; deferred_goals: DeferredGoal[] };
+export type Advisory = { goal_id: string; reason: string; suggested_action: string; evidence_ids: string[] };
+export type Proposal = { summary: string; items: ProposedItem[]; deferred_goals: DeferredGoal[]; advisories?: Advisory[]; preparation_outlook?: string };
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isoDay = /^\d{4}-\d{2}-\d{2}$/;
@@ -89,6 +98,8 @@ export function parseCoachingRequest(value: unknown): CoachingRequest {
   const start = dayNumber(value.period_start);
   const end = dayNumber(value.period_end);
   if (end < start || end - start > 13) throw new CoachingError("Plan period must be 1 to 14 days");
+  for (const key of ["review_other_goals", "use_related_learning"]) if (value[key] !== undefined && typeof value[key] !== "boolean") throw new CoachingError("Invalid review scope");
+  if (value.preparation_end !== undefined && (value.intent !== "exam_prep" || dayNumber(value.preparation_end) < end || dayNumber(value.preparation_end) - start > 20)) throw new CoachingError("시험 준비 전망은 실행 기간 이후부터 최대 21일까지입니다.");
   if (!Array.isArray(value.goal_ids) || value.goal_ids.length < 1 || value.goal_ids.length > 5 ||
     new Set(value.goal_ids).size !== value.goal_ids.length || !value.goal_ids.every((id) => typeof id === "string" && uuid.test(id))) {
     throw new CoachingError("Select 1 to 5 unique goals");
@@ -146,6 +157,9 @@ export function parseCoachingRequest(value: unknown): CoachingRequest {
     methodMinimums[code] = minutes as number;
   }
   return {
+    ...(value.review_other_goals === true && value.intent !== "daily_plan" ? { review_other_goals: true } : {}),
+    ...(value.use_related_learning === true ? { use_related_learning: true } : {}),
+    ...(typeof value.preparation_end === "string" ? { preparation_end: value.preparation_end } : {}),
     ...(value.intent === "daily_plan" ? { daily_sources: sources } : {}),
     ...(value.intent === "exam_prep" ? { exam_inputs: exams } : {}),
     goal_ids: value.goal_ids as string[], intent: value.intent,
@@ -232,7 +246,7 @@ export function fitProposalSchedule(value: unknown, request: CoachingRequest, co
       }
       if (!placed) break;
     }
-    if (remaining || fitted.length + pieces.length > 30) throw new CoachingError("추천한 학습 분량을 선택한 시간대와 휴식 조건에 맞춰 배치하지 못했습니다. 항목을 더 작게 나누거나 분량을 줄여 다시 생성해 주세요.", 502);
+    if (remaining || fitted.length + pieces.length > 30 || (raw.completion_criteria !== undefined && pieces.length > 1)) throw new CoachingError("추천한 학습 분량을 선택한 시간대와 휴식 조건에 맞춰 배치하지 못했습니다. 항목을 더 작게 나누고 각각의 완료 기준을 정해 다시 생성해 주세요.", 502);
     byDate.set(raw.planned_date, scheduled);
     fitted.push(...pieces);
   }
@@ -250,6 +264,11 @@ export function validateProposal(value: unknown, request: CoachingRequest, conte
   const used = new Map<string, number>();
   const scheduled = new Map<string, { start: number; end: number; goal: string }[]>();
   const items: ProposedItem[] = [];
+  const allowedEvidence = evidenceIds(context);
+  const checkedEvidence = (value: unknown, allowed = allowedEvidence): string[] => {
+    if (!Array.isArray(value) || value.length > 6 || value.some(id => typeof id !== "string" || !allowed.has(id))) throw new CoachingError("출처가 확인되지 않은 학습 근거입니다.", 502);
+    return [...new Set(value)] as string[];
+  };
   for (const raw of value.items) {
     if (!record(raw) || typeof raw.goal_id !== "string" || !goals.has(raw.goal_id) ||
       (raw.topic_id !== null && (typeof raw.topic_id !== "string" || topics.get(raw.topic_id) !== raw.goal_id)) ||
@@ -285,6 +304,12 @@ export function validateProposal(value: unknown, request: CoachingRequest, conte
     if (minutes > budgets.get(date)!) throw new CoachingError("Plan exceeds confirmed daily availability", 502);
     used.set(date, minutes);
     scheduled.set(date, [...(scheduled.get(date) ?? []), { start, end, goal: raw.goal_id }]);
+    if (raw.completion_criteria !== undefined) {
+      const c = raw.completion_criteria;
+      if (!record(c) || typeof c.task_scope !== "string" || !c.task_scope.trim() || c.task_scope.length > 500 ||
+        typeof c.observable_check !== "string" || !c.observable_check.trim() || c.observable_check.length > 500) throw new CoachingError("학습 범위와 완료 기준을 확인하지 못했습니다.", 502);
+      raw.completion_criteria = { schema_version: 1, task_scope: c.task_scope.trim(), observable_check: c.observable_check.trim(), evidence_ids: checkedEvidence(c.evidence_ids, evidenceIds(context, raw.goal_id)) };
+    }
     items.push(raw as unknown as ProposedItem);
   }
   if (items.length === 0) throw new CoachingError("Model returned no plan items", 502);
@@ -325,5 +350,18 @@ export function validateProposal(value: unknown, request: CoachingRequest, conte
     deferred.push(raw as DeferredGoal);
   }
   if (request.rules.carryover && request.goal_ids.some((id) => !selected.has(id) && !deferredIds.has(id))) throw new CoachingError("Unplanned goal lacks a carryover reason", 502);
-  return { summary: value.summary.trim(), items, deferred_goals: deferred };
+  let advisories: Advisory[] | undefined;
+  if (value.advisories !== undefined) {
+    if (!Array.isArray(value.advisories) || value.advisories.length > 5) throw new CoachingError("추가 검토 제안이 너무 많습니다.", 502);
+    const reviewGoals = new Set([...goals, ...(context.review?.candidates ?? []).map(g => g.goal_id)]);
+    advisories = value.advisories.map(raw => {
+      if (!record(raw) || typeof raw.goal_id !== "string" || !reviewGoals.has(raw.goal_id) ||
+        typeof raw.reason !== "string" || !raw.reason.trim() || raw.reason.length > 500 ||
+        typeof raw.suggested_action !== "string" || !raw.suggested_action.trim() || raw.suggested_action.length > 500) throw new CoachingError("추가 검토 대상이나 이유를 확인하지 못했습니다.", 502);
+      return { goal_id: raw.goal_id, reason: raw.reason.trim(), suggested_action: raw.suggested_action.trim(), evidence_ids: checkedEvidence(raw.evidence_ids, evidenceIds(context, raw.goal_id)) };
+    });
+  }
+  if (value.preparation_outlook !== undefined && (typeof value.preparation_outlook !== "string" || value.preparation_outlook.length > 1000 || (!request.preparation_end && value.preparation_outlook))) throw new CoachingError("시험 준비 전망 범위를 확인해 주세요.", 502);
+  return { summary: value.summary.trim(), items, deferred_goals: deferred,
+    ...(advisories ? { advisories } : {}), ...(typeof value.preparation_outlook === "string" ? { preparation_outlook: value.preparation_outlook } : {}) };
 }

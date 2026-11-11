@@ -27,7 +27,8 @@ export async function loadKnowledge(db: SupabaseClient, userId: string, goalId: 
   if ((notesResult.data?.length ?? 0) > 40 || (artifacts.data?.length ?? 0) > 1500 || (progressResult.data?.length ?? 0) > 100) throw new RequestError("과목 분석 범위를 초과했습니다. 자료·수업 범위를 나누어 주세요.", 409);
   const notes = (notesResult.data ?? []).filter((n) => /\.pdf$/i.test(n.file_name ?? "") || n.drive_file_id || n.file_path?.toLowerCase().endsWith(".pdf")) as KnowledgeNote[];
   const progress = (progressResult.data ?? []) as Progress[];
-  const plan = await planKnowledge(notes, progress, (artifacts.data ?? []) as KnowledgeTask[], model, searchModel);
+  const plan = await planKnowledge(notes, progress, (artifacts.data ?? []) as KnowledgeTask[], model, searchModel,
+    { title: goal.data.title, goal_type: goal.data.goal_type, as_of: asOf });
   return { goal: goal.data, notes, progress, plan, context: { goal_id: goalId, ...knowledgeContext(plan, focus, ranges) } };
 }
 

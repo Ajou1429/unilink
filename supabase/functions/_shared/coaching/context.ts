@@ -3,6 +3,8 @@ import { CoachingError, type CoachingContext, type CoachingRequest, type CourseP
 import { loadKnowledge } from "../courseKnowledgeStore.ts";
 import { bankModelEvidence, loadBankEvidence } from "./problemBank.ts";
 import { loadSatisfaction, loadUnderstandingHistory, satisfactionModelEvidence } from "./personalization.ts";
+import { loadCoachingReview } from "./diagnosis.ts";
+import { readApprovalRevision } from "./execution.ts";
 
 const caps = { topics: 100, deadlines: 100, sessions: 100, existing_items: 100, blocks: 200 };
 
@@ -20,6 +22,7 @@ export async function loadCoachingContext(
   knowledge?: { model: string; searchModel: string | null },
 ): Promise<CoachingContext> {
   // Every user-owned table is explicitly scoped even though this server client has service-role access.
+  const approvalRevision = await readApprovalRevision(db, userId);
   const [preferences, goals, topics, methods, deadlines, sessionResults, existing, events, commitments, courses, schedules, plannedBlocks] = await Promise.all([
     db.from("user_preferences").select("timezone,preferred_session_minutes,coaching_style").eq("user_id", userId).maybeSingle(),
     db.from("learning_goals").select("id,title,goal_type,course_id,target_date,importance,metadata")
@@ -75,7 +78,7 @@ export async function loadCoachingContext(
   if ((learningStates.data?.length ?? 0) > caps.topics) throw new CoachingError("학습 주제가 많습니다. 목표 범위를 나눠 주세요.", 409);
   const courseKnowledge: Record<string, unknown>[] = [];
   if (knowledge) for (const goalId of request.goal_ids) {
-    const focus = [request.desired_outcome, ...(request.exam_inputs ?? []).filter((e) => e.goal_id === goalId).map((e) => e.scope),
+    const focus = [request.desired_outcome, request.constraints, ...(request.exam_inputs ?? []).filter((e) => e.goal_id === goalId).map((e) => e.scope),
       ...((deadlines.data ?? []).filter((d) => d.goal_id === goalId).flatMap((d) => [d.title, d.description ?? "", d.exam_scope ?? ""])),
       ...((topics.data ?? []).filter((t) => t.goal_id === goalId).map((t) => t.title))];
     const ranges = (learningStates.data ?? []).filter(s => s.goal_id === goalId && s.note_id && s.page_start && s.page_end
@@ -115,7 +118,8 @@ export async function loadCoachingContext(
       if (!rows?.some((row) => row.id === source.id)) throw new CoachingError("선택한 작업이 완료되었거나 더 이상 사용할 수 없습니다.", 409);
     }
   }
-  return {
+  const context = {
+    approval_revision: approvalRevision,
     satisfaction,
     understanding_history:understandingHistory,
     problem_bank: problemBank,
@@ -143,6 +147,9 @@ export async function loadCoachingContext(
       })),
     ],
   } as CoachingContext;
+  context.review = await loadCoachingReview(db, userId, request, context);
+  if (approvalRevision !== await readApprovalRevision(db, userId)) throw new CoachingError("조회 중 일정이나 학습 상태가 변경됐습니다. 다시 요청해 주세요.", 409);
+  return context;
 }
 
 export function modelContext(context: CoachingContext) {
@@ -152,6 +159,7 @@ export function modelContext(context: CoachingContext) {
   const reportedLevel = (value: unknown) => value === "상" || value === "중" || value === "하" ? value : null;
   const selectedCourses = new Set(context.goals.flatMap((goal) => goal.course_id ? [goal.course_id] : []));
   return {
+    review: context.review ?? { status: "not_requested", truncated: false, candidates: [], related_learning: [] },
     satisfaction: satisfactionModelEvidence(context),
     understanding_history: {
       truncated_goal_ids:(context.understanding_history?.truncated_goal_ids??[]).filter(id=>context.goals.some(g=>g.id===id)),

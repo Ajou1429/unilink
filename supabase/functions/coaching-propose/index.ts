@@ -53,6 +53,7 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
     if (!modelName) throw new CoachingError("Coaching model is not configured", 503);
     const context = await loadCoachingContext(admin, user.id, request,
       featureEnabled(Deno.env.get("COURSE_KNOWLEDGE_ENABLED"), settings.knowledge_enabled) ? knowledgeModels((key) => Deno.env.get(key), settings) : undefined);
+    if (context.approval_revision === undefined) throw new CoachingError("코칭 DB 0032 적용 후 사용할 수 있습니다.", 503);
     const { data: jobId, error: reservationError } = await admin.rpc("reserve_coaching_proposal", { p_user_id: user.id });
     if (reservationError) {
       console.error("coaching quota reservation failed", {
@@ -72,7 +73,7 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
       const { data: created, error: createError } = await admin.from("coaching_runs").insert({
         user_id: user.id, request_key: requestKey, intent: request.intent, status: "generating",
         request_payload: coachingRequestPayload(request, requestHash),
-        context_snapshot: coachingContextSnapshot(context),
+        context_snapshot: coachingContextSnapshot(context, request),
         policy_version: COACHING_POLICY_VERSION, contract_version: 2,
         model_name: modelName,
         prompt_version: COACHING_PROMPT_VERSION,

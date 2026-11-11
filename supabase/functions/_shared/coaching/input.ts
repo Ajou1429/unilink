@@ -1,7 +1,7 @@
 import type { CoachingContext, CoachingRequest } from "./contract.ts";
 import { modelContext } from "./context.ts";
 import { BANK_STAGE_LABELS, SELF_RATING_LABELS } from "./problemBank.ts";
-export const MODEL_INPUT_VERSION = "coaching-evidence-v5";
+export const MODEL_INPUT_VERSION = "coaching-evidence-v6";
 
 // Group by ownership before generation; each evidence record is sent only once.
 export function buildEvidenceContext(source: CoachingContext) {
@@ -47,8 +47,15 @@ export function groupEvidenceContext(context: ReturnType<typeof modelContext>) {
     problem_bank_scope: { status: context.problem_bank?.status ?? "not_loaded", truncated_goal_ids: context.problem_bank?.truncated_goal_ids ?? [],
       history: "Latest 20 problem records per selected goal, explicitly linked bank subjects only; optional topic applies to the entire bank subject." },
     personal_preferences: context.personal_preferences, personal_feedback: context.personal_feedback,
+    review: context.review,
+    diagnosis_contract: {
+      compare: ["actual required concepts/depth/prerequisites", "dated prior familiarity", "actual class progress/pace", "current self-report/scored application", "exam/assignment scope and remaining time"],
+      scope: "Different evidence types, not a blended mastery score. Related learning is lexical prerequisite evidence, not verified mastery or permission to schedule that goal.",
+      request_policy: "Current text is important but does not erase approaching exams or justified review. Distinguish soft emphasis from explicit exclusions. Keep exclusions, confirmed windows and selected execution goals. Candidate goals are advice only; user selection is needed before scheduling them.",
+      review_policy: "Use importance/depth, last observed scope/time, conflicts or stale checks, independent practice and exam date. No fixed reread count or quiz interval; no repeated checks by difficulty alone. Search describes course demand, never the learner's knowledge.",
+    },
     request_scope: "request.desired_outcome and request.constraints apply only to this generation; never persist them as profile facts. Current structured deadlines/windows also are not lifetime preferences.",
-    personalization_scope: "Only this user's observed study results, understanding and structured satisfaction. Past run decisions and plan titles are not standing preferences. Repeated comparable observations may inform provisional adaptation, not permanent traits or model training. personal_preferences are explicit settings only; the current request wins.",
+    personalization_scope: "Only this user's observed study results, understanding and structured satisfaction. Past run decisions and plan titles are not standing preferences. Repeated comparable observations may inform provisional adaptation, not permanent traits or model training. Explicit current preferences override older soft settings, not confirmed constraints or the duty to flag approaching exams and warranted review.",
     satisfaction_scope: { status: context.satisfaction?.status ?? "not_loaded", truncated_goal_ids: context.satisfaction?.truncated_goal_ids ?? [],
       history: "Latest 20 per goal, one mutable satisfaction observation per run. Satisfaction is not mastery or learning effectiveness; had_one_off_request flags situational requests whose text is deliberately unavailable." },
     understanding_history_scope:{truncated_goal_ids:context.understanding_history?.truncated_goal_ids??[],

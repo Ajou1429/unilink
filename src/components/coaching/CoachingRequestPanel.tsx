@@ -23,13 +23,15 @@ import styles from "@/app/(dashboard)/ai-coaching/workspace.module.css";
 type Goal = { id: string; title: string };
 type DailySource = { id: string; kind: "event" | "plan"; goal_id: string; title: string; deadline: string | null };
 type ExamInput = { scope: string; exam_at: string; priority: number; difficulty: number };
-type Item = { goal_id: string; topic_id: string | null; method_code: string; title: string; planned_date: string; start_time: string; planned_minutes: number; reason: string };
-type Proposal = { summary: string; items: Item[]; deferred_goals: { goal_id: string; reason: string; reconsider_on: string }[] };
+type Item = { goal_id: string; topic_id: string | null; method_code: string; title: string; planned_date: string; start_time: string; planned_minutes: number; reason: string;
+  completion_criteria?: { task_scope: string; observable_check: string; evidence_ids: string[] } };
+type Proposal = { summary: string; items: Item[]; deferred_goals: { goal_id: string; reason: string; reconsider_on: string }[];
+  advisories?: { goal_id: string; reason: string; suggested_action: string; evidence_ids: string[] }[]; preparation_outlook?: string };
 type Usage = { model: string; attempt_count: number; pricing_version: string; totals: {
   input_tokens: number; cached_input_tokens: number; output_tokens: number; reasoning_tokens: number;
   total_tokens: number; estimated_cost_usd: number | null;
 } };
-type Result = { schema_version: number; proposal: Proposal; persisted: boolean; proposal_run_id?: string; proposal_persisted?: boolean; usage?: Usage };
+type Result = { schema_version: number; prompt_version?: string; proposal: Proposal; persisted: boolean; proposal_run_id?: string; proposal_persisted?: boolean; usage?: Usage };
 
 const intents = [
   ["weekly_plan", "이번 주 계획"], ["daily_plan", "오늘 계획"], ["exam_prep", "시험 대비"],
@@ -138,6 +140,9 @@ export function CoachingRequestPanel() {
   const [dailyMinutes, setDailyMinutes] = useState(120);
   const [preferredHours, setPreferredHours] = useState<Record<string, number[]>>({});
   const [requestNote, setRequestNote] = useState("");
+  const [reviewOtherGoals, setReviewOtherGoals] = useState(false);
+  const [useRelatedLearning, setUseRelatedLearning] = useState(false);
+  const [preparationDays, setPreparationDays] = useState(14);
   const [dailySources, setDailySources] = useState<DailySource[]>([]);
   const [chosenSources, setChosenSources] = useState<string[]>([]);
   const [examInputs, setExamInputs] = useState<Record<string, ExamInput>>({});
@@ -229,6 +234,11 @@ export function CoachingRequestPanel() {
       const { data, error } = await db.functions.invoke<Result>("coaching-propose", { body: {
         request_key: crypto.randomUUID(),
         goal_ids: goalIds, intent, period_start: requestDates[0], period_end: requestDates.at(-1),
+        review_other_goals: intent !== "daily_plan" && reviewOtherGoals,
+        use_related_learning: useRelatedLearning,
+        ...(intent === "exam_prep" && preparationDays === 21 ? { preparation_end: (() => {
+          const end = new Date(`${requestDates[0]}T12:00:00`); end.setDate(end.getDate() + 20); return localDate(end);
+        })() } : {}),
         ...(intent === "daily_plan" ? { daily_sources: picked.map(({ kind, id }) => ({ kind, id })) } : {}),
         ...(intent === "exam_prep" ? { exam_inputs: goalIds.map((goal_id) => ({ goal_id, ...examInputs[goal_id], exam_at: new Date(examInputs[goal_id].exam_at).toISOString() })) } : {}),
         day_budgets: requestDates.map((date) => { const windows = hoursToWindows(preferredHours[date] ?? []); return { date, minutes: Math.min(dailyMinutes, windows.reduce((total, w) => total + Number(w.end.slice(0, 2)) * 60 - Number(w.start.slice(0, 2)) * 60, 0)), windows }; }),
@@ -241,7 +251,10 @@ export function CoachingRequestPanel() {
       if (getStorageUser() !== user.id) throw new Error("계정이 변경됐습니다. 다시 요청해 주세요.");
       setResult(data);
       setRequestNote("");
-      setStatus("제안이 생성됐습니다. 아직 DB 계획으로 저장되지는 않았습니다.");
+      const advancedRequested = useRelatedLearning || (intent !== "daily_plan" && reviewOtherGoals) || (intent === "exam_prep" && preparationDays === 21);
+      setStatus(advancedRequested && data.prompt_version !== "diagnostic-coaching-v17"
+        ? "연결된 코칭 서버는 추가 검토와 21일 전망을 지원하지 않습니다. 아래는 기존 방식의 제안이며, 아직 계획으로 저장되지 않았습니다."
+        : "제안이 생성됐습니다. 아직 DB 계획으로 저장되지는 않았습니다.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "코칭 제안을 생성하지 못했습니다.");
     } finally { setBusy(false); }
@@ -374,6 +387,14 @@ export function CoachingRequestPanel() {
               </fieldset>
               <label>추가 요청 <span className={styles.optional}>(이번 계획만 · 선택)</span><textarea maxLength={1000} rows={4}
                 placeholder="예: 수요일은 가볍게 계획해줘" value={requestNote} onChange={(event) => { setRequestNote(event.target.value); setResult(null); }} /></label>
+              <div className="space-y-2 border-t pt-3">
+                <label className={styles.reviewOption}><input type="checkbox" checked={useRelatedLearning}
+                  onChange={e => { setUseRelatedLearning(e.target.checked); setResult(null); }} />관련 선수지식의 내 이해도 기록 참고</label>
+                {intent !== "daily_plan" && <label className={styles.reviewOption}><input type="checkbox" checked={reviewOtherGoals}
+                  onChange={e => { setReviewOtherGoals(e.target.checked); setResult(null); }} />다른 목표의 시험·과제도 검토</label>}
+                {intent === "exam_prep" && <label>시험 준비 전망<select aria-label="시험 준비 전망" value={preparationDays}
+                  onChange={e => { setPreparationDays(Number(e.target.value)); setResult(null); }}><option value={14}>14일</option><option value={21}>21일 전망 · 실행 일정은 14일</option></select></label>}
+              </div>
               <p className={styles.autoPlanNotice}>순공시간은 휴식·이동을 제외한 목표 공부시간입니다. 휴식·이동은 시간 계산에 반영하지만 별도 계획으로 표시하지 않습니다. 선택 시간 안에 목표량을 채우기 어려우면 가능한 분량만 추천합니다.</p>
               <button type="button" className={styles.save} disabled={busy || learningPending > 0 || !goals.length || !coachingEnabled} onClick={() => void generate()}><Sparkles size={16} />{learningPending > 0 ? "학습 상태 저장 중…" : busy ? "계획 생성 중…" : coachingEnabled ? "AI 계획 만들기" : "AI 기능 설정 후 사용 가능"}</button>
               <p role="status" className={styles.notice}>{status}</p>
@@ -402,10 +423,16 @@ export function CoachingRequestPanel() {
               <details className={styles.planDetails}><summary>추천 이유 자세히 보기</summary><ul>
                 {result.proposal.items.map((item, index) => <li key={`${item.planned_date}-${item.start_time}-${index}`}>
                   <strong>{item.planned_date} {item.start_time} · {item.planned_minutes}분</strong><br />
-                  {item.title} · {item.reason}</li>)}
+                  {item.title} · {item.reason}
+                  {item.completion_criteria && <p className="mt-2 break-words text-sm">학습 범위: {item.completion_criteria.task_scope}<br />완료 기준: {item.completion_criteria.observable_check}</p>}</li>)}
               </ul></details>
               {!!result.proposal.deferred_goals.length && <><h4>다음으로 이월</h4><ul>{result.proposal.deferred_goals.map((goal) => <li key={goal.goal_id}>
                 {goals.find((item) => item.id === goal.goal_id)?.title ?? "목표"}: {goal.reason} ({goal.reconsider_on} 재검토)</li>)}</ul></>}
+              {!!result.proposal.advisories?.length && <section className="border-t pt-3" aria-label="추가 검토 제안"><h4>추가 검토 · 일정 미반영</h4>
+                <ul className="space-y-3">{result.proposal.advisories.map((a, i) => <li key={`${a.goal_id}:${i}`} className="break-words text-sm">
+                  <strong>{goals.find(g => g.id === a.goal_id)?.title ?? "학습 목표"}</strong><p>{a.reason}</p><p>{a.suggested_action}</p>
+                </li>)}</ul></section>}
+              {result.proposal.preparation_outlook && <section className="border-t pt-3" aria-label="이후 시험 준비 전망"><h4>이후 준비 전망 · 일정 미반영</h4><p className="break-words">{result.proposal.preparation_outlook}</p></section>}
               <button type="button" className={styles.save} disabled={approving || Boolean(approvedPlanId) || !result.proposal_run_id}
                 onClick={() => void approve()}>{approving ? "저장 중…" : approvedPlanId ? "저장 완료" : "이 계획 사용하기"}</button>
               <p>{approvedPlanId ? "승인된 계획은 DB에 저장되며 다시 눌러도 중복 생성되지 않습니다." : "확인 후 승인하면 실행할 학습 계획으로 저장됩니다."}</p>

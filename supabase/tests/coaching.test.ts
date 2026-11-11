@@ -41,7 +41,7 @@ Deno.test("coaching provider uses bounded structured output and fails closed on 
     assert(body.store === false && body.model === selected);
     assert(selected === "gpt-6.1-sol" ? body.reasoning.effort === "low" : body.reasoning === undefined);
     const submitted = JSON.parse(body.input.at(-1).content);
-    assert(submitted.input_schema_version === "coaching-evidence-v5");
+    assert(submitted.input_schema_version === "coaching-evidence-v6");
     assert(submitted.request.day_budgets[0].minutes === 30);
     assert(submitted.goal_briefs[0].goal.id === goal);
     assert(submitted.goal_briefs[0].evidence_gaps.missing_records.includes("scored_checks"));
@@ -55,6 +55,10 @@ Deno.test("coaching provider uses bounded structured output and fails closed on 
     assert(itemSchema.properties.goal_id.enum.length === 1 && itemSchema.properties.goal_id.enum[0] === goal);
     assert(itemSchema.properties.topic_id.enum.length === 1 && itemSchema.properties.topic_id.enum[0] === null);
     assert(itemSchema.properties.method_code.enum[0] === "note_review");
+    assert(itemSchema.required.includes("completion_criteria"));
+    assert(itemSchema.properties.completion_criteria.required.includes("observable_check"));
+    assert(body.text.format.schema.required.includes("advisories"));
+    assert(body.text.format.schema.required.includes("preparation_outlook"));
     assert(itemSchema.properties.planned_date.enum.length === 1 && itemSchema.properties.planned_date.enum[0] === "2026-10-01");
     assert(!body.input.includes("private"));
     return Response.json(refuse ? { status: "completed", output: [{ type: "message", content: [{ type: "refusal", refusal: "No" }] }] }
