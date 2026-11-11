@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { SCHEDULE_COLORS } from "@/lib/schedule-colors";
-import { AJOU_TERM, courseSchedules, matchesCatalogSearch, prepareSection, sameCatalogSubject, schedulesOverlap, sectionToCourse, type ParsedSection } from "@/lib/ajou-catalog";
+import { AJOU_TERM, UNSCHEDULED_LABEL, courseSchedules, isUnscheduledCourse, matchesCatalogSearch, prepareSection, sameCatalogSubject, schedulesOverlap, sectionToCourse, type ParsedSection } from "@/lib/ajou-catalog";
 import type { Course, DayOfWeek } from "@/lib/types";
 import type { WorkSchedule } from "@/lib/timetable-storage";
 
@@ -21,6 +21,7 @@ function Preview({ courses, workSchedules }: { courses: Course[]; workSchedules:
   const startHour = Math.min(8, ...entries.map((e) => Math.floor(toMinutes(e.startTime) / 60)));
   const endHour = Math.max(20, ...entries.map((e) => Math.ceil(toMinutes(e.endTime) / 60)));
   const height = (endHour - startHour) * 30;
+  const unscheduled = courses.filter(isUnscheduledCourse);
   return (
     <div className="overflow-x-auto rounded-xl border bg-white p-2" aria-label="선택한 과목의 주간 시간표 미리보기">
       <div className="min-w-[320px]">
@@ -35,6 +36,13 @@ function Preview({ courses, workSchedules }: { courses: Course[]; workSchedules:
             </div>)}
           </div>)}
         </div>
+        {unscheduled.length > 0 && <ul className="mt-2 divide-y rounded-lg border text-[11px]" aria-label={UNSCHEDULED_LABEL}>
+          {unscheduled.map((course) => <li key={course.id} className="flex items-center gap-2 px-2 py-1.5 font-medium text-slate-700">
+            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: course.color }} />
+            <span className="truncate">{course.name}</span>
+            <span className="ml-auto shrink-0 text-slate-400">{UNSCHEDULED_LABEL}</span>
+          </li>)}
+        </ul>}
       </div>
     </div>
   );
@@ -90,7 +98,7 @@ function PickerBody({ selectedTerm, existingCourses, workSchedules, onApply, onC
   const filtered = catalog.filter((section) =>
     matchesCatalogSearch(section, query) && (!department || section.department === department) &&
     (!category || section.category === category) && (!englishOnly || section.english) &&
-    (!freeDay || (!section.scheduleWarning && !section.schedules.some((s) => s.day === freeDay))) &&
+    (!freeDay || (!section.scheduleWarning && !section.unscheduled && !section.schedules.some((s) => s.day === freeDay))) &&
     (!onlyFits || basket.some((b) => b.registrationNumber === section.registrationNumber) || !availability(section)),
   );
   const visible = filtered.slice(0, limit);
@@ -155,6 +163,7 @@ function PickerBody({ selectedTerm, existingCourses, workSchedules, onApply, onC
               <p className="mt-2 break-words text-[11px] text-slate-500">원본: {section.rawSchedule || "강의시간 미기재"}</p>
               {(section.targetYear || section.teachingMode) && <p className="mt-1 text-[11px] text-slate-500">{[section.targetYear, section.teachingMode].filter(Boolean).join(" · ")}</p>}
               {(section.internationalOnly || section.priorityEnrollment) && <p className="mt-2 text-[11px] text-amber-700">{[section.internationalOnly && "유학생 전용", section.priorityEnrollment && "분반별 우선수강 대상 확인"].filter(Boolean).join(" · ")}</p>}
+              {!reason && section.unscheduled && <p className="mt-2 rounded-md bg-slate-50 px-2 py-1.5 text-xs text-slate-600">{UNSCHEDULED_LABEL} · 담으면 시간표 하단 목록에 표시됩니다. 실제 일정은 강의계획서를 확인해주세요.</p>}
               {reason && <p className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">{reason}</p>}
             </article>;
           })}
@@ -167,7 +176,7 @@ function PickerBody({ selectedTerm, existingCourses, workSchedules, onApply, onC
         {freeDay && (allCourses.some((c) => courseSchedules(c).some((s) => s.day === freeDay)) || workSchedules.some((w) => courseSchedules(w).some((s) => s.day === freeDay))) && <p className="text-xs text-amber-700">{freeDay}요일에 이미 일정이 있습니다. 공강 필터는 검색 결과에만 적용됩니다.</p>}
         <Preview courses={allCourses} workSchedules={workSchedules} />
         {basket.length === 0 ? <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">왼쪽에서 원하는 분반을 담아보세요. 시간이 겹치거나 같은 과목의 다른 분반이면 알려드립니다.</p> : <ul className="space-y-2">{basket.map((s) => <li key={s.registrationNumber} className="flex items-center justify-between gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm"><span>{s.name} <span className="text-xs text-slate-500">{s.registrationNumber} · {s.credits}학점</span></span><button aria-label={`${s.registrationNumber} 선택 제거`} className="rounded p-1 hover:bg-blue-100" onClick={() => toggle(s)}><X className="h-4 w-4" /></button></li>)}</ul>}
-        <p className="text-[11px] leading-relaxed text-slate-500">시간 미기재 강좌는 자동 배치하지 않습니다. 강의시간·수강 자격·정원은 학교 포털에서 최종 확인해주세요. 숫자 교시는 50분, 영문 교시는 75분으로 변환하며 연속 교시는 휴식 시간을 포함해 묶습니다.</p>
+        <p className="text-[11px] leading-relaxed text-slate-500">시간 미기재(시간 미정·별도 운영) 강좌는 시간표 격자 대신 하단 목록에 추가됩니다. 강의시간·수강 자격·정원은 학교 포털에서 최종 확인해주세요. 숫자 교시는 50분, 영문 교시는 75분으로 변환하며 연속 교시는 휴식 시간을 포함해 묶습니다.</p>
       </aside>
     </div>
     <div className="flex shrink-0 items-center justify-between gap-3 border-t pt-3">

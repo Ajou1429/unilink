@@ -40,6 +40,7 @@ import {
   PERSONAL_STUDIES_CHANGED_EVENT,
 } from "@/lib/personal-study-storage";
 import { Course } from "@/lib/types";
+import { UNSCHEDULED_LABEL, isUnscheduledCourse } from "@/lib/ajou-catalog";
 
 const GRADE_OPTIONS = ["A+", "A0", "B+", "B0", "C+", "C0", "D+", "D0", "F", "P", "미정"];
 const STATUS_LABELS: Record<SpecRecord["status"], string> = {
@@ -498,7 +499,7 @@ export default function RecordsPage() {
                             <p className="truncate font-medium">{course.name}</p>
                             <p className="text-xs text-muted-foreground">
                               {COURSE_TYPE_LABELS[course.courseType ?? "major"]} ·{" "}
-                              {course.credits}학점 · {course.days.join(", ")}
+                              {course.credits}학점 · {isUnscheduledCourse(course) ? UNSCHEDULED_LABEL : course.days.join(", ")}
                             </p>
                           </div>
                           <Button size="sm" onClick={() => addCourseGrade(course)}>

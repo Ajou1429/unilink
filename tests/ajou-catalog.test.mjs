@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { AJOU_TERM, parseAjouSchedule, prepareSection, schedulesOverlap, sectionToCourse, sameCatalogSubject, matchesCatalogSearch } from "../src/lib/ajou-catalog.ts";
+import { AJOU_TERM, parseAjouSchedule, prepareSection, schedulesOverlap, sectionToCourse, sameCatalogSubject, matchesCatalogSearch, isUnscheduledCourse } from "../src/lib/ajou-catalog.ts";
 
 const catalog = JSON.parse(readFileSync(new URL("../src/data/ajou-2026-2.json", import.meta.url), "utf8"));
 const sections = catalog.courses.map(prepareSection);
@@ -10,7 +10,8 @@ test("the source snapshot retains every section with unique registration numbers
   assert.equal(sections.length, 1820);
   assert.equal(new Set(sections.map((s) => s.registrationNumber)).size, 1820);
   assert.equal(sections.filter((s) => !s.rawSchedule).length, 399);
-  assert.equal(sections.filter((s) => !s.scheduleWarning).length, 1421);
+  assert.equal(sections.filter((s) => s.unscheduled).length, 399);
+  assert.equal(sections.filter((s) => !s.scheduleWarning && !s.unscheduled).length, 1421);
   assert.deepEqual(sections.filter((s) => s.rawSchedule && s.scheduleWarning), []);
 });
 
@@ -53,7 +54,7 @@ test("overlap checks include containment but permit adjacent periods and differe
 });
 
 test("all timed sections convert to stable IDs with credits and original times intact", () => {
-  for (const s of sections.filter((s) => !s.scheduleWarning)) {
+  for (const s of sections.filter((s) => !s.scheduleWarning && !s.unscheduled)) {
     const c = sectionToCourse(s, "#123456");
     assert.equal(c.term, AJOU_TERM);
     assert.equal(c.id, `ajou-2026-2-${s.registrationNumber}`);
@@ -63,7 +64,17 @@ test("all timed sections convert to stable IDs with credits and original times i
     assert.ok(sameCatalogSubject(s, c));
     assert.ok(!sameCatalogSubject(s, { ...c, term: "2026년 1학기" }));
   }
-  assert.throws(() => sectionToCourse(sections.find((s) => !s.rawSchedule), "#123456"));
+  assert.throws(() => sectionToCourse({ ...sections.find((s) => !s.unscheduled), schedules: [], scheduleWarning: "확인 필요" }, "#123456"));
+});
+
+test("unscheduled (시간 미정·별도 운영) sections convert to courses without time slots", () => {
+  const s = sections.find((s) => s.unscheduled);
+  const c = sectionToCourse(s, "#123456");
+  assert.deepEqual(c.schedules, []);
+  assert.deepEqual(c.days, []);
+  assert.equal(c.credits, s.credits);
+  assert.ok(isUnscheduledCourse(c));
+  assert.ok(!schedulesOverlap(c.schedules, [{ day: "월", startTime: "09:00", endTime: "18:00" }]));
 });
 
 test("a different section of the same subject is recognized as a duplicate", () => {

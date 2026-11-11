@@ -30,6 +30,7 @@ import {
   Users,
 } from "lucide-react";
 import { Course, LectureNote, StudyPlan } from "@/lib/types";
+import { UNSCHEDULED_LABEL, isUnscheduledCourse } from "@/lib/ajou-catalog";
 import {
   CourseFile,
   getCourseFiles,
@@ -266,6 +267,7 @@ function CourseContent() {
 
   const courseTime = useMemo(() => {
     if (!course) return "";
+    if (isUnscheduledCourse(course)) return UNSCHEDULED_LABEL;
     return `${course.days.join(", ")} ${course.startTime} - ${course.endTime}`;
   }, [course]);
 

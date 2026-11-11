@@ -26,7 +26,11 @@ export interface CatalogSection {
 export interface ParsedSection extends CatalogSection {
   schedules: CourseSchedule[];
   scheduleWarning: string | null;
+  /** 시간 미정·별도 운영 강좌: 시간표 격자 대신 하단 목록에 표시한다. */
+  unscheduled: boolean;
 }
+
+export const UNSCHEDULED_LABEL = "시간 미정·별도 운영";
 
 const DAYS = "월화수목금토일";
 const minutes = (time: string) => {
@@ -40,7 +44,7 @@ const clock = (value: number) => `${String(Math.floor(value / 60)).padStart(2, "
 // Half periods shift the start by 30 minutes; explicit clock ranges take precedence.
 // Source: https://www.ajou.ac.kr/gs/bachelor/enrolment.do
 export function parseAjouSchedule(raw: string): { schedules: CourseSchedule[]; warning: string | null } {
-  if (!raw.trim()) return { schedules: [], warning: "시간 미정·별도 운영: 강의계획서 확인 필요" };
+  if (!raw.trim()) return { schedules: [], warning: `${UNSCHEDULED_LABEL}: 강의계획서 확인 필요` };
   const token = /([월화수목금토일])?\s*(\d{1,2}:\d{2}\s*[~～–-]\s*\d{1,2}:\d{2}|[A-H]|\d+(?:\.5)?)(?:\s*\(([^)]*)\))?/g;
   const schedules: CourseSchedule[] = [];
   let day: DayOfWeek | undefined;
@@ -82,7 +86,14 @@ export function parseAjouSchedule(raw: string): { schedules: CourseSchedule[]; w
 
 export function prepareSection(section: CatalogSection): ParsedSection {
   const { schedules, warning } = parseAjouSchedule(section.rawSchedule);
-  return { ...section, schedules, scheduleWarning: warning };
+  const unscheduled = !section.rawSchedule.trim();
+  // 시간 미정 강좌는 추가 가능하므로 차단 사유(scheduleWarning)로 쓰지 않는다.
+  return { ...section, schedules, scheduleWarning: unscheduled ? null : warning, unscheduled };
+}
+
+/** 요일·시간이 없는 과목(시간 미정·별도 운영)인지 여부 */
+export function isUnscheduledCourse(course: Pick<Course, "schedules" | "days" | "startTime" | "endTime">) {
+  return courseSchedules(course).length === 0;
 }
 
 export function courseSchedules(course: Pick<Course, "schedules" | "days" | "startTime" | "endTime">): CourseSchedule[] {
@@ -102,8 +113,8 @@ export function sameCatalogSubject(section: Pick<CatalogSection, "registrationNu
 }
 
 export function sectionToCourse(section: ParsedSection, color: string): Course {
-  if (section.scheduleWarning || !section.schedules.length) throw new Error("강의시간을 확인한 과목만 자동 추가할 수 있습니다.");
-  const first = section.schedules[0];
+  if (section.scheduleWarning || (!section.schedules.length && !section.unscheduled)) throw new Error("강의시간을 확인한 과목만 자동 추가할 수 있습니다.");
+  const first = section.schedules[0] as CourseSchedule | undefined;
   return {
     id: `ajou-2026-2-${section.registrationNumber}`, term: AJOU_TERM,
     catalogSource: "ajou", registrationNumber: section.registrationNumber,
@@ -114,7 +125,8 @@ export function sectionToCourse(section: ParsedSection, color: string): Course {
     credits: section.credits, color,
     courseType: section.curriculum === "전공과목" ? "major" : "non-major",
     days: [...new Set(section.schedules.map((s) => s.day))], schedules: section.schedules,
-    startTime: first.startTime, endTime: first.endTime,
+    // 시간 미정 과목은 시간대가 없으므로 빈 값으로 둔다 (격자에 그리지 않음).
+    startTime: first?.startTime ?? "", endTime: first?.endTime ?? "",
   };
 }
 

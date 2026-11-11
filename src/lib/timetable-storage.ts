@@ -133,3 +133,19 @@ export function saveCourseSession(session: CourseSessionProgress) {
 
   window.dispatchEvent(new Event(TIMETABLE_CHANGED_EVENT));
 }
+
+export const MAX_CREDITS_STORAGE_KEY = "unilink:max-credits";
+export const DEFAULT_MAX_CREDITS = 18;
+export const MAX_CREDITS_RANGE = { min: 9, max: 24 } as const;
+
+/** 사용자가 설정한 학기당 최대 수강 학점 (학교·학년마다 달라 직접 설정) */
+export function getMaxCredits(): number {
+  const value = readJson<number>(MAX_CREDITS_STORAGE_KEY, DEFAULT_MAX_CREDITS);
+  return Number.isInteger(value) && value >= MAX_CREDITS_RANGE.min && value <= MAX_CREDITS_RANGE.max
+    ? value
+    : DEFAULT_MAX_CREDITS;
+}
+
+export function saveMaxCredits(value: number) {
+  writeJson(MAX_CREDITS_STORAGE_KEY, value);
+}

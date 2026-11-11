@@ -7,7 +7,7 @@ import { Header } from "@/components/layout/Header";
 import { TimetableGrid } from "@/components/timetable/TimetableGrid";
 import { AjouCoursePicker } from "@/components/timetable/AjouCoursePicker";
 import { ScheduleColorPicker } from "@/components/timetable/ScheduleColorPicker";
-import { AJOU_TERM, courseSchedules, sameCatalogSubject, schedulesOverlap } from "@/lib/ajou-catalog";
+import { AJOU_TERM, UNSCHEDULED_LABEL, courseSchedules, isUnscheduledCourse, sameCatalogSubject, schedulesOverlap } from "@/lib/ajou-catalog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -79,6 +79,9 @@ import {
   saveMonthlyEvents,
   getWorkSchedules,
   saveWorkSchedules,
+  getMaxCredits,
+  saveMaxCredits,
+  MAX_CREDITS_RANGE,
   WorkSchedule,
   WORK_SCHEDULES_CHANGED_EVENT,
 } from "@/lib/timetable-storage";
@@ -97,7 +100,14 @@ const COURSE_TYPE_LABELS = {
   "non-major": "비전공",
 } as const;
 const LEVELS: PaceLevel[] = ["상", "중", "하"];
-const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);
+const MAX_CREDIT_OPTIONS = Array.from(
+  { length: MAX_CREDITS_RANGE.max - MAX_CREDITS_RANGE.min + 1 },
+  (_, index) => MAX_CREDITS_RANGE.min + index,
+);
+
+function formatCourseDays(course: Course) {
+  return isUnscheduledCourse(course) ? UNSCHEDULED_LABEL : course.days.join("");
+}
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
   const hour = Math.floor(index / 2);
   const minute = index % 2 === 0 ? "00" : "30";
@@ -330,6 +340,8 @@ export default function TimetablePage() {
   const [selectedEvent, setSelectedEvent] = useState<MonthlyEvent | null>(null);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()));
+  const [viewTab, setViewTab] = useState<"weekly" | "monthly">("weekly");
+  const [maxCredits, setMaxCredits] = useState(18);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const today = new Date();
     return today.getFullYear() === 2026 ? today.getMonth() + 1 : 1;
@@ -391,6 +403,7 @@ export default function TimetablePage() {
       setCourses(getStoredCourses(selectedTerm));
       setAjouCourses(getStoredCourses(AJOU_TERM));
       setWorkSchedules(getWorkSchedules());
+      setMaxCredits(getMaxCredits());
       setPersonalStudies(
         getPersonalStudies().filter((study) => (study.status ?? "active") === "active"),
       );
@@ -435,6 +448,13 @@ export default function TimetablePage() {
     .filter((course) => (course.courseType ?? "major") === "major")
     .reduce((sum, c) => sum + c.credits, 0);
   const nonMajorCredits = totalCredits - majorCredits;
+  const remainingCredits = maxCredits - totalCredits;
+  const unscheduledCourses = filteredCourses.filter(isUnscheduledCourse);
+
+  function changeMaxCredits(value: number) {
+    setMaxCredits(value);
+    saveMaxCredits(value);
+  }
 
   function persistCourses(nextCourses: Course[]) {
     setCourses(nextCourses);
@@ -779,32 +799,35 @@ export default function TimetablePage() {
   }
 
   function saveEditedCourse() {
-    if (!editingCourse || !editingCourse.name.trim() || editingCourse.days.length === 0) {
+    // 요일을 비우면 시간 미정·별도 운영 과목으로 저장한다.
+    if (!editingCourse || !editingCourse.name.trim()) {
       return;
     }
+    const fallbackStart = editingCourse.startTime || "09:00";
+    const fallbackEnd = editingCourse.endTime || "10:00";
 
     const existingSchedules = editingCourse.schedules?.length
       ? editingCourse.schedules
       : editingCourse.days.map((day) => ({
           day,
-          startTime: editingCourse.startTime,
-          endTime: editingCourse.endTime,
+          startTime: fallbackStart,
+          endTime: fallbackEnd,
         }));
     const schedules = editingCourse.days.flatMap(
       (day) => {
         const matches = existingSchedules.filter((schedule) => schedule.day === day);
         return matches.length ? matches : [{
           day,
-          startTime: editingCourse.startTime,
-          endTime: editingCourse.endTime,
+          startTime: fallbackStart,
+          endTime: fallbackEnd,
         }];
       },
     );
     const updatedCourse: Course = {
       ...editingCourse,
       schedules,
-      startTime: schedules[0]?.startTime ?? editingCourse.startTime,
-      endTime: schedules[0]?.endTime ?? editingCourse.endTime,
+      startTime: schedules[0]?.startTime ?? "",
+      endTime: schedules[0]?.endTime ?? "",
       name: editingCourse.name.trim(),
       professor: editingCourse.professor.trim(),
       location: editingCourse.location.trim(),
@@ -1187,31 +1210,62 @@ export default function TimetablePage() {
 
         <div className="grid 2xl:grid-cols-[minmax(0,1fr)_320px] gap-6">
           <div className="min-w-0">
-            <Tabs defaultValue="weekly">
+            <Tabs
+              value={viewTab}
+              onValueChange={(value) => setViewTab(value as "weekly" | "monthly")}
+            >
               <div className="flex items-center justify-between gap-3 mb-3">
                 <TabsList className="bg-white border shadow-sm">
                   <TabsTrigger value="weekly">주간 시간표</TabsTrigger>
                   <TabsTrigger value="monthly">월간 일정</TabsTrigger>
                 </TabsList>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    onClick={() => setWeekStart((prev) => addDays(prev, -7))}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <div className="min-w-40 text-center text-sm font-medium">
-                    {formatWeekRange(weekStart)}
+                {viewTab === "weekly" ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      aria-label="이전 주"
+                      onClick={() => setWeekStart((prev) => addDays(prev, -7))}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <div className="min-w-40 text-center text-sm font-medium">
+                      {formatWeekRange(weekStart)}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      aria-label="다음 주"
+                      onClick={() => setWeekStart((prev) => addDays(prev, 7))}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    onClick={() => setWeekStart((prev) => addDays(prev, 7))}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      aria-label="이전 달"
+                      disabled={calendarMonth === 1}
+                      onClick={() => setCalendarMonth((prev) => Math.max(1, prev - 1))}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <div className="min-w-40 text-center text-sm font-medium">
+                      2026년 {calendarMonth}월
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      aria-label="다음 달"
+                      disabled={calendarMonth === 12}
+                      onClick={() => setCalendarMonth((prev) => Math.min(12, prev + 1))}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
               </div>
 
               <TabsContent value="weekly">
@@ -1232,6 +1286,37 @@ export default function TimetablePage() {
                         openNewWorkSchedule({ day, startTime, endTime })
                       }
                     />
+                    {unscheduledCourses.length > 0 && (
+                      <div
+                        className="mt-3 overflow-hidden rounded-xl border bg-white"
+                        aria-label={`${UNSCHEDULED_LABEL} 과목`}
+                      >
+                        {unscheduledCourses.map((course) => (
+                          <button
+                            key={course.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedCourse(course);
+                              setSelectedOccurrence(null);
+                              setSelectedEvent(null);
+                              setEditingCourse(null);
+                            }}
+                            className="flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-accent"
+                          >
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: course.color }}
+                            />
+                            <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                              {course.name}
+                            </span>
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {UNSCHEDULED_LABEL} · {course.credits}학점
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -1239,53 +1324,12 @@ export default function TimetablePage() {
               <TabsContent value="monthly">
                 <Card className="border-0 shadow-sm">
                   <CardHeader className="pb-3">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <CardTitle className="text-base">
-                          2026년 {calendarMonth}월 월간 일정
-                        </CardTitle>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          날짜를 누르면 일정 추가, 일정 칩을 누르면 상세를 볼 수 있습니다.
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="icon-sm"
-                          disabled={calendarMonth === 1}
-                          onClick={() =>
-                            setCalendarMonth((prev) => Math.max(1, prev - 1))
-                          }
-                        >
-                          <ChevronLeft className="h-4 w-4" />
-                        </Button>
-                        <Select
-                          value={String(calendarMonth)}
-                          onValueChange={(value) => setCalendarMonth(Number(value))}
-                        >
-                          <SelectTrigger className="w-28">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {MONTH_OPTIONS.map((month) => (
-                              <SelectItem key={month} value={String(month)}>
-                                {month}월
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <Button
-                          variant="outline"
-                          size="icon-sm"
-                          disabled={calendarMonth === 12}
-                          onClick={() =>
-                            setCalendarMonth((prev) => Math.min(12, prev + 1))
-                          }
-                        >
-                          <ChevronRight className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
+                    <CardTitle className="text-base">
+                      2026년 {calendarMonth}월 월간 일정
+                    </CardTitle>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      날짜를 누르면 일정 추가, 일정 칩을 누르면 상세를 볼 수 있습니다.
+                    </p>
                   </CardHeader>
                   <CardContent>
                     <div className="grid grid-cols-7 border-y bg-muted/30 text-center text-xs font-semibold text-muted-foreground">
@@ -1482,8 +1526,9 @@ export default function TimetablePage() {
                     <div className="flex items-center gap-2">
                       <Clock className="h-3.5 w-3.5" />
                       <span>
-                        {selectedCourse.days.join(", ")} {selectedCourse.startTime} -{" "}
-                        {selectedCourse.endTime}
+                        {isUnscheduledCourse(selectedCourse)
+                          ? UNSCHEDULED_LABEL
+                          : `${selectedCourse.days.join(", ")} ${selectedCourse.startTime} - ${selectedCourse.endTime}`}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1946,7 +1991,7 @@ export default function TimetablePage() {
                           <p className="text-sm font-medium truncate">{course.name}</p>
                           <p className="text-xs text-muted-foreground">
                             {COURSE_TYPE_LABELS[course.courseType ?? "major"]} ·{" "}
-                            {course.days.join("")} · {course.credits}학점
+                            {formatCourseDays(course)} · {course.credits}학점
                           </p>
                         </div>
                       </button>
@@ -1970,11 +2015,33 @@ export default function TimetablePage() {
                       수업 {courses.length}개
                     </Badge>
                     <Badge
-                      variant={totalCredits >= 18 ? "destructive" : "secondary"}
+                      variant={remainingCredits <= 0 ? "destructive" : "secondary"}
                       className="text-[10px]"
                     >
-                      {totalCredits >= 18 ? "최대 학점" : `${18 - totalCredits}학점 여유`}
+                      {remainingCredits > 0
+                        ? `${remainingCredits}학점 여유`
+                        : remainingCredits === 0
+                          ? "최대 학점"
+                          : `${-remainingCredits}학점 초과`}
                     </Badge>
+                  </div>
+                  <div className="mt-3 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                    <span>최대 수강 학점</span>
+                    <Select
+                      value={String(maxCredits)}
+                      onValueChange={(value) => changeMaxCredits(Number(value))}
+                    >
+                      <SelectTrigger className="h-7 w-24 text-xs" aria-label="최대 수강 학점">
+                        <SelectValue>{`${maxCredits}학점`}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MAX_CREDIT_OPTIONS.map((credit) => (
+                          <SelectItem key={credit} value={String(credit)}>
+                            {credit}학점
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               </CardContent>
