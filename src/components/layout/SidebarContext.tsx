@@ -46,6 +46,24 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearTimeout(timeout);
   }, []);
 
+  // 앱 위에 데모 배너 등이 있으면 그 높이를 --app-top으로 두어, 홈·목록이 남은 화면 높이에 딱 맞게 한다
+  useEffect(() => {
+    const measure = () => {
+      const shell = document.querySelector<HTMLElement>("[data-app-shell]");
+      if (!shell) return;
+      const top = Math.max(0, shell.getBoundingClientRect().top + window.scrollY);
+      document.documentElement.style.setProperty("--app-top", `${top}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(document.body);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
   const toggle = useCallback(() => {
     // 좁은 화면에서는 목록을 위에 띄우고, 넓은 화면에서는 접었다 폈다 한다
     if (window.matchMedia("(max-width: 1023px)").matches) {

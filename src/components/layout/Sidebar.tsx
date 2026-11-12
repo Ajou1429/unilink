@@ -274,7 +274,7 @@ export function Sidebar() {
       <aside
         aria-label="목록"
         className={cn(
-          "sticky top-0 hidden h-dvh shrink-0 overflow-hidden border-r bg-[#f7f6f3] transition-[width] duration-200 ease-out lg:block",
+          "sticky top-0 hidden h-[calc(100dvh-var(--app-top,0px))] shrink-0 overflow-hidden border-r bg-[#f7f6f3] transition-[width] duration-200 ease-out lg:block",
           open ? "w-72" : "w-0 border-r-0",
         )}
       >

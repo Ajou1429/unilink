@@ -10,13 +10,13 @@ export default function DashboardLayout({
 }) {
   return (
     <SidebarProvider>
-      <div className="flex min-h-screen bg-slate-50">
+      <div data-app-shell className="flex min-h-[calc(100dvh-var(--app-top,0px))] bg-slate-50">
         <NotificationBridge />
         <Suspense fallback={null}>
           <Sidebar />
         </Suspense>
         {/* 목록을 접으면 본문이 그만큼 넓어진다 */}
-        <main className="min-h-screen min-w-0 flex-1">
+        <main className="min-w-0 flex-1">
           {children}
         </main>
       </div>

@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { BookMarked, BookOpen, CalendarDays, FileText, Sparkles } from "lucide-react";
+import { FileText, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NEW_CHAT_EVENT } from "@/components/layout/Sidebar";
 import { ChatComposer, type ComposerSubmit } from "./ChatComposer";
@@ -13,14 +12,6 @@ type ThreadItem =
   | { id: string; kind: "user"; text: string; fileNames: string[] }
   | { id: string; kind: "files"; recordIds: string[] }
   | { id: string; kind: "notice"; text: string };
-
-const QUICK_LINKS = [
-  { href: "/timetable", icon: CalendarDays, label: "시간표" },
-  { href: "/study", icon: BookOpen, label: "학습 계획" },
-  { href: "/ai-coaching", icon: Sparkles, label: "AI 학습코칭" },
-  { href: "/notes", icon: FileText, label: "나의 노트" },
-  { href: "/problem-bank", icon: BookMarked, label: "문제은행" },
-];
 
 let threadSeq = 0;
 const nextId = () => `t-${Date.now()}-${++threadSeq}`;
@@ -85,32 +76,27 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
   const composer = <ChatComposer onSubmit={send} footer={driveToggle} autoFocus />;
 
   if (thread.length === 0) {
+    // 넓은 화면: 위쪽(인사말·입력창)과 아래쪽(일정 박스)이 화면 높이를 나눠 써서 페이지는 스크롤되지 않는다
     return (
-      <div className="mx-auto w-full max-w-5xl px-4 pb-12 sm:px-6">
-        <section className="mx-auto flex min-h-[58vh] max-w-2xl flex-col justify-center py-10">
-          <h2 className="mb-7 flex items-center justify-center gap-3 text-center text-3xl font-semibold tracking-tight sm:text-[34px]" suppressHydrationWarning>
+      <div className="mx-auto flex w-full max-w-5xl flex-col px-4 pb-6 sm:px-6 lg:h-full lg:min-h-0">
+        <section className="mx-auto flex w-full max-w-2xl shrink-0 flex-col justify-center py-10 lg:min-h-0 lg:flex-1 lg:py-4">
+          <h2 className="mb-6 flex items-center justify-center gap-3 text-center text-3xl font-semibold tracking-tight sm:text-[34px]" suppressHydrationWarning>
             <Sparkles className="h-8 w-8 shrink-0 text-primary" aria-hidden />
             {greeting}
           </h2>
           {consentBanner}
           {composer}
-          <div className="mt-4 flex flex-wrap justify-center gap-2">
-            {QUICK_LINKS.map(({ href, icon: Icon, label }) => (
-              <Link key={href} href={href} className="flex items-center gap-1.5 rounded-lg border bg-white px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
-                <Icon className="h-4 w-4" /> {label}
-              </Link>
-            ))}
-          </div>
         </section>
-        {widgets}
+        {widgets && <div className="lg:min-h-[200px] lg:flex-[1.15]">{widgets}</div>}
       </div>
     );
   }
 
   const byId = new Map(intake.records.map((record) => [record.id, record]));
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 sm:px-6">
-      <div className="flex-1 space-y-5 py-6">
+    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 sm:px-6 lg:h-full lg:min-h-0">
+      {/* 대화가 길어지면 메시지 영역만 스크롤 */}
+      <div className="flex-1 space-y-5 py-6 lg:min-h-0 lg:overflow-y-auto">
         {thread.map((item) => {
           if (item.kind === "user") {
             return (
@@ -148,7 +134,7 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
         })}
         <div ref={bottom} />
       </div>
-      <div className="sticky bottom-0 bg-gradient-to-t from-slate-50 via-slate-50 to-slate-50/0 pb-4 pt-6">
+      <div className="sticky bottom-0 bg-gradient-to-t from-slate-50 via-slate-50 to-slate-50/0 pb-4 pt-6 lg:static lg:pt-2">
         {consentBanner}
         {composer}
       </div>

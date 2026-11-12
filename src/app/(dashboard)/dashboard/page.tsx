@@ -96,13 +96,14 @@ export default function DashboardPage() {
   // 정적 빌드 시각과 접속 시각의 인사말이 다를 수 있어 h2에 suppressHydrationWarning을 둔다.
   const greeting = getGreeting(displayName, new Date(now));
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-[calc(100dvh-var(--app-top,0px))] flex-col lg:h-[calc(100dvh-var(--app-top,0px))] lg:overflow-hidden">
       <Header title="대시보드" bare />
+      <div className="flex flex-1 flex-col lg:min-h-0">
       <ChatHome
         greeting={greeting}
         widgets={
         // 오늘 계획·시험·과제·오늘 수업은 입력창 아래에 한 줄로, 각 박스 안에서 스크롤
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[3fr_2fr_2fr] [&>*]:h-80">
+        <div className="grid gap-4 md:grid-cols-2 lg:h-full lg:grid-cols-[3fr_2fr_2fr] max-lg:[&>*]:h-80 lg:[&>*]:min-h-0">
           <TodayPlans date={new Intl.DateTimeFormat("sv-SE", { timeZone: KOREA_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now))} plans={plans} courses={termCourses} />
 
           <ExamAssignments now={now} courses={termCourses} />
@@ -153,6 +154,7 @@ export default function DashboardPage() {
         </div>
         }
       />
+      </div>
     </div>
   );
 }
