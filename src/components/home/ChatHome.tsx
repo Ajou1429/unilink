@@ -8,7 +8,9 @@ import {
   applyAction, editApplied, getChatConsent, interpretMessage, loadChatContext, setChatConsent, undoApplied,
   type AppliedEdit, type ChatContext,
 } from "@/lib/chat-record/apply";
-import { dateKey, missingOf, resolveProblemAction, type ChatAction } from "@/lib/chat-record/plan";
+import {
+  courseMentioned, dateKey, missingOf, pendingNote, resolveProblemAction, sameRecord, type ChatAction,
+} from "@/lib/chat-record/plan";
 import { ChatComposer, type ComposerSubmit } from "./ChatComposer";
 import { ChatRecordCard, type RecordEntry } from "./ChatRecordCard";
 import { IntakeResultRow } from "./IntakeResultRow";
@@ -21,6 +23,9 @@ type ThreadItem =
   | { id: string; kind: "assistant"; text: string; pending?: boolean }
   | { id: string; kind: "records"; entries: RecordEntry[] }
   | { id: string; kind: "consent"; text: string };
+
+const waitingEntries = (thread: ThreadItem[]) =>
+  thread.flatMap((item) => (item.kind === "records" ? item.entries.filter((entry) => entry.status === "waiting" && entry.missing) : []));
 
 let threadSeq = 0;
 const nextId = () => `t-${Date.now()}-${++threadSeq}`;
@@ -71,6 +76,11 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
     const history = thread.flatMap((item): { role: "user" | "assistant"; text: string }[] =>
       item.kind === "user" && item.text ? [{ role: "user", text: item.text }]
         : item.kind === "assistant" && item.text ? [{ role: "assistant", text: item.text }] : []).slice(-6);
+    // 아직 되묻는 중인 기록도 알려 준다. 사용자가 버튼 대신 "어제", "운영체제"처럼 글로 답하면 이어서 해석한다.
+    for (const entry of waitingEntries(thread)) {
+      const course = context?.courses.find((item) => item.id === entry.action.course_id);
+      history.push({ role: "assistant", text: pendingNote(entry.action, entry.missing!, course?.name) });
+    }
     setThread((prev) => [...prev, ...items]);
     if (text) void record(text, history);
   }
@@ -109,17 +119,32 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
       const ctx = await loadChatContext();
       setContext(ctx);
       if (!ctx.signedIn) { say("로그인하면 대화 내용으로 진도·이해도가 기록돼요."); return; }
-      const result = await interpretMessage(ctx, text, history, dateKey(new Date()));
-      say(result.reply || (result.actions.length ? "기록할게요." : "기록할 진도나 이해도를 찾지 못했어요. 과목과 함께 말씀해 주세요."));
-      if (!result.actions.length) return;
+      const result = await interpretMessage(ctx, text, history.slice(-8), dateKey(new Date()));
+      if (!result.actions.length) {
+        say(result.dropped > 0 ? "말씀하신 과목이나 문항 번호를 찾지 못해 기록하지 않았어요. 시간표·문제은행에 있는 이름과 번호로 말씀해 주세요."
+          : result.reply || "기록할 진도나 이해도를 찾지 못했어요. 과목과 함께 말씀해 주세요.");
+        return;
+      }
+      say(result.reply || "기록할게요.");
+      const waiting = waitingEntries(threadRef.current);
       const recordsId = nextId();
-      const entries: RecordEntry[] = result.actions.map((action, index) => ({ key: `${recordsId}-${index}`, action, status: "saving", missing: null }));
-      // 앞에서 되묻던 기록은 이번 답으로 다시 해석했으므로 지운다
+      const replaced = new Set<string>();
+      const entries: RecordEntry[] = result.actions.map((raw, index) => {
+        // 되묻던 기록에 글로 답한 경우: 그 기록을 이번 결과로 바꾼다
+        const answered = waiting.find((entry) => !replaced.has(entry.key) && sameRecord(entry.action, raw));
+        if (answered) replaced.add(answered.key);
+        const source = answered ? `${answered.source}\n${text}` : text;
+        // 과목은 사용자가 직접 말한 경우에만 쓴다. AI가 짐작한 과목이면 되묻는다.
+        const course = ctx.courses.find((item) => item.id === raw.course_id);
+        const action = course && !courseMentioned(course, source.split("\n")) ? { ...raw, course_id: null } : raw;
+        return { key: `${recordsId}-${index}`, source, action, status: "saving", missing: null };
+      });
       setThread((prev) => [
-        ...prev.map((item) => (item.kind === "records" ? { ...item, entries: item.entries.filter((entry) => entry.status !== "waiting") } : item)),
+        ...prev.map((item) => (item.kind === "records" ? { ...item, entries: item.entries.filter((entry) => !replaced.has(entry.key)) } : item)),
         { id: recordsId, kind: "records", entries },
       ]);
-      await Promise.all(entries.map((entry) => runEntry(recordsId, ctx, entry.key, entry.action)));
+      // 같은 새 주제가 두 번 만들어지지 않도록 하나씩 저장한다
+      for (const entry of entries) await runEntry(recordsId, ctx, entry.key, entry.action);
     } catch (error) {
       say(error instanceof Error ? error.message : "대화를 기록하지 못했어요.");
     }

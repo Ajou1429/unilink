@@ -6,10 +6,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Award,
   BookMarked,
-  BookOpen,
   CalendarDays,
   ChevronDown,
-  FileText,
   GraduationCap,
   LogOut,
   PanelLeft,
@@ -17,7 +15,6 @@ import {
   PinOff,
   Plus,
   Settings,
-  Sparkles,
   Target,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -39,9 +36,6 @@ export const NEW_CHAT_EVENT = "unilink:newChat";
 
 const navItems = [
   { href: "/timetable", icon: CalendarDays, label: "시간표" },
-  { href: "/study", icon: BookOpen, label: "학습 계획" },
-  { href: "/ai-coaching", icon: Sparkles, label: "AI 학습코칭" },
-  { href: "/notes", icon: FileText, label: "나의 노트" },
   { href: "/problem-bank", icon: BookMarked, label: "문제은행" },
   { href: "/records", icon: Award, label: "성적 및 스펙" },
 ];

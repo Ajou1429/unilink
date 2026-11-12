@@ -12,6 +12,8 @@ import {
 
 export interface RecordEntry {
   key: string;
+  /** 이 기록을 만든 사용자 말 (되물은 뒤 글로 답할 때 과목 확인에 쓴다) */
+  source: string;
   action: ChatAction;
   status: "waiting" | "saving" | "saved" | "undoing" | "undone" | "error";
   missing: Missing | null;

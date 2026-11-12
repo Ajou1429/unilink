@@ -4,7 +4,7 @@ import {
   chatModelInput, chatSchema, parseChatOutput, parseChatRequest,
 } from "../supabase/functions/_shared/chatRecord.ts";
 import {
-  formatDate, missingOf, recentClassDates, resolveProblemAction, slotFor,
+  courseMentioned, formatDate, missingOf, pendingNote, recentClassDates, resolveProblemAction, sameRecord, slotFor,
 } from "../src/lib/chat-record/plan.ts";
 
 const body = {
@@ -140,4 +140,35 @@ test("migration 0035: chat calls have their own daily limit", async () => {
   } finally {
     await db.close();
   }
+});
+
+test("simulation fixes: future class dates are re-asked and dropped records are counted", () => {
+  const request = parseChatRequest(body);
+  const result = parseChatOutput({ reply: "기록할게요.", actions: [
+    { ...empty, kind: "session", course_id: "math", date: "2026-11-19", progress_title: "정규화" },
+    { ...empty, kind: "problem", course_id: "math", problem_labels: ["99"], problem_level: 0 },
+  ] }, request);
+  assert.equal(result.actions[0].date, null, "a future date becomes a date question");
+  assert.equal(result.dropped, 1, "the unknown problem is reported as dropped");
+});
+
+test("simulation fixes: the course must be named by the student (name, code or abbreviation)", () => {
+  const os = { name: "운영체제", courseCode: "SCE213" };
+  assert.equal(courseMentioned(os, ["운영체제 교착 상태 어려워"]), true);
+  assert.equal(courseMentioned(os, ["운체는 너무 어려워"]), true, "abbreviation with a particle");
+  assert.equal(courseMentioned(os, ["sce 213 과제"]), true, "course code");
+  assert.equal(courseMentioned(os, ["교착 상태 어려워"]), false, "topic alone does not name the course");
+  assert.equal(courseMentioned({ name: "알고리즘" }, ["교착 상태 이제 알고 있어"]), false, "'알고 있어' is not 알고리즘");
+  assert.equal(courseMentioned({ name: "소프트웨어공학" }, ["소공 UML 반쯤 이해"]), true);
+  assert.equal(courseMentioned({ name: "영어회화" }, ["오늘 영어 수업 빨랐어"]), true);
+  assert.equal(courseMentioned({ name: "수학2" }, ["수2 극한"]), true);
+  assert.equal(courseMentioned(os, ["교착 상태 어려워", "운영체제"]), true, "answer to the course question");
+});
+
+test("simulation fixes: typed answers replace the matching pending record and tell the AI what was asked", () => {
+  const pending = { ...empty, kind: "session", course_id: "algo", progress_title: "동적 계획법" };
+  assert.equal(sameRecord(pending, { ...pending, date: "2026-11-12" }), true);
+  assert.equal(sameRecord({ ...empty, topic: "B+트리", status: "needs_review" }, { ...empty, topic: "그리디", status: "understood" }), false);
+  assert.equal(sameRecord({ ...empty, kind: "session" }, { ...empty, kind: "session" }), false, "empty sessions do not match");
+  assert.equal(pendingNote(pending, "date", "알고리즘"), "확인 중: 언제 수업인가요? — 알고리즘 수업 진도 동적 계획법");
 });

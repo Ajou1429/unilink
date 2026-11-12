@@ -43,7 +43,8 @@ export interface ChatAction {
   quote: string;
 }
 
-export interface ChatResult { reply: string; actions: ChatAction[] }
+/** dropped: 모델이 냈지만 검사에서 버린 기록 수 (모르는 문항 등). 답이 "기록할게요"인데 아무것도 없을 때 안내에 쓴다. */
+export interface ChatResult { reply: string; actions: ChatAction[]; dropped: number }
 
 export class InputError extends Error {}
 
@@ -139,6 +140,7 @@ export const CHAT_INSTRUCTIONS = [
   "- session: what happened in a specific class meeting. date = the class date (YYYY-MM-DD) resolved from words like 오늘/어제/지난주 화요일 using today's date; null if no date or day is stated. progress_title = what the class covered (e.g. '3장 극한과 연속'), page_start/page_end only if pages are stated. difficulty = how hard the content was (상 hard, 중, 하 easy); pace = how fast the class went (상 fast, 중, 하 slow). Leave unstated fields null.",
   "- problem: understanding of numbered problems in the student's problem bank. problem_labels must be copied from the listed problem labels of that course; problem_file = one listed file key when the student indicates which file (e.g. 중간/기말, file name) or when only one listed file contains those labels, else null. problem_level 0-5 (0 전혀 모름 … 5 완벽).",
   "course_id: set only when the course is explicitly named in the current message (full name, code, or an obvious abbreviation like 수2 for 수학2), or by the answer to the assistant's clarifying question. Never infer the course from context, today's timetable or the topic alone; use null instead.",
+  "Assistant turns starting with '확인 중:' are questions the app is still waiting on (with the pending record). If the current message answers one (e.g. a course name or '어제'), output that pending record completed with the answer. Never output a session date later than today.",
   "A message can produce several actions (e.g. one difficult topic plus the class pace). quote: the student's own words that support the action (max 200 chars).",
   "reply: one or two short, warm Korean sentences acknowledging what you will record (e.g. '극한 부분이 어려웠군요. 복습이 필요하다고 기록할게요.'). If the course or date is missing, ask for it briefly instead (e.g. '어느 과목 수업이었어요?'). Do not explain concepts or solve problems; if asked, say that this chat currently only records learning status.",
 ].join("\n");
@@ -189,7 +191,8 @@ export function parseChatOutput(raw: unknown, request: ChatRequest): ChatResult 
       let start = int(a.page_start, 1, 100000), end = int(a.page_end, 1, 100000);
       if (start === null || end === null || end < start) { start = null; end = null; }
       const session = {
-        ...base, date: validDate(a.date), progress_title: clip(a.progress_title, 100), page_start: start, page_end: end,
+        // 아직 오지 않은 수업은 진도를 기록하지 않는다(날짜를 다시 묻는다)
+        ...base, date: (validDate(a.date) ?? "9999") <= request.today ? validDate(a.date) : null, progress_title: clip(a.progress_title, 100), page_start: start, page_end: end,
         difficulty: LEVELS.includes(a.difficulty as Level) ? a.difficulty as Level : null,
         pace: LEVELS.includes(a.pace as Level) ? a.pace as Level : null,
       };
@@ -205,5 +208,6 @@ export function parseChatOutput(raw: unknown, request: ChatRequest): ChatResult 
     if (level === null || !labels.length) return [];
     return [{ ...base, problem_file: file?.file ?? null, problem_labels: labels, problem_level: level }];
   });
-  return { reply, actions };
+  const total = Array.isArray(value.actions) ? Math.min(value.actions.length, MAX_ACTIONS) : 0;
+  return { reply, actions, dropped: total - actions.length };
 }
