@@ -24,6 +24,8 @@
 
 2026-11-13 2차(`feature/chat-record`, main 미반영): 홈 채팅으로 진도·이해도를 기록한다. 새 Edge Function `chat-record`가 메시지를 해석하고, 브라우저가 기존 경로(주제 관측 `record_topic_observation`, 시간표 회차, 문제은행 문항 이해도)에 저장한다. 과목·날짜가 없으면 되묻고, 저장 카드에서 수정·취소한다. 마이그레이션 0035는 AI 호출 한도에 `chat`만 추가한다. 운영 반영에는 0033~0035 적용과 `chat-record` 배포가 필요하고, 실제 AI 해석 품질은 미검증. 대화로 쌓이는 자기 보고는 코칭 입력(주제 이해도)을 늘리므로 우선순위 2(실제 과목 대조) 때 함께 확인한다. 같은 브랜치에서 왼쪽 목록의 학습 계획·AI 학습코칭·나의 노트 표시를 숨겼다(페이지·기능 유지). 가상 대화 22개 시뮬레이션(모델 응답만 고정)으로 6건을 고쳤다. 상세는 [changelog/2026-11-13-chat-record.md](changelog/2026-11-13-chat-record.md).
 
+2026-11-13 3차(`feature/chat-record`, main 미반영): 문제은행 문항에 본문(LaTeX)·크롭 그림을 붙였다. 새 함수 `problem-analyze`, 마이그레이션 0036(`problem_bank_problems.content`, AI 한도 `problem`)이다. 규칙+AI 번호 이중 확인, 스캔 PDF, 강의노트 안의 문제(p.N-k)를 포함한다. 운영 반영에는 0033~0036 적용과 `chat-record`·`problem-analyze`·`file-classify`·`drive-upload` 배포가 필요하다. 실제 AI 분석 품질과 페이지당 비용은 미측정. 문항 본문이 생기므로 이후 코칭의 문제은행 근거(우선순위 5, 원문 분석)에 쓸 수 있다. 상세는 [changelog/2026-11-13-problem-content.md](changelog/2026-11-13-problem-content.md).
+
 ## 2026-11-11 로컬 최신 코드 통합
 
 - 후속 사용자 요청으로 커뮤니티 페이지·링크·알림·게시판 저장 코드·샘플을 제거했다. 기존 커뮤니티는 브라우저 전용이었고 로컬 DB 스키마에 관련 객체가 없어 DB 삭제 마이그레이션은 필요하지 않다. 앱 시작 시 기존 브라우저 커뮤니티 데이터만 정리한다. 상세는 `community-removal.md`. 로컬 수정이며 코칭 운영 확인·실행 기록 연결의 우선순위는 유지한다.
