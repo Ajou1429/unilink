@@ -4,7 +4,7 @@ import { fetchDrivePdf, uploadNoteToDrive } from "../drive-connection";
 import { addNote, getMyNotes, updateNoteClassification, updateNoteTags, type MyNote } from "../my-notes-storage";
 import { analyzeProblemPdf, getProblemConsent, problemAiAvailable, saveAnalyzedProblems } from "../problem-bank/analyze";
 import {
-  createSubject, deleteFile, joinSourceFile, listSubjects, saveProblems, syncSubjectsWithCourses,
+  createSubject, deleteFile, joinSourceFile, listSubjects, syncSubjectsWithCourses,
 } from "../problem-bank-storage";
 import { SCHEDULE_COLORS } from "../schedule-colors";
 import { getTimetableTerms, saveTimetableTerms } from "../timetable-storage";
