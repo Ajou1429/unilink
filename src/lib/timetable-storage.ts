@@ -139,6 +139,16 @@ export function saveCourseSession(session: CourseSessionProgress) {
   window.dispatchEvent(new Event(TIMETABLE_CHANGED_EVENT));
 }
 
+export function removeCourseSession(courseId: string, date: string, startTime: string) {
+  writeJson(
+    COURSE_SESSIONS_STORAGE_KEY,
+    getCourseSessions().filter(
+      (item) => !(item.courseId === courseId && item.date === date && item.startTime === startTime),
+    ),
+  );
+  window.dispatchEvent(new Event(TIMETABLE_CHANGED_EVENT));
+}
+
 export const MAX_CREDITS_STORAGE_KEY = "unilink:max-credits";
 export const DEFAULT_MAX_CREDITS = 18;
 export const MAX_CREDITS_RANGE = { min: 9, max: 24 } as const;

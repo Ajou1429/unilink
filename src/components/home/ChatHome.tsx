@@ -1,17 +1,26 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, FileText, Sparkles } from "lucide-react";
+import { ChevronDown, ChevronUp, FileText, Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NEW_CHAT_EVENT } from "@/components/layout/Sidebar";
+import {
+  applyAction, editApplied, getChatConsent, interpretMessage, loadChatContext, setChatConsent, undoApplied,
+  type AppliedEdit, type ChatContext,
+} from "@/lib/chat-record/apply";
+import { dateKey, missingOf, resolveProblemAction, type ChatAction } from "@/lib/chat-record/plan";
 import { ChatComposer, type ComposerSubmit } from "./ChatComposer";
+import { ChatRecordCard, type RecordEntry } from "./ChatRecordCard";
 import { IntakeResultRow } from "./IntakeResultRow";
 import { useFileIntake } from "./useFileIntake";
 
 type ThreadItem =
   | { id: string; kind: "user"; text: string; fileNames: string[] }
   | { id: string; kind: "files"; recordIds: string[] }
-  | { id: string; kind: "notice"; text: string };
+  | { id: string; kind: "notice"; text: string }
+  | { id: string; kind: "assistant"; text: string; pending?: boolean }
+  | { id: string; kind: "records"; entries: RecordEntry[] }
+  | { id: string; kind: "consent"; text: string };
 
 let threadSeq = 0;
 const nextId = () => `t-${Date.now()}-${++threadSeq}`;
@@ -26,6 +35,9 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
   // 대화 중에는 아래 일정 박스를 접어 대화창을 넓히고, 손잡이로 다시 펼친다
   const [widgetsOpen, setWidgetsOpen] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
+  const [context, setContext] = useState<ChatContext | null>(null);
+  const threadRef = useRef<ThreadItem[]>([]);
+  useEffect(() => { threadRef.current = thread; }, [thread]);
 
   useEffect(() => {
     const reset = () => { setThread([]); setWidgetsOpen(false); };
@@ -53,10 +65,112 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
           : item,
       )));
     }
-    if (text) items.push({ id: nextId(), kind: "notice", text: "채팅 답변 기능은 아직 연결되지 않았어요. 파일은 바로 분류돼요." });
     // 첫 메시지를 보내면 일정 박스가 내려가며 대화창이 커진다
     if (thread.length === 0) setWidgetsOpen(false);
+    // 직전까지의 대화(이번 메시지 제외). 되물은 질문에 글로 답하면 앞 메시지와 함께 다시 해석한다.
+    const history = thread.flatMap((item): { role: "user" | "assistant"; text: string }[] =>
+      item.kind === "user" && item.text ? [{ role: "user", text: item.text }]
+        : item.kind === "assistant" && item.text ? [{ role: "assistant", text: item.text }] : []).slice(-6);
     setThread((prev) => [...prev, ...items]);
+    if (text) void record(text, history);
+  }
+
+  // ── 대화로 진도·이해도 기록 ──
+  const patchItem = (id: string, patch: (item: ThreadItem) => ThreadItem) => setThread((prev) => prev.map((item) => (item.id === id ? patch(item) : item)));
+  const patchEntry = (itemId: string, key: string, patch: Partial<RecordEntry>) => patchItem(itemId, (item) =>
+    item.kind === "records" ? { ...item, entries: item.entries.map((entry) => (entry.key === key ? { ...entry, ...patch } : entry)) } : item);
+
+  async function runEntry(itemId: string, ctx: ChatContext, key: string, action: ChatAction) {
+    const resolved = resolveProblemAction(action, ctx.files);
+    if (!resolved) {
+      patchEntry(itemId, key, { action, missing: null, status: "error", error: "말씀하신 문항을 이 과목 문제은행에서 찾지 못했어요." });
+      return;
+    }
+    const missing = missingOf(resolved, ctx.files);
+    if (missing) { patchEntry(itemId, key, { action: resolved, missing, status: "waiting" }); return; }
+    patchEntry(itemId, key, { action: resolved, missing: null, status: "saving" });
+    try {
+      const applied = await applyAction(ctx, resolved);
+      patchEntry(itemId, key, { applied, status: "saved", error: undefined });
+    } catch (error) {
+      patchEntry(itemId, key, { status: "error", error: error instanceof Error ? error.message : "저장하지 못했어요." });
+    }
+  }
+
+  async function record(text: string, history: { role: "user" | "assistant"; text: string }[]) {
+    if (getChatConsent() !== "granted") {
+      setThread((prev) => [...prev, { id: nextId(), kind: "consent", text }]);
+      return;
+    }
+    const replyId = nextId();
+    const say = (value: string) => patchItem(replyId, () => ({ id: replyId, kind: "assistant", text: value }));
+    setThread((prev) => [...prev, { id: replyId, kind: "assistant", text: "", pending: true }]);
+    try {
+      const ctx = await loadChatContext();
+      setContext(ctx);
+      if (!ctx.signedIn) { say("로그인하면 대화 내용으로 진도·이해도가 기록돼요."); return; }
+      const result = await interpretMessage(ctx, text, history, dateKey(new Date()));
+      say(result.reply || (result.actions.length ? "기록할게요." : "기록할 진도나 이해도를 찾지 못했어요. 과목과 함께 말씀해 주세요."));
+      if (!result.actions.length) return;
+      const recordsId = nextId();
+      const entries: RecordEntry[] = result.actions.map((action, index) => ({ key: `${recordsId}-${index}`, action, status: "saving", missing: null }));
+      // 앞에서 되묻던 기록은 이번 답으로 다시 해석했으므로 지운다
+      setThread((prev) => [
+        ...prev.map((item) => (item.kind === "records" ? { ...item, entries: item.entries.filter((entry) => entry.status !== "waiting") } : item)),
+        { id: recordsId, kind: "records", entries },
+      ]);
+      await Promise.all(entries.map((entry) => runEntry(recordsId, ctx, entry.key, entry.action)));
+    } catch (error) {
+      say(error instanceof Error ? error.message : "대화를 기록하지 못했어요.");
+    }
+  }
+
+  function answerConsent(itemId: string, text: string, value: "granted" | "declined") {
+    setChatConsent(value);
+    setThread((prev) => prev.filter((item) => item.id !== itemId));
+    if (value === "granted") {
+      const history = threadRef.current.flatMap((item) => item.kind === "assistant" && item.text ? [{ role: "assistant" as const, text: item.text }] : []).slice(-3);
+      void record(text, history);
+    }
+  }
+
+  function findEntry(key: string) {
+    for (const item of threadRef.current) {
+      if (item.kind !== "records") continue;
+      const entry = item.entries.find((candidate) => candidate.key === key);
+      if (entry) return { itemId: item.id, entry };
+    }
+    return null;
+  }
+
+  function pick(key: string, patch: Partial<ChatAction>) {
+    const found = findEntry(key);
+    if (!found || !context) return;
+    void runEntry(found.itemId, context, key, { ...found.entry.action, ...patch });
+  }
+
+  async function undo(key: string) {
+    const found = findEntry(key);
+    if (!found?.entry.applied) return;
+    patchEntry(found.itemId, key, { status: "undoing" });
+    try {
+      await undoApplied(found.entry.applied);
+      patchEntry(found.itemId, key, { status: "undone", error: undefined });
+    } catch (error) {
+      patchEntry(found.itemId, key, { status: "saved", error: error instanceof Error ? error.message : "되돌리지 못했어요." });
+    }
+  }
+
+  async function edit(key: string, change: AppliedEdit) {
+    const found = findEntry(key);
+    if (!found?.entry.applied) return;
+    patchEntry(found.itemId, key, { status: "saving" });
+    try {
+      const applied = await editApplied(found.entry.applied, change);
+      patchEntry(found.itemId, key, { applied, status: "saved", error: undefined });
+    } catch (error) {
+      patchEntry(found.itemId, key, { status: "saved", error: error instanceof Error ? error.message : "고치지 못했어요." });
+    }
   }
 
   const consentBanner = intake.signedIn && intake.consent === null && (
@@ -108,6 +222,36 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
         }
         if (item.kind === "notice") {
           return <p key={item.id} className="text-sm text-muted-foreground">{item.text}</p>;
+        }
+        if (item.kind === "assistant") {
+          return item.pending
+            ? <Loader2 key={item.id} className="h-4 w-4 animate-spin text-muted-foreground" aria-label="답변 준비 중" />
+            : <p key={item.id} className="whitespace-pre-wrap text-[15px]">{item.text}</p>;
+        }
+        if (item.kind === "consent") {
+          return (
+            <div key={item.id} className="space-y-2 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
+              <p>대화 내용을 AI(OpenAI)로 보내 과목·진도·이해도를 찾아 저장해요. 대화 원문은 서버에 남기지 않아요.</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => answerConsent(item.id, item.text, "granted")} className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">동의하고 기록</button>
+                <button type="button" onClick={() => answerConsent(item.id, item.text, "declined")} className="rounded-md border bg-white px-3 py-1 text-xs">기록하지 않기</button>
+              </div>
+            </div>
+          );
+        }
+        if (item.kind === "records") {
+          return (
+            <ChatRecordCard
+              key={item.id}
+              entries={item.entries}
+              courses={context?.courses ?? []}
+              today={dateKey(new Date())}
+              files={context?.files ?? new Map()}
+              onPick={pick}
+              onUndo={(key) => void undo(key)}
+              onEdit={(key, change) => void edit(key, change)}
+            />
+          );
         }
         const records = item.recordIds.map((id) => byId.get(id)).filter((record) => record !== undefined);
         return (

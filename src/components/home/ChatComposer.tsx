@@ -111,7 +111,7 @@ export function ChatComposer({
           autoFocus={autoFocus}
           value={text}
           aria-label="메시지 입력"
-          placeholder="무엇을 도와드릴까요?"
+          placeholder="오늘 수업이나 어려웠던 부분을 말해 주세요"
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
