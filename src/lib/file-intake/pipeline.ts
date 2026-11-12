@@ -2,7 +2,7 @@ import { getCurrentAcademicTermLabel } from "../academic-term";
 import { getActiveTermCourses, getAllStoredCourses, saveStoredCourses } from "../course-storage";
 import { fetchDrivePdf, uploadNoteToDrive } from "../drive-connection";
 import { addNote, getMyNotes, updateNoteClassification, updateNoteTags, type MyNote } from "../my-notes-storage";
-import { extractProblemsFromPdf } from "../problem-bank-pdf";
+import { analyzeProblemPdf, getProblemConsent, problemAiAvailable, saveAnalyzedProblems } from "../problem-bank/analyze";
 import {
   createSubject, deleteFile, joinSourceFile, listSubjects, saveProblems, syncSubjectsWithCourses,
 } from "../problem-bank-storage";
@@ -120,18 +120,27 @@ async function subjectFor(course: Course) {
     ?? createSubject(course.name);
 }
 
-/** 문제은행: PDF에서 문항 번호를 뽑아 과목의 중간/기말 범위에 저장 */
-async function addToProblemBank(file: File, course: Course, record: IntakeRecord) {
+/**
+ * 문제은행: 문제 파일은 문항 번호·내용을, 강의노트는 그 안의 문제를(p.12, p.12-1…) 과목의 중간/기말 범위에 저장.
+ * AI 분석은 문제은행 탭에서 동의한 로그인 계정만. 동의 전에는 문제 파일의 번호와 영역 그림만 넣는다.
+ */
+async function addToProblemBank(file: File, course: Course, record: IntakeRecord, docType: "problem_set" | "lecture") {
+  const useAi = getProblemConsent() === "granted" && await problemAiAvailable();
+  if (docType === "lecture" && !useAi) return;
   try {
-    const labels = await extractProblemsFromPdf(file);
+    const mode = docType === "lecture" ? "lecture" : "problems";
+    const result = await analyzeProblemPdf(file, { mode, useAi });
     const subject = await subjectFor(course);
     const sourceFile = joinSourceFile(examPeriodFor(new Date()), file.name.slice(0, 180));
-    const result = await saveProblems(subject.id, sourceFile, labels);
+    const saved = await saveAnalyzedProblems(subject.id, sourceFile, result.problems, mode === "lecture" ? "lecture" : "problem");
     record.problemSubjectId = subject.id;
     record.problemSourceFile = sourceFile;
-    record.problemCount = result.addedCount + result.skippedCount;
+    record.problemCount = saved.addedCount + saved.skippedCount;
+    if (saved.check) record.message = `번호 확인이 필요한 문항 ${saved.check}개가 있어요. 문제은행에서 확인해 주세요.`;
+    else if (docType === "problem_set" && !useAi && getProblemConsent() === null) record.message = "문제은행 탭에서 AI 분석에 동의하면 문제 내용과 수식도 정리돼요.";
   } catch (error) {
-    record.message = `${error instanceof Error ? error.message : "문항 번호를 찾지 못했어요."} 문제은행에서 직접 입력해 주세요.`;
+    // 강의노트에 문제가 없으면 조용히 넘어간다
+    if (docType === "problem_set") record.message = `${error instanceof Error ? error.message : "문항 번호를 찾지 못했어요."} 문제은행에서 직접 입력해 주세요.`;
   }
 }
 
@@ -200,7 +209,9 @@ async function run(target: Target, record: IntakeRecord, ctx: IntakeContext, onU
   record.courseName = course?.name;
   record.term = record.term ?? course?.term;
   if (decision.docType === "syllabus" && course) linkSyllabusNote(course, record.noteId);
-  if (decision.docType === "problem_set" && course && kind === "pdf") await addToProblemBank(normalized, course, record);
+  if ((decision.docType === "problem_set" || decision.docType === "lecture") && course && kind === "pdf") {
+    await addToProblemBank(normalized, course, record, decision.docType);
+  }
   if (!course && !record.message) record.message = "과목을 찾지 못했어요. 과목을 골라 주세요.";
 
   if (target.kind === "new" && ctx.uploadToDrive && course) {
@@ -263,17 +274,17 @@ export async function reassignRecord(record: IntakeRecord, change: { courseId?: 
   await updateNoteTags(note.id, [...typeTags(note.tags), DOC_TYPE_LABELS[docType]]);
 
   // 문제은행: 이전에 넣은 번호는 지우고, 새 과목·종류가 문제은행이면 다시 넣는다
-  const movedProblems = record.problemSubjectId && record.problemSourceFile && (docType !== "problem_set" || courseId !== record.courseId);
+  const movedProblems = record.problemSubjectId && record.problemSourceFile && (docType !== record.docType || courseId !== record.courseId);
   if (movedProblems) {
     await deleteFile(record.problemSubjectId!, record.problemSourceFile!).catch(() => undefined);
     next.problemSubjectId = undefined;
     next.problemSourceFile = undefined;
     next.problemCount = undefined;
   }
-  if (docType === "problem_set" && course && (movedProblems || !record.problemSourceFile)) {
+  if ((docType === "problem_set" || docType === "lecture") && course && (movedProblems || !record.problemSourceFile)) {
     const file = sessionFiles.get(record.id);
-    if (file && detectKind(file) === "pdf") await addToProblemBank(file, course, next);
-    else next.message = "문제 번호는 문제은행에서 직접 넣어 주세요.";
+    if (file && detectKind(file) === "pdf") await addToProblemBank(file, course, next, docType);
+    else if (docType === "problem_set") next.message = "문제 번호는 문제은행에서 직접 넣어 주세요.";
   }
   if (record.drive === "uploaded" && courseId !== record.courseId) next.message = "Drive에 이미 올린 파일은 원래 폴더에 남아 있어요.";
 

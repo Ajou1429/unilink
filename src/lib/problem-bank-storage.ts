@@ -40,6 +40,21 @@ function dismissCourse(courseId: string) {
   privateStorage.setItem(PROBLEM_BANK_DISMISSED_COURSES_KEY, JSON.stringify([...next]));
 }
 
+/** 문항 본문. 분석 전에 저장된 문항은 없다(null). */
+export interface ProblemContent {
+  v: 1;
+  /** problem: 문제은행·기출 파일 / lecture: 강의노트 안의 문제 */
+  kind: "problem" | "lecture";
+  page: number | null;
+  /** Markdown + LaTeX($…$, $$…$$). 정확히 옮기지 못한 문제는 null(그림만 보여 준다) */
+  text: string | null;
+  /** 크롭 그림. src는 "storage:<경로>"(로그인) 또는 "idb:<키>"(이 브라우저) */
+  images: { src: string; w: number; h: number }[];
+  /** 규칙과 AI가 찾은 번호가 달라 사용자 확인이 필요한 문항 */
+  check: boolean;
+  origin: "both" | "rule" | "ai";
+}
+
 export interface ProblemBankProblem {
   id: string;
   subjectId: string;
@@ -49,6 +64,7 @@ export interface ProblemBankProblem {
   sourceFile: string;
   createdAt: string;
   updatedAt: string;
+  content?: ProblemContent | null;
 }
 
 export interface ProblemBankSaveResult {
@@ -237,6 +253,7 @@ interface ProblemRow {
   source_file: string | null;
   created_at: string;
   updated_at: string;
+  content?: ProblemContent | null;
 }
 
 function rowToProblem(row: ProblemRow): ProblemBankProblem {
@@ -248,6 +265,7 @@ function rowToProblem(row: ProblemRow): ProblemBankProblem {
     sourceFile: row.source_file ?? "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    content: row.content ?? null,
   };
 }
 
@@ -489,6 +507,18 @@ export async function listProblems(subjectId: string): Promise<ProblemBankProble
 export async function setProblemLevel(id: string, level: number): Promise<ProblemBankProblem> {
   if (isSupabaseConfigured) return setSupabaseProblemLevel(id, level);
   return setLocalProblemLevel(id, level);
+}
+
+/** 문항 본문을 채우거나 고친다(확인 필요 해제 포함). 이해도는 건드리지 않는다. */
+export async function setProblemContent(id: string, content: ProblemContent | null): Promise<void> {
+  if (isSupabaseConfigured) {
+    const { error } = await getSupabaseClient()!.from("problem_bank_problems").update({ content }).eq("id", id);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  const problems = getLocalProblems();
+  if (!problems.some((p) => p.id === id)) throw new Error("문제를 찾을 수 없어요.");
+  writeJson(PROBLEM_BANK_PROBLEMS_KEY, problems.map((p) => (p.id === id ? { ...p, content } : p)));
 }
 
 export async function deleteProblem(id: string): Promise<void> {

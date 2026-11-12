@@ -33,6 +33,18 @@ interface Segment {
   x0: number;
   x1: number;
   text: string;
+  /** 기준선 y(PDF 좌표, 아래가 0)와 글자 높이 */
+  y: number;
+  h: number;
+}
+
+/** 읽는 순서로 정렬한 한 줄과 페이지 안 위치 (크롭 영역 계산용) */
+export interface PageLine {
+  text: string;
+  x0: number;
+  x1: number;
+  y: number;
+  h: number;
 }
 
 interface Run {
@@ -45,6 +57,10 @@ interface Run {
 
 // 기준선이 가까운 조각은 한 행, 행 안에서 넓은 간격(단 사이 여백)이 있으면 구간을 나눈다.
 export function pageLines(items: PdfTextItem[], pageWidth: number): string[] {
+  return pageLinesDetailed(items, pageWidth).map((line) => line.text);
+}
+
+export function pageLinesDetailed(items: PdfTextItem[], pageWidth: number): PageLine[] {
   const runs: Run[] = items
     .filter((it) => typeof it.str === "string" && it.str.length > 0)
     .map((it) => ({
@@ -63,7 +79,7 @@ export function pageLines(items: PdfTextItem[], pageWidth: number): string[] {
     else rows.push({ y: run.y, h: run.h, runs: [run] });
   }
 
-  const segments = rows.flatMap((row) => splitRow(row.runs));
+  const segments = rows.flatMap((row) => splitRow(row.runs, row.y, row.h));
   const leftEdge = pageWidth * 0.45;
   const rightStarts = segments.filter((s) => s.x0 >= leftEdge).length;
   // 가운데를 가로지르는 긴 줄이 많으면 1단 페이지(수식 번호도 오른쪽에서 시작하므로)
@@ -72,17 +88,17 @@ export function pageLines(items: PdfTextItem[], pageWidth: number): string[] {
     rightStarts >= 3 && rightStarts > crossing
       ? [...segments.filter((s) => s.x0 < leftEdge), ...segments.filter((s) => s.x0 >= leftEdge)]
       : segments;
-  return ordered.map((s) => s.text).filter(Boolean);
+  return ordered.filter((s) => s.text).map(({ text, x0, x1, y, h }) => ({ text, x0, x1, y, h }));
 }
 
-function splitRow(rowRuns: Run[]): Segment[] {
+function splitRow(rowRuns: Run[], y: number, h: number): Segment[] {
   rowRuns.sort((a, b) => a.x - b.x);
   const segments: Segment[] = [];
   let seg: Segment | null = null;
   for (const r of rowRuns) {
     const gap = seg ? r.x - seg.x1 : 0;
     if (!seg || gap > r.h * 1.5) {
-      seg = { x0: r.x, x1: r.x + r.w, text: r.str };
+      seg = { x0: r.x, x1: r.x + r.w, text: r.str, y, h };
       segments.push(seg);
       continue;
     }
@@ -212,16 +228,21 @@ function findParts(text: string): string[] {
 }
 
 export function extractLabels(lines: string[]): string[] {
+  return extractLabelPositions(lines).map((item) => item.label);
+}
+
+/** 문항 번호와 그 번호가 시작하는 줄 번호. 소문항은 같은 줄 번호를 가진다. */
+export function extractLabelPositions(lines: string[]): { label: string; line: number }[] {
   const problems = pickProblems(lines);
   // 문제 본문은 읽는 순서상 다음 문제 전까지 (번호 순서와 다를 수 있다)
   const starts = problems.map((p) => p.line).sort((a, b) => a - b);
-  const labels: string[] = [];
+  const labels: { label: string; line: number }[] = [];
   problems.forEach((p) => {
     const stop = starts.find((s) => s > p.line) ?? lines.length;
     const body = [lines[p.line].slice(p.end), ...lines.slice(p.line + 1, stop)].join("\n");
     const parts = findParts(body);
-    if (parts.length) parts.forEach((part) => labels.push(`${p.label}(${part})`));
-    else labels.push(p.label);
+    if (parts.length) parts.forEach((part) => labels.push({ label: `${p.label}(${part})`, line: p.line }));
+    else labels.push({ label: p.label, line: p.line });
   });
   return labels;
 }

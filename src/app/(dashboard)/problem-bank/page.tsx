@@ -29,12 +29,19 @@ import {
   listSubjects,
   renameProblem,
   saveProblems,
+  setProblemContent,
   setProblemLevel,
   ProblemBankProblem,
   ProblemBankSubject,
 } from "@/lib/problem-bank-storage";
 import { compareLabels, expandLabels, understandingPercent } from "@/lib/problem-bank-labels";
-import { extractProblemsFromPdf, ProblemExtractionError } from "@/lib/problem-bank-pdf";
+import { ProblemExtractionError } from "@/lib/problem-bank-pdf";
+import {
+  analyzeProblemPdf, getProblemConsent, problemAiAvailable, saveAnalyzedProblems, setProblemConsent,
+  type AnalysisResult, type ProblemConsent,
+} from "@/lib/problem-bank/analyze";
+import { removeCrops } from "@/lib/problem-bank/images";
+import { ProblemDetail } from "@/components/problem-bank/ProblemDetail";
 
 // 원본: eugenepark0404/AJOUBuild-problembank의 frontend/src/App.jsx.
 // PDF -> (브라우저에서 문항 번호 인식) -> 사용자 확인·수정 -> 업로드. 목록은 파일 단위로 보여준다.
@@ -367,8 +374,20 @@ function FailurePrompt({
   );
 }
 
-// 번호를 누르면 수정
-function EditableLabel({ label, onRename }: { label: string; onRename: (label: string) => void }) {
+// 번호를 누르면 문제가 펼쳐지고, 연필 버튼으로 번호를 고친다
+function EditableLabel({
+  label,
+  open,
+  check,
+  onOpen,
+  onRename,
+}: {
+  label: string;
+  open: boolean;
+  check: boolean;
+  onOpen: () => void;
+  onRename: (label: string) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(label);
   const finish = (save: boolean) => {
@@ -379,17 +398,30 @@ function EditableLabel({ label, onRename }: { label: string; onRename: (label: s
   };
   if (!editing) {
     return (
-      <button
-        onClick={() => {
-          setValue(label);
-          setEditing(true);
-        }}
-        title="눌러서 번호 수정"
-        className="-mx-1 w-28 shrink-0 truncate rounded px-1 text-left font-mono text-[14px] font-semibold hover:bg-slate-100"
-        style={{ color: INK }}
-      >
-        {label}
-      </button>
+      <div className="flex w-32 shrink-0 items-center">
+        <button
+          onClick={onOpen}
+          aria-expanded={open}
+          title="문제 보기"
+          className="-mx-1 flex min-w-0 items-center gap-1 rounded px-1 text-left font-mono text-[14px] font-semibold hover:bg-slate-100"
+          style={{ color: INK }}
+        >
+          <ChevronRight size={13} className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-90" : ""}`} />
+          <span className="truncate">{label}</span>
+          {check && <span className="ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-label="확인 필요" />}
+        </button>
+        <button
+          onClick={() => {
+            setValue(label);
+            setEditing(true);
+          }}
+          title="번호 수정"
+          aria-label={`${label} 번호 수정`}
+          className="ml-0.5 shrink-0 rounded p-1 text-slate-300 opacity-0 transition group-hover:opacity-100 hover:bg-slate-100 hover:text-slate-600"
+        >
+          <PencilLine size={12} />
+        </button>
+      </div>
     );
   }
   return (
@@ -420,6 +452,7 @@ function FileGroup({
   onRemove,
   onAdd,
   onRemoveFile,
+  onConfirm,
 }: {
   name: string;
   problems: ProblemBankProblem[];
@@ -430,9 +463,21 @@ function FileGroup({
   onRemove: (id: string) => void;
   onAdd: (labels: string[]) => void;
   onRemoveFile: () => void;
+  onConfirm: (id: string) => void;
 }) {
   const percent = understandingPercent(problems);
-  const sorted = [...problems].sort((a, b) => compareLabels(a.label, b.label));
+  const sorted = [...problems].sort((a, b) =>
+    (a.content?.page ?? 0) - (b.content?.page ?? 0) || compareLabels(a.label, b.label));
+  const [shown, setShown] = useState<Set<string>>(() => new Set());
+  const lecture = problems.some((p) => p.content?.kind === "lecture");
+  const checks = problems.filter((p) => p.content?.check).length;
+  const toggleShown = (id: string) =>
+    setShown((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   return (
     <div className="border-t first:border-t-0" style={{ borderColor: "#EEF1F6" }}>
       <button
@@ -446,10 +491,20 @@ function FileGroup({
         />
         <FileText size={17} className="shrink-0" style={{ color: ACCENT }} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[14px] font-semibold" style={{ color: INK }}>
-            {name || "파일 정보 없음"}
+          <div className="flex items-center gap-1.5">
+            {lecture && (
+              <span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium" style={{ color: ACCENT }}>
+                강의노트
+              </span>
+            )}
+            <span className="truncate text-[14px] font-semibold" style={{ color: INK }}>
+              {name || "파일 정보 없음"}
+            </span>
           </div>
-          <div className="text-[12px] text-slate-400">{problems.length}문항</div>
+          <div className="text-[12px] text-slate-400">
+            {problems.length}문항
+            {checks > 0 && <span className="ml-1.5 text-amber-600">확인 필요 {checks}</span>}
+          </div>
         </div>
         <PercentBar percent={percent} />
       </button>
@@ -457,8 +512,15 @@ function FileGroup({
       {open && (
         <div className="border-t pb-3" style={{ borderColor: "#EEF1F6", backgroundColor: "#FBFCFD" }}>
           {sorted.map((p) => (
-            <div key={p.id} className="group flex items-center gap-3 py-2 pl-12 pr-4">
-              <EditableLabel label={p.label} onRename={(label) => onRename(p.id, label)} />
+            <div key={p.id}>
+            <div className="group flex items-center gap-3 py-2 pl-12 pr-4">
+              <EditableLabel
+                label={p.label}
+                open={shown.has(p.id)}
+                check={Boolean(p.content?.check)}
+                onOpen={() => toggleShown(p.id)}
+                onRename={(label) => onRename(p.id, label)}
+              />
               <div className="flex-1">
                 <Meter level={p.level} onSet={(l) => onLevel(p.id, l)} />
               </div>
@@ -475,6 +537,12 @@ function FileGroup({
               >
                 <Trash2 size={15} />
               </button>
+            </div>
+            {shown.has(p.id) && (
+              <div className="pb-2 pl-[3.25rem] pr-4">
+                <ProblemDetail content={p.content} onConfirm={() => onConfirm(p.id)} onRemove={() => onRemove(p.id)} />
+              </div>
+            )}
             </div>
           ))}
           <div className="mt-2 flex items-center gap-3 pl-12 pr-4">
@@ -509,6 +577,19 @@ export default function ProblemBankPage() {
   const [openFiles, setOpenFiles] = useState<Set<string>>(() => new Set());
   const [period, setPeriod] = useState<ExamPeriod>("midterm");
   const fileRef = useRef<HTMLInputElement>(null);
+  // 문제 내용 AI 분석: 로그인 계정에서만, 처음 한 번 동의를 받는다
+  const [aiAvailable, setAiAvailable] = useState(false);
+  const [consent, setConsent] = useState<ProblemConsent>(null);
+  const [askFile, setAskFile] = useState<File | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  // AI 없이 규칙으로만 읽은 결과: 사용자가 번호를 확인한 뒤 크롭 그림을 붙인다
+  const pendingAnalysis = useRef<AnalysisResult | null>(null);
+
+  useEffect(() => {
+    void problemAiAvailable().then(setAiAvailable);
+    const timeout = window.setTimeout(() => setConsent(getProblemConsent()), 0);
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   const loadSubjects = async () => {
     const subs = await listSubjects();
@@ -641,11 +722,26 @@ export default function ProblemBankPage() {
     }
   };
 
+  const confirmProblem = async (pid: string) => {
+    const target = problems.find((p) => p.id === pid);
+    if (!target?.content) return;
+    const content = { ...target.content, check: false };
+    setProblems((prev) => prev.map((p) => (p.id === pid ? { ...p, content } : p)));
+    try {
+      await setProblemContent(pid, content);
+    } catch (err) {
+      setError(messageOf(err, "확인 상태를 저장하지 못했습니다."));
+      reloadProblems();
+    }
+  };
+
   const removeProblem = async (pid: string) => {
     const prevProblems = problems;
+    const images = problems.find((p) => p.id === pid)?.content?.images.map((image) => image.src) ?? [];
     setProblems((prev) => prev.filter((p) => p.id !== pid));
     try {
       await deleteProblem(pid);
+      void removeCrops(images);
       setSubjects((prev) =>
         prev.map((s) => (s.id === activeId ? { ...s, count: Math.max(0, s.count - 1) } : s)),
       );
@@ -661,7 +757,9 @@ export default function ProblemBankPage() {
     const label = splitSourceFile(name).name || "파일 정보 없음";
     if (!window.confirm(`「${label}」의 ${count}문항과 기록한 이해도를 모두 삭제할까요?`)) return;
     try {
+      const images = (files.get(name) ?? []).flatMap((p) => p.content?.images.map((image) => image.src) ?? []);
       await deleteFile(activeId, name);
+      void removeCrops(images);
       await reloadProblems();
       await loadSubjects();
     } catch (err) {
@@ -682,18 +780,56 @@ export default function ProblemBankPage() {
     }
   };
 
-  // 1) PDF는 브라우저에서 읽기만 한다. 사용자가 확인하기 전에는 저장하지 않는다.
+  // 1) PDF를 브라우저에서 읽는다. 처음이면 AI 분석 동의를 먼저 묻는다.
   const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !active) return;
-    setBusy(true);
     setError("");
     setNotice("");
     setReview(null);
     setFailure(null);
+    if (aiAvailable && consent === null) {
+      setAskFile(file);
+      return;
+    }
+    await analyze(file, aiAvailable && consent === "granted");
+  };
+
+  const answerConsent = async (value: "granted" | "declined") => {
+    setProblemConsent(value);
+    setConsent(value);
+    const file = askFile;
+    setAskFile(null);
+    if (file) await analyze(file, aiAvailable && value === "granted");
+  };
+
+  // 2) AI로 읽었으면 규칙과 AI가 같이 찾은 번호는 바로 저장하고 다른 번호는 "확인 필요"로 표시한다.
+  //    AI 없이 규칙으로만 읽었으면 지금처럼 번호 목록을 확인받은 뒤 저장한다(그림 크롭은 함께 붙인다).
+  const analyze = async (file: File, useAi: boolean) => {
+    if (!active) return;
+    setBusy(true);
+    setProgress(null);
+    pendingAnalysis.current = null;
     try {
-      setReview({ fileName: file.name, labels: await extractProblemsFromPdf(file) });
+      const result = await analyzeProblemPdf(file, { mode: "problems", useAi, onProgress: (done, total) => setProgress({ done, total }) });
+      if (!result.aiUsed) {
+        pendingAnalysis.current = result;
+        setReview({ fileName: file.name, labels: result.problems.map((p) => p.label) });
+        if (result.aiError) setNotice(`AI 분석을 하지 못해 번호만 찾았어요. (${result.aiError})`);
+        return;
+      }
+      const raw = rawFor(file.name);
+      const saved = await saveAnalyzedProblems(active.id, raw, result.problems, "problem");
+      await reloadProblems();
+      await loadSubjects();
+      setOpenFiles((prev) => new Set(prev).add(raw));
+      setNotice(
+        `「${file.name}」에서 ${result.problems.length}문항을 찾았어요.` +
+          (saved.addedCount < result.problems.length ? ` 새 문항 ${saved.addedCount}개, 기존 문항 ${result.problems.length - saved.addedCount}개는 내용만 채웠어요.` : "") +
+          (saved.check ? ` 번호 확인이 필요한 문항이 ${saved.check}개 있어요.` : "") +
+          (result.aiError ? ` 일부 페이지는 AI로 보지 못했어요. (${result.aiError})` : ""),
+      );
     } catch (err) {
       if (err instanceof ProblemExtractionError && (err.code === "NO_TEXT" || err.code === "NO_PROBLEMS")) {
         setFailure({ fileName: file.name, message: err.message, image: err.code === "NO_TEXT" });
@@ -702,16 +838,23 @@ export default function ProblemBankPage() {
       }
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   };
 
-  // 2) 사용자가 확인한 목록만 저장
+  // 3) 사용자가 확인한 목록만 저장
   const saveReview = async (fileName: string, labels: string[]) => {
     if (!active) return;
     setError("");
     try {
       const raw = rawFor(fileName);
       const result = await saveProblems(active.id, raw, labels);
+      const pending = pendingAnalysis.current;
+      pendingAnalysis.current = null;
+      if (pending) {
+        const keep = new Set(labels);
+        await saveAnalyzedProblems(active.id, raw, pending.problems.filter((p) => keep.has(p.label)), "problem");
+      }
       setReview(null);
       await reloadProblems();
       await loadSubjects();
@@ -857,19 +1000,19 @@ export default function ProblemBankPage() {
                     />
                     <button
                       onClick={() => fileRef.current?.click()}
-                      disabled={busy || Boolean(review)}
+                      disabled={busy || Boolean(review) || Boolean(askFile)}
                       className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-[14px] font-semibold text-white disabled:opacity-60"
                       style={{ backgroundColor: ACCENT }}
                     >
                       {busy ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                      {busy ? "문항 번호 인식 중…" : "문제은행 PDF 넣기"}
+                      {!busy ? "문제은행 PDF 넣기" : progress?.total ? `페이지 분석 중 ${progress.done}/${progress.total}` : "PDF 읽는 중…"}
                     </button>
                     <button
                       onClick={() => {
                         setFailure(null);
                         setReview({ fileName: "", labels: [] });
                       }}
-                      disabled={busy || Boolean(review)}
+                      disabled={busy || Boolean(review) || Boolean(askFile)}
                       className="flex items-center gap-1.5 rounded-xl border bg-white px-3.5 py-2.5 text-[13px] font-medium text-slate-600 disabled:opacity-50"
                       style={{ borderColor: "#DDE3EC" }}
                     >
@@ -899,6 +1042,22 @@ export default function ProblemBankPage() {
                   {notice && !error && (
                     <div className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">
                       {notice}
+                    </div>
+                  )}
+
+                  {askFile && (
+                    <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-[13px] text-blue-950">
+                      <p>
+                        문제 PDF의 페이지 그림과 글자를 AI(OpenAI)로 보내 문항 번호·문제 내용·수식을 정리해요. 페이지 그림은 저장되지 않아요.
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        <button onClick={() => answerConsent("granted")} className="rounded-lg px-3 py-1.5 text-[13px] font-semibold text-white" style={{ backgroundColor: ACCENT }}>
+                          동의하고 분석
+                        </button>
+                        <button onClick={() => answerConsent("declined")} className="rounded-lg border bg-white px-3 py-1.5 text-[13px]">
+                          번호만 찾기
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -945,6 +1104,7 @@ export default function ProblemBankPage() {
                           onRemove={removeProblem}
                           onAdd={(labels) => addToFile(name, labels)}
                           onRemoveFile={() => removeFile(name)}
+                          onConfirm={confirmProblem}
                         />
                       ))
                     )}
