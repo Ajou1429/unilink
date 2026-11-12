@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FileText, Sparkles } from "lucide-react";
+import { ChevronDown, ChevronUp, FileText, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NEW_CHAT_EVENT } from "@/components/layout/Sidebar";
 import { ChatComposer, type ComposerSubmit } from "./ChatComposer";
@@ -23,17 +23,23 @@ const nextId = () => `t-${Date.now()}-${++threadSeq}`;
 export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: React.ReactNode }) {
   const intake = useFileIntake();
   const [thread, setThread] = useState<ThreadItem[]>([]);
+  // 대화 중에는 아래 일정 박스를 접어 대화창을 넓히고, 손잡이로 다시 펼친다
+  const [widgetsOpen, setWidgetsOpen] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const reset = () => setThread([]);
+    const reset = () => { setThread([]); setWidgetsOpen(false); };
     window.addEventListener(NEW_CHAT_EVENT, reset);
     return () => window.removeEventListener(NEW_CHAT_EVENT, reset);
   }, []);
 
   useEffect(() => {
-    if (thread.length) bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [thread]);
+    if (!thread.length) return;
+    bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    // 박스가 펼쳐지거나 접히는 애니메이션(0.3초)이 끝난 뒤 최신 메시지가 보이도록 한 번 더 맞춘다
+    const timeout = window.setTimeout(() => bottom.current?.scrollIntoView({ block: "end" }), 320);
+    return () => window.clearTimeout(timeout);
+  }, [thread, widgetsOpen]);
 
   function send({ text, files }: ComposerSubmit) {
     const items: ThreadItem[] = [{ id: nextId(), kind: "user", text, fileNames: files.map((file) => file.name) }];
@@ -48,6 +54,8 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
       )));
     }
     if (text) items.push({ id: nextId(), kind: "notice", text: "채팅 답변 기능은 아직 연결되지 않았어요. 파일은 바로 분류돼요." });
+    // 첫 메시지를 보내면 일정 박스가 내려가며 대화창이 커진다
+    if (thread.length === 0) setWidgetsOpen(false);
     setThread((prev) => [...prev, ...items]);
   }
 
@@ -75,11 +83,60 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
 
   const composer = <ChatComposer onSubmit={send} footer={driveToggle} autoFocus />;
 
-  if (thread.length === 0) {
-    // 넓은 화면: 위쪽(인사말·입력창)과 아래쪽(일정 박스)이 화면 높이를 나눠 써서 페이지는 스크롤되지 않는다
-    return (
-      <div className="mx-auto flex w-full max-w-5xl flex-col px-4 pb-6 sm:px-6 lg:h-full lg:min-h-0">
-        <section className="mx-auto flex w-full max-w-2xl shrink-0 flex-col justify-center py-10 lg:min-h-0 lg:flex-1 lg:py-4">
+  const chatting = thread.length > 0;
+  const showWidgets = Boolean(widgets) && (!chatting || widgetsOpen);
+  const byId = new Map(intake.records.map((record) => [record.id, record]));
+
+  const conversation = (
+    <div className="mx-auto w-full max-w-3xl space-y-5 py-6">
+      {thread.map((item) => {
+        if (item.kind === "user") {
+          return (
+            <div key={item.id} className="flex justify-end">
+              <div className="max-w-[85%] space-y-2 rounded-2xl bg-muted px-4 py-2.5 text-[15px]">
+                {item.fileNames.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {item.fileNames.map((name, index) => (
+                      <span key={`${name}-${index}`} className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-xs"><FileText className="h-3.5 w-3.5" />{name}</span>
+                    ))}
+                  </div>
+                )}
+                {item.text && <p className="whitespace-pre-wrap">{item.text}</p>}
+              </div>
+            </div>
+          );
+        }
+        if (item.kind === "notice") {
+          return <p key={item.id} className="text-sm text-muted-foreground">{item.text}</p>;
+        }
+        const records = item.recordIds.map((id) => byId.get(id)).filter((record) => record !== undefined);
+        return (
+          <div key={item.id} className="rounded-2xl border bg-white px-4 py-2">
+            {records.length === 0 ? (
+              <p className="py-2 text-sm text-muted-foreground">파일을 읽는 중…</p>
+            ) : (
+              <ul>
+                {records.map((record) => (
+                  <IntakeResultRow key={record.id} record={record} courses={intake.courses} onChange={intake.change} onRemove={intake.remove} />
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
+      <div ref={bottom} />
+    </div>
+  );
+
+  // 넓은 화면에서는 페이지가 스크롤되지 않는다.
+  // 처음: 인사말·입력창(위) + 일정 박스(아래)
+  // 대화 중: 대화(남는 높이 전부, 안에서 스크롤) + 입력창 + 손잡이 [+ 펼치면 일정 박스]
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-col px-4 sm:px-6 lg:h-full lg:min-h-0">
+      {chatting ? (
+        <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">{conversation}</div>
+      ) : (
+        <section className="mx-auto flex w-full max-w-2xl flex-col justify-center py-10 lg:min-h-0 lg:flex-1 lg:py-4">
           <h2 className="mb-6 flex items-center justify-center gap-3 text-center text-3xl font-semibold tracking-tight sm:text-[34px]" suppressHydrationWarning>
             <Sparkles className="h-8 w-8 shrink-0 text-primary" aria-hidden />
             {greeting}
@@ -87,57 +144,39 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
           {consentBanner}
           {composer}
         </section>
-        {widgets && <div className="lg:min-h-[200px] lg:flex-[1.15]">{widgets}</div>}
-      </div>
-    );
-  }
+      )}
 
-  const byId = new Map(intake.records.map((record) => [record.id, record]));
-  return (
-    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 sm:px-6 lg:h-full lg:min-h-0">
-      {/* 대화가 길어지면 메시지 영역만 스크롤 */}
-      <div className="flex-1 space-y-5 py-6 lg:min-h-0 lg:overflow-y-auto">
-        {thread.map((item) => {
-          if (item.kind === "user") {
-            return (
-              <div key={item.id} className="flex justify-end">
-                <div className="max-w-[85%] space-y-2 rounded-2xl bg-muted px-4 py-2.5 text-[15px]">
-                  {item.fileNames.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {item.fileNames.map((name, index) => (
-                        <span key={`${name}-${index}`} className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-xs"><FileText className="h-3.5 w-3.5" />{name}</span>
-                      ))}
-                    </div>
-                  )}
-                  {item.text && <p className="whitespace-pre-wrap">{item.text}</p>}
-                </div>
-              </div>
-            );
-          }
-          if (item.kind === "notice") {
-            return <p key={item.id} className="text-sm text-muted-foreground">{item.text}</p>;
-          }
-          const records = item.recordIds.map((id) => byId.get(id)).filter((record) => record !== undefined);
-          return (
-            <div key={item.id} className="rounded-2xl border bg-white px-4 py-2">
-              {records.length === 0 ? (
-                <p className="py-2 text-sm text-muted-foreground">파일을 읽는 중…</p>
-              ) : (
-                <ul>
-                  {records.map((record) => (
-                    <IntakeResultRow key={record.id} record={record} courses={intake.courses} onChange={intake.change} onRemove={intake.remove} />
-                  ))}
-                </ul>
-              )}
-            </div>
-          );
-        })}
-        <div ref={bottom} />
-      </div>
-      <div className="sticky bottom-0 bg-gradient-to-t from-slate-50 via-slate-50 to-slate-50/0 pb-4 pt-6 lg:static lg:pt-2">
-        {consentBanner}
-        {composer}
-      </div>
+      {chatting && (
+        <div className="sticky bottom-0 mx-auto w-full max-w-3xl shrink-0 bg-gradient-to-t from-slate-50 via-slate-50 to-slate-50/0 pt-4 lg:static lg:pt-2">
+          {consentBanner}
+          {composer}
+          {widgets && (
+            <button
+              type="button"
+              aria-expanded={widgetsOpen}
+              aria-label={widgetsOpen ? "오늘 계획·시험·과제·오늘 수업 접기" : "오늘 계획·시험·과제·오늘 수업 펼치기"}
+              title={widgetsOpen ? "접기" : "오늘 계획·시험·과제·오늘 수업 보기"}
+              onClick={() => setWidgetsOpen((value) => !value)}
+              className="group mx-auto my-1.5 flex h-5 w-56 items-center justify-center rounded-full bg-slate-200/70 text-muted-foreground transition-colors hover:bg-slate-300/80 hover:text-foreground"
+            >
+              {widgetsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            </button>
+          )}
+        </div>
+      )}
+
+      {widgets && (
+        <div
+          inert={!showWidgets}
+          className={cn(
+            "overflow-hidden transition-[flex-basis,opacity] duration-300 ease-out lg:min-h-0 lg:flex-none",
+            showWidgets ? "pb-6 opacity-100" : "max-lg:hidden opacity-0 lg:pointer-events-none",
+            !chatting ? "lg:basis-[52%]" : showWidgets ? "lg:basis-[40%]" : "lg:basis-0",
+          )}
+        >
+          {widgets}
+        </div>
+      )}
     </div>
   );
 }
