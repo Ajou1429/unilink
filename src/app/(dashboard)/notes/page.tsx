@@ -1,5 +1,7 @@
 "use client";
 
+import { getAllStoredCourses } from "@/lib/course-storage";
+import { docTypeLabelFromTags } from "@/lib/file-intake/classify-local";
 import { privateStorage } from "@/lib/private-storage";
 
 
@@ -594,7 +596,11 @@ export default function NotesPage() {
 
       let feedback = "노트가 저장되었습니다.";
       if (saveToDrive) {
-        try { await uploadNoteToDrive(savedNote.id); feedback = "노트를 저장하고 Drive의 해당 수업·개인 학습 폴더에 올렸습니다."; }
+        try {
+          // Drive 폴더: UniLink / 학기 / 과목 / 종류
+          const term = getAllStoredCourses().find((course) => course.id === savedNote.linkedId)?.term;
+          await uploadNoteToDrive(savedNote.id, { term, kind: docTypeLabelFromTags(savedNote.tags) });
+          feedback = "노트를 저장하고 Drive의 해당 수업·개인 학습 폴더에 올렸습니다."; }
         catch (error) { feedback = `노트는 저장됐습니다. Drive 업로드는 실패했습니다: ${error instanceof Error ? error.message : "다시 시도해 주세요."} 노트를 열어 다시 업로드할 수 있습니다.`; }
       }
       await loadNotes();

@@ -18,6 +18,8 @@
 
 같은 날 5차: 문제은행 과목을 현재 학기 시간표 과목과 자동 연동하고, `problem_bank_coaching_links`를 과목 학습 목표로 자동 연결했다(수동 연결 UI `ProblemBankCoachingLink` 삭제). 이해도가 사용자 선택 없이 코칭 근거에 들어간다. 중간/기말 범위는 `source_file` 접두사로 구분해 새 마이그레이션은 없다. 대시보드에서 계획·시험·과제를 바로 추가한다(시험·과제는 과목 `calendar_events`). 상세는 [changelog/2026-11-12-quick-add-problem-bank-sync.md](changelog/2026-11-12-quick-add-problem-bank-sync.md). 로그인 계정 DB 왕복은 미확인. 코칭 우선순위 순서는 변경 없음.
 
+같은 날 6차(`feature/file-intake` 브랜치, 사용자 요청으로 main 미반영): 대시보드 파일 자동 분류를 구현했다. 브라우저 1차 분류 후 필요할 때만 `file-classify`(OpenAI)로 종류·과목을 정하고, 강의계획서는 시간표·성적 반영비율로, 문제 PDF는 문제은행으로 반영한다. 운영 반영에는 마이그레이션 0033·0034 적용과 `file-classify`·`drive-upload` 배포가 먼저 필요하다. 실제 AI 분류 품질·토큰과 Drive 폴더 구조는 미검증. 상세는 [changelog/2026-11-12-file-intake.md](changelog/2026-11-12-file-intake.md). 강의계획서 성적 반영비율은 이후 코칭 입력(시험 비중)에 활용할 수 있다. 코칭 우선순위 순서는 변경 없음.
+
 ## 2026-11-11 로컬 최신 코드 통합
 
 - 후속 사용자 요청으로 커뮤니티 페이지·링크·알림·게시판 저장 코드·샘플을 제거했다. 기존 커뮤니티는 브라우저 전용이었고 로컬 DB 스키마에 관련 객체가 없어 DB 삭제 마이그레이션은 필요하지 않다. 앱 시작 시 기존 브라우저 커뮤니티 데이터만 정리한다. 상세는 `community-removal.md`. 로컬 수정이며 코칭 운영 확인·실행 기록 연결의 우선순위는 유지한다.

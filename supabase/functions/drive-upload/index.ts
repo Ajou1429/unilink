@@ -23,6 +23,13 @@ async function folder(token: string, key: string, name: string, parent = "root")
   return created.id as string;
 }
 
+/** 폴더 이름으로 쓸 학기·종류. 1~60자, 경로 구분자·제어문자 없음. 없거나 잘못되면 null */
+export function folderLabel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const label = value.trim();
+  return label && label.length <= 60 && !/[\/\u0000-\u001f]/.test(label) ? label : null;
+}
+
 export async function handleDriveUpload(req: Request): Promise<Response> {
   const options = handleOptions(req); if (options) return options;
   if (req.method !== "POST") return jsonResponse({ error: "method not allowed" }, { status: 405 });
@@ -57,8 +64,15 @@ export async function handleDriveUpload(req: Request): Promise<Response> {
       bytes = new TextEncoder().encode(note.content); mime = "text/plain"; name = `${note.title}.txt`;
       if (bytes.length > MAX) throw new RequestError("노트 내용이 너무 큽니다.");
     }
+    // 분류된 파일: UniLink / 학기 / 과목 / 종류. 학기·종류를 보내지 않은 기존 호출은 UniLink / 과목
+    const term = folderLabel(body.term), kind = folderLabel(body.kind);
     const root = await folder(token, "root", "UniLink");
-    const target = await folder(token, `${note.linked_type}:${note.linked_id}`, note.linked_title.slice(0, 150), root);
+    const termFolder = term ? await folder(token, `term:${term}`, term, root) : root;
+    const courseKey = term ? `${note.linked_type}:${note.linked_id}:${term}` : `${note.linked_type}:${note.linked_id}`;
+    const courseFolder = await folder(token, courseKey, note.linked_title.slice(0, 150), termFolder);
+    const target = kind ? await folder(token, `${courseKey}:${kind}`, kind, courseFolder) : courseFolder;
+    const folderPath = ["UniLink", ...(term ? [term] : []), note.linked_title, ...(kind ? [kind] : [])];
+    const folderPathIds = [root, ...(term ? [termFolder] : []), courseFolder, ...(kind ? [target] : [])];
     const job = await db.from("drive_upload_jobs").select("drive_file_id").eq("id", jobId).eq("user_id", user.id).single();
     if (job.error) throw new RequestError("업로드 상태를 확인하지 못했습니다.");
     let fileId = job.data.drive_file_id;
@@ -81,7 +95,7 @@ export async function handleDriveUpload(req: Request): Promise<Response> {
       remote = await (await google(token, uploadUrl, { method: "PUT", headers: { "Content-Type": mime }, body: new Uint8Array(bytes).buffer })).json();
     }
     const saved = await db.from("notes").update({ drive_file_id: fileId, drive_modified_time: remote.modifiedTime,
-      drive_folder_id: target, drive_folder_name: note.linked_title, drive_folder_path: ["UniLink", note.linked_title], drive_folder_path_ids: [root, target], sync_status: "synced" })
+      drive_folder_id: target, drive_folder_name: kind ?? note.linked_title, drive_folder_path: folderPath, drive_folder_path_ids: folderPathIds, sync_status: "synced" })
       .eq("id", note.id).eq("user_id", user.id).eq("updated_at", note.updated_at).select("id").single();
     if (saved.error) throw new RequestError("파일은 Drive에 업로드됐지만 노트 연결 저장에 실패했습니다. 다시 누르면 같은 파일로 재연결합니다.", 503);
     const complete = await db.from("drive_upload_jobs").update({ status: "completed" }).eq("id", jobId).eq("user_id", user.id);

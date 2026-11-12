@@ -26,8 +26,12 @@ export interface Course {
   originalSchedule?: string;
   term?: string;
   courseType?: "major" | "non-major";
-  /** 이수구분 (전필·전선·교선 등). 직접 추가한 과목에만 있다. */
+  /** 이수구분 (전필·전선·교선 등). 직접 추가하거나 강의계획서로 만든 과목에 있다. */
   category?: string;
+  /** 강의계획서의 성적 반영비율 (예: 중간 30, 기말 40) */
+  gradingWeights?: { item: string; weight: number }[];
+  /** 강의계획서 파일을 저장한 노트 id */
+  syllabusNoteId?: string;
   name: string;
   professor: string;
   location: string;

@@ -165,7 +165,7 @@ export function TodayPlans({ date: today, plans, courses }: { date: string; plan
       })),
   ];
 
-  return <Card className="min-w-0 border-0 shadow-sm">
+  return <Card className="flex min-h-0 min-w-0 flex-col border-0 shadow-sm">
     <CardHeader className="pb-3">
       <div className="flex items-center justify-between gap-2">
         <CardTitle className="text-base">{offset === 0 ? "오늘 계획" : "계획"}</CardTitle>
@@ -190,7 +190,7 @@ export function TodayPlans({ date: today, plans, courses }: { date: string; plan
         </div>
       </div>
     </CardHeader>
-    <CardContent className="space-y-3">
+    <CardContent className="min-h-0 flex-1 overflow-y-auto max-lg:max-h-80 space-y-3">
       {rows.map((row) => <div key={row.id} className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3">
         <Link href="/study" className="min-w-0 flex-1 hover:underline">
           <p className="break-words text-sm font-medium">{row.title}</p>

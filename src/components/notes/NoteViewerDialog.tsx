@@ -1,5 +1,7 @@
 "use client";
 
+import { getAllStoredCourses } from "@/lib/course-storage";
+import { docTypeLabelFromTags } from "@/lib/file-intake/classify-local";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -66,9 +68,11 @@ export function NoteViewerDialog({
     if (driveUploading) return;
     setDriveUploading(true); setDriveUploadMessage("");
     try {
-      await uploadNoteToDrive(note.id);
+      const term = getAllStoredCourses().find((course) => course.id === note.linkedId)?.term;
+      const kind = docTypeLabelFromTags(note.tags);
+      await uploadNoteToDrive(note.id, { term, kind });
       setDriveUploaded(true);
-      setDriveUploadMessage(`Drive의 UniLink / ${note.linkedTitle ?? note.courseName} 폴더에 저장했습니다. 기존 분류가 유지됩니다.`);
+      setDriveUploadMessage(`Drive의 ${["UniLink", term, note.linkedTitle ?? note.courseName, kind].filter(Boolean).join(" / ")} 폴더에 저장했습니다.`);
       window.dispatchEvent(new Event(MY_NOTES_CHANGED_EVENT));
     } catch (error) { setDriveUploadMessage(error instanceof Error ? error.message : "Drive 업로드에 실패했습니다."); }
     finally { setDriveUploading(false); }

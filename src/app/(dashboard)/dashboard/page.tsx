@@ -3,6 +3,7 @@
 import { useCurrentTime } from "@/lib/use-current-time";
 import { TodayPlans } from "@/components/dashboard/TodayPlans";
 import { ExamAssignments } from "@/components/dashboard/ExamAssignments";
+import { FileIntakeBox } from "@/components/dashboard/FileIntakeBox";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Header } from "@/components/layout/Header";
@@ -95,21 +96,22 @@ export default function DashboardPage() {
   // 정적 빌드 시각과 접속 시각의 인사말이 다를 수 있어 h2에 suppressHydrationWarning을 둔다.
   const greeting = getGreeting(displayName, new Date(now));
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex min-h-screen flex-col lg:h-dvh lg:min-h-0">
       <Header title="대시보드" />
-      <div className="flex-1 p-6 flex flex-col gap-6 max-w-6xl mx-auto w-full">
-        <div className="flex items-center justify-between">
+      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-4 p-6">
+        <div className="flex shrink-0 items-center justify-between">
           <div>
             <h2 className="text-2xl font-bold" suppressHydrationWarning>{greeting}</h2>
           </div>
         </div>
 
-        <div className="grid flex-1 gap-6 lg:grid-cols-2">
+        {/* 위 3개 박스는 남는 높이를 나눠 쓰고, 내용이 넘치면 박스 안에서 스크롤 */}
+        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
           <TodayPlans date={new Intl.DateTimeFormat("sv-SE", { timeZone: KOREA_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now))} plans={plans} courses={termCourses} />
 
-          <div className="grid min-w-0 gap-6 sm:grid-cols-2">
+          <div className="grid min-h-0 min-w-0 gap-4 sm:grid-cols-2">
           <ExamAssignments now={now} courses={termCourses} />
-          <Card className="min-w-0 border-0 shadow-sm">
+          <Card className="flex min-h-0 min-w-0 flex-col border-0 shadow-sm">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">오늘 수업</CardTitle>
@@ -124,7 +126,7 @@ export default function DashboardPage() {
                 </Button>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="min-h-0 flex-1 overflow-y-auto max-lg:max-h-80 space-y-3">
               {todaySchedule.length > 0 ? (
                 todaySchedule.map((course) => (
                   <Link
@@ -154,6 +156,9 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
           </div>
+        </div>
+        <div className="min-h-0 shrink-0 lg:h-[38%]">
+          <FileIntakeBox />
         </div>
       </div>
     </div>

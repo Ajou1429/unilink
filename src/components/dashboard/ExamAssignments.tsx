@@ -166,7 +166,7 @@ export function ExamAssignments({ now, courses }: { now: number; courses: Course
   }, [now]);
 
   const format = (value: string) => new Intl.DateTimeFormat("ko-KR", { timeZone: KOREA_TIME_ZONE, month: "long", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
-  return <Card className="min-w-0 border-0 shadow-sm">
+  return <Card className="flex min-h-0 min-w-0 flex-col border-0 shadow-sm">
     <CardHeader className="pb-3"><div className="flex items-center justify-between gap-3">
       <CardTitle className="text-base">시험·과제</CardTitle>
       <div className="flex items-center gap-1">
@@ -178,7 +178,7 @@ export function ExamAssignments({ now, courses }: { now: number; courses: Course
       </Button>
       </div>
     </div></CardHeader>
-    <CardContent className="space-y-2">
+    <CardContent className="min-h-0 flex-1 overflow-y-auto max-lg:max-h-80 space-y-2">
       {message ? <p role="status" className="py-4 text-center text-sm text-muted-foreground">{message}</p>
         : rows.length === 0 ? <p className="py-4 text-center text-sm text-muted-foreground">예정된 시험·과제가 없어요.</p>
         : rows.map((event) => {

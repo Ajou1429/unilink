@@ -522,9 +522,13 @@ export async function getMyNotes(): Promise<MyNote[]> {
 export async function addNote(input: NewNoteInput): Promise<MyNote> {
   const owner = getStorageUser();
   if (input.file) {
-    const allowed = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif", "text/plain"];
+    const allowed = [
+      "application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif", "text/plain",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ];
     if (input.file.size > 20 * 1024 * 1024 || !allowed.includes(input.file.type)) {
-      throw new Error("20MB 이하의 PDF, 이미지 또는 텍스트 파일만 업로드할 수 있습니다.");
+      throw new Error("20MB 이하의 PDF, 이미지, PPTX, DOCX 또는 텍스트 파일만 업로드할 수 있습니다.");
     }
     if (input.file.type === "application/pdf" && await input.file.slice(0, 5).text() !== "%PDF-") {
       throw new Error("유효한 PDF 파일이 필요합니다.");
@@ -557,6 +561,17 @@ export async function updateNotesClassification(
     return updateSupabaseNotesClassification(noteIds, linkedType, linkedId, linkedTitle);
   }
   return updateLocalNotesClassification(noteIds, linkedType, linkedId, linkedTitle);
+}
+
+/** 노트 태그 교체 (자동 분류의 자료 종류 표시 등) */
+export async function updateNoteTags(noteId: string, tags: string[]): Promise<void> {
+  const clean = [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))].slice(0, 20);
+  if (isSupabaseConfigured) {
+    const { error } = await getSupabaseClient()!.from("notes").update({ tags: clean }).eq("id", noteId);
+    if (error) throw error;
+    return;
+  }
+  saveLocalNotes(getLocalNotes().map((note) => (note.id === noteId ? { ...note, tags: clean, updatedAt: new Date().toISOString() } : note)));
 }
 
 export async function deleteNote(noteId: string): Promise<MyNote[]> {

@@ -449,6 +449,16 @@ function CourseContent() {
                     {courseTime}
                   </span>
                 </div>
+                {Boolean(course.gradingWeights?.length) && (
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs" aria-label="성적 반영비율">
+                    <span className="font-medium text-foreground">성적 반영비율</span>
+                    {course.gradingWeights!.map((item) => (
+                      <span key={item.item} className="rounded-md bg-muted px-2 py-0.5">
+                        {item.item} <b>{item.weight}%</b>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div>

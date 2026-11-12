@@ -255,10 +255,11 @@ export async function syncDriveFolder(folderId?: string): Promise<DriveSyncResul
   return syncDriveFolders(folderId ? [folderId] : undefined);
 }
 
-export async function uploadNoteToDrive(noteId: string): Promise<void> {
+/** folder를 주면 Drive의 UniLink / 학기 / 과목 / 종류 폴더에, 없으면 UniLink / 과목 폴더에 올린다. */
+export async function uploadNoteToDrive(noteId: string, folder?: { term?: string; kind?: string }): Promise<void> {
   const db = getSupabaseClient();
   if (!db) throw new Error("로그인이 필요합니다.");
-  const result = await db.functions.invoke("drive-upload", { body: { noteId } });
+  const result = await db.functions.invoke("drive-upload", { body: { noteId, term: folder?.term, kind: folder?.kind } });
   if (result.error) throw new Error(await describeFunctionError(result.error, "Drive 업로드에 실패했습니다."));
 }
 
