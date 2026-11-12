@@ -178,7 +178,7 @@ export function ExamAssignments({ now, courses }: { now: number; courses: Course
       </Button>
       </div>
     </div></CardHeader>
-    <CardContent className="min-h-0 flex-1 overflow-y-auto max-lg:max-h-80 space-y-2">
+    <CardContent className="min-h-0 flex-1 overflow-y-auto space-y-2">
       {message ? <p role="status" className="py-4 text-center text-sm text-muted-foreground">{message}</p>
         : rows.length === 0 ? <p className="py-4 text-center text-sm text-muted-foreground">예정된 시험·과제가 없어요.</p>
         : rows.map((event) => {

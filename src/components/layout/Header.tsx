@@ -1,8 +1,9 @@
 "use client";
 
-import { Sidebar } from "@/components/layout/Sidebar";
+import { SidebarToggle } from "@/components/layout/Sidebar";
+import { useSidebar } from "@/components/layout/SidebarContext";
 import { useCurrentTime } from "@/lib/use-current-time";
-import { Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,9 +23,12 @@ import {
 
 interface HeaderProps {
   title: string;
+  /** 홈처럼 제목 없이 버튼만 두는 투명 상단 줄 */
+  bare?: boolean;
 }
 
-export function Header({ title }: HeaderProps) {
+export function Header({ title, bare = false }: HeaderProps) {
+  const { open } = useSidebar();
   const now = useCurrentTime();
   const router = useRouter();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -60,9 +64,10 @@ export function Header({ title }: HeaderProps) {
   }
 
   return (
-    <header className="h-16 border-b bg-white flex items-center gap-3 px-4 sm:gap-4 sm:px-6">
-      <Suspense fallback={<span className="size-9 shrink-0" />}><Sidebar /></Suspense>
-      <h1 className="text-lg font-semibold">{title}</h1>
+    <header className={bare ? "flex h-14 items-center gap-3 px-3 sm:px-4" : "flex h-14 items-center gap-3 border-b bg-white px-3 sm:gap-4 sm:px-4"}>
+      {/* 목록이 열려 있으면 목록 안의 버튼을 쓰고, 접혀 있거나 좁은 화면이면 여기에 버튼을 둔다 */}
+      <SidebarToggle className={open ? "lg:hidden" : ""} />
+      <h1 className={bare ? "sr-only" : "text-lg font-semibold"}>{title}</h1>
       <div className="flex-1" />
       <DropdownMenu>
         <DropdownMenuTrigger
