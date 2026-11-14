@@ -1,6 +1,6 @@
 // callback only relays the authorization response. Only authenticated /complete
 // may exchange the code, after checking the initiating browser's secret.
-import { buildConsentUrl, exchangeCodeForTokens, getDriveAccountProfile, GoogleTokenError, refreshAccessToken } from "../_shared/google.ts";
+import { buildConsentUrl, exchangeCodeForTokens, getDriveAccountProfile, getDriveFolder, GoogleTokenError, refreshAccessToken } from "../_shared/google.ts";
 import { encryptSecret } from "../_shared/crypto.ts";
 import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.ts";
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
@@ -94,12 +94,30 @@ export async function handleGoogleAuth(req: Request): Promise<Response> {
     const encrypted = await encryptSecret(tokens.refresh_token);
     stage = "read_drive_profile";
     const profile = await getDriveAccountProfile(verifiedTokens.access_token);
+    stage = "read_previous_connection";
+    const previous = await admin.from("drive_connections").select("account_email,folder_id,folder_ids,folder_names").eq("user_id", user.id).maybeSingle();
+    if (previous.error) throw previous.error;
+    const sameAccount = Boolean(profile.email && previous.data?.account_email &&
+      profile.email.trim().toLowerCase() === previous.data.account_email.trim().toLowerCase());
+    const oldIds: string[] = previous.data?.folder_ids?.length ? previous.data.folder_ids : previous.data?.folder_id ? [previous.data.folder_id] : [];
+    const retained = [] as { id: string; name: string }[];
+    if (sameAccount) {
+      for (const id of oldIds) {
+        try {
+          const folder = await getDriveFolder(verifiedTokens.access_token, id);
+          if (folder.mimeType === "application/vnd.google-apps.folder") retained.push({ id: folder.id, name: folder.name });
+        } catch (error) {
+          if (!(error instanceof Error) || !/\): (403|404)\b/.test(error.message)) throw error;
+          // An inaccessible folder requires explicit reselection; do not guess by name.
+        }
+      }
+    }
     stage = "save_connection";
     const { error: saveError } = await admin.from("drive_connections").upsert({
       user_id: user.id, refresh_token_encrypted: encrypted.ciphertext, refresh_token_iv: encrypted.iv,
       account_email: profile.email, account_name: profile.name, account_photo_url: profile.photoUrl,
-      // A reconnected Google account must never inherit another account's folders/cursors.
-      folder_id: null, folder_ids: [], folder_names: [], page_token: null,
+      // Cursors and channels are always reset; folder IDs survive only for the same account and accessible folders.
+      folder_id: retained[0]?.id ?? null, folder_ids: retained.map((folder) => folder.id), folder_names: retained.map((folder) => folder.name), page_token: null,
       channel_id: null, resource_id: null, channel_expiration: null,
       connection_status: "active", last_error_code: null, last_error_at: null,
     });

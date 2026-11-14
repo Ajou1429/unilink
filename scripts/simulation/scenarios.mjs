@@ -308,7 +308,7 @@ export async function runSimulation({ seed = 20260929, users: userCount = 12, di
       assert.equal((await rows('drive_connections', a.id))[0].page_token, 'cursor-2');
       assert.equal(Date.parse((await rows('notes', a.id)).find((note) => note.drive_file_id === file.id).drive_modified_time), Date.parse(file.modifiedTime));
     }, 'simulated-external');
-    await check('expired authorization fails visibly and reconnect resets old folder/cursor state', async () => {
+    await check('expired authorization fails visibly and reconnect preserves accessible folders but resets cursor', async () => {
       external.state.expired.add(a.id);
       assert.equal((await external.invoke('drive-sync', a.id, syncBody)).status, 409);
       assert.equal((await rows('drive_connections', a.id))[0].connection_status, 'reconnect_required');
@@ -317,7 +317,7 @@ export async function runSimulation({ seed = 20260929, users: userCount = 12, di
       assert.equal((await preview.json()).code, 'reconnect_required');
       await connect(a);
       const connection = (await rows('drive_connections', a.id))[0];
-      assert.deepEqual(connection.folder_ids, []);
+      assert.deepEqual(connection.folder_ids, [`root-${a.id}`]);
       assert.equal(connection.page_token, null);
       assert.equal((await external.invoke('drive-sync', a.id, syncBody)).status, 200);
     }, 'simulated-external');

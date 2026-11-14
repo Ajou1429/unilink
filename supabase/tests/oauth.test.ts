@@ -16,6 +16,9 @@ Deno.test("OAuth binds browser proof and user, expires states and consumes each 
   let pending: Pending | null = null;
   let exchanges = 0;
   let saves = 0;
+  let previousConnection: { account_email: string; folder_id: string; folder_ids: string[]; folder_names: string[] } | null = null;
+  let newEmail = "test@example.invalid";
+  let accessible = true;
   const verifier = "a".repeat(64);
   const challenge = await codeChallenge(verifier);
   const json = (value: unknown) => Response.json(value);
@@ -44,10 +47,16 @@ Deno.test("OAuth binds browser proof and user, expires states and consumes each 
       assert(form.get("code_verifier") === verifier);
       return json({access_token:"fake-access", refresh_token:"fake-refresh"});
     }
-    if (url.pathname === "/drive/v3/about") return json({user:{emailAddress:"test@example.invalid"}});
+    if (url.pathname === "/drive/v3/about") return json({user:{emailAddress:newEmail}});
+    if (url.pathname === "/drive/v3/files/folder123") return accessible ? json({id:"folder123",name:"GoodNotes renamed",mimeType:"application/vnd.google-apps.folder"}) : Response.json({}, {status:404});
     if (url.pathname === "/rest/v1/drive_connections") {
+      if (req.method === "GET") return json(previousConnection);
       const body = await req.json(); assert(body.user_id === "A");
-      assert(body.refresh_token_encrypted !== "fake-refresh"); assert(body.folder_ids.length === 0);
+      assert(body.refresh_token_encrypted !== "fake-refresh");
+      if (previousConnection && newEmail === previousConnection.account_email && accessible) {
+        assert(body.folder_ids[0] === "folder123" && body.folder_names[0] === "GoodNotes renamed");
+      } else assert(body.folder_ids.length === 0);
+      assert(body.page_token === null && body.channel_id === null);
       saves++; return new Response(null,{status:201});
     }
     throw new Error(`Unexpected request: ${url.origin}${url.pathname}`);
@@ -75,10 +84,17 @@ Deno.test("OAuth binds browser proof and user, expires states and consumes each 
     assert((await post("complete",body)).status === 200);
     assert((await post("complete",body)).status === 403);
     assert(Number(exchanges) === 1 && Number(saves) === 1);
+    previousConnection = {account_email:"test@example.invalid",folder_id:"folder123",folder_ids:["folder123"],folder_names:["GoodNotes"]};
+    for (const scenario of ["same", "other", "inaccessible"]) {
+      newEmail = scenario === "other" ? "different@example.invalid" : "test@example.invalid";
+      accessible = scenario !== "inaccessible";
+      const next = await (await post("start",{codeChallenge:challenge})).json();
+      assert((await post("complete",{...body,state:next.state})).status === 200);
+    }
     const expired = await (await post("start",{codeChallenge:challenge})).json();
     (pending as unknown as Pending).created_at = new Date(Date.now()-660_000).toISOString();
     assert((await post("complete",{...body,state:expired.state})).status === 403);
-    assert(Number(exchanges) === 1);
+    assert(Number(exchanges) === 4);
   } finally {
     globalThis.fetch = originalFetch;
     for (const [key,value] of Object.entries(previous)) { if (value === undefined) Deno.env.delete(key); else Deno.env.set(key,value); }
