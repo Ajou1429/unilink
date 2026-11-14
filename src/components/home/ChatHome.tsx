@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { NEW_CHAT_EVENT } from "@/components/layout/Sidebar";
 import {
   applyAction, editApplied, getChatConsent, interpretMessage, loadChatContext, setChatConsent, undoApplied,
-  type AppliedEdit, type ChatContext,
+  type AppliedEdit, type ChatContext, type ObservationIdentity,
 } from "@/lib/chat-record/apply";
 import {
   courseMentioned, dateKey, missingOf, pendingNote, resolveProblemAction, sameRecord, type ChatAction,
@@ -15,6 +15,7 @@ import { ChatComposer, type ComposerSubmit } from "./ChatComposer";
 import { ChatRecordCard, type RecordEntry } from "./ChatRecordCard";
 import { IntakeResultRow } from "./IntakeResultRow";
 import { useFileIntake } from "./useFileIntake";
+import { createChatQueue } from "@/lib/chat-record/queue";
 
 type ThreadItem =
   | { id: string; kind: "user"; text: string; fileNames: string[] }
@@ -42,12 +43,14 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
   const bottom = useRef<HTMLDivElement>(null);
   const [context, setContext] = useState<ChatContext | null>(null);
   const threadRef = useRef<ThreadItem[]>([]);
+  const requests = useRef(createChatQueue());
   useEffect(() => { threadRef.current = thread; }, [thread]);
 
   useEffect(() => {
-    const reset = () => { setThread([]); setWidgetsOpen(false); };
+    const queue = requests.current;
+    const reset = () => { queue.cancel(); threadRef.current = []; setThread([]); setContext(null); setWidgetsOpen(false); };
     window.addEventListener(NEW_CHAT_EVENT, reset);
-    return () => window.removeEventListener(NEW_CHAT_EVENT, reset);
+    return () => { queue.cancel(); window.removeEventListener(NEW_CHAT_EVENT, reset); };
   }, []);
 
   useEffect(() => {
@@ -82,7 +85,10 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
       history.push({ role: "assistant", text: pendingNote(entry.action, entry.missing!, course?.name) });
     }
     setThread((prev) => [...prev, ...items]);
-    if (text) void record(text, history);
+    if (text) {
+      const observedAt = new Date().toISOString();
+      void requests.current.enqueue(check => record(text, history, check, observedAt)).catch(() => {});
+    }
   }
 
   // ── 대화로 진도·이해도 기록 ──
@@ -90,7 +96,8 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
   const patchEntry = (itemId: string, key: string, patch: Partial<RecordEntry>) => patchItem(itemId, (item) =>
     item.kind === "records" ? { ...item, entries: item.entries.map((entry) => (entry.key === key ? { ...entry, ...patch } : entry)) } : item);
 
-  async function runEntry(itemId: string, ctx: ChatContext, key: string, action: ChatAction) {
+  async function runEntry(itemId: string, ctx: ChatContext, key: string, action: ChatAction, assertCurrent: () => void, identity?: ObservationIdentity) {
+    assertCurrent();
     const resolved = resolveProblemAction(action, ctx.files);
     if (!resolved) {
       patchEntry(itemId, key, { action, missing: null, status: "error", error: "말씀하신 문항을 이 과목 문제은행에서 찾지 못했어요." });
@@ -100,14 +107,18 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
     if (missing) { patchEntry(itemId, key, { action: resolved, missing, status: "waiting" }); return; }
     patchEntry(itemId, key, { action: resolved, missing: null, status: "saving" });
     try {
-      const applied = await applyAction(ctx, resolved);
+      const entry = findEntry(key)?.entry;
+      const applied = await applyAction(ctx, resolved, identity ?? { requestId: entry?.requestId ?? crypto.randomUUID(), observedAt: entry?.observedAt ?? new Date().toISOString() }, assertCurrent);
+      assertCurrent();
       patchEntry(itemId, key, { applied, status: "saved", error: undefined });
     } catch (error) {
+      assertCurrent();
       patchEntry(itemId, key, { status: "error", error: error instanceof Error ? error.message : "저장하지 못했어요." });
     }
   }
 
-  async function record(text: string, history: { role: "user" | "assistant"; text: string }[]) {
+  async function record(text: string, history: { role: "user" | "assistant"; text: string }[], assertCurrent: () => void, observedAt: string) {
+    assertCurrent();
     if (getChatConsent() !== "granted") {
       setThread((prev) => [...prev, { id: nextId(), kind: "consent", text }]);
       return;
@@ -117,9 +128,11 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
     setThread((prev) => [...prev, { id: replyId, kind: "assistant", text: "", pending: true }]);
     try {
       const ctx = await loadChatContext();
+      assertCurrent();
       setContext(ctx);
       if (!ctx.signedIn) { say("로그인하면 대화 내용으로 진도·이해도가 기록돼요."); return; }
       const result = await interpretMessage(ctx, text, history.slice(-8), dateKey(new Date()));
+      assertCurrent();
       if (!result.actions.length) {
         say(result.dropped > 0 ? "말씀하신 과목이나 문항 번호를 찾지 못해 기록하지 않았어요. 시간표·문제은행에 있는 이름과 번호로 말씀해 주세요."
           : result.reply || "기록할 진도나 이해도를 찾지 못했어요. 과목과 함께 말씀해 주세요.");
@@ -137,15 +150,19 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
         // 과목은 사용자가 직접 말한 경우에만 쓴다. AI가 짐작한 과목이면 되묻는다.
         const course = ctx.courses.find((item) => item.id === raw.course_id);
         const action = course && !courseMentioned(course, source.split("\n")) ? { ...raw, course_id: null } : raw;
-        return { key: `${recordsId}-${index}`, source, action, status: "saving", missing: null };
+        return { key: `${recordsId}-${index}`, source, action, status: "saving", missing: null,
+          requestId: answered?.requestId ?? crypto.randomUUID(), observedAt: answered?.observedAt ?? observedAt };
       });
       setThread((prev) => [
         ...prev.map((item) => (item.kind === "records" ? { ...item, entries: item.entries.filter((entry) => !replaced.has(entry.key)) } : item)),
         { id: recordsId, kind: "records", entries },
       ]);
       // 같은 새 주제가 두 번 만들어지지 않도록 하나씩 저장한다
-      for (const entry of entries) await runEntry(recordsId, ctx, entry.key, entry.action);
+      for (const entry of entries) {
+        await runEntry(recordsId, ctx, entry.key, entry.action, assertCurrent, { requestId: entry.requestId!, observedAt: entry.observedAt! });
+      }
     } catch (error) {
+      try { assertCurrent(); } catch { return; }
       say(error instanceof Error ? error.message : "대화를 기록하지 못했어요.");
     }
   }
@@ -155,7 +172,8 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
     setThread((prev) => prev.filter((item) => item.id !== itemId));
     if (value === "granted") {
       const history = threadRef.current.flatMap((item) => item.kind === "assistant" && item.text ? [{ role: "assistant" as const, text: item.text }] : []).slice(-3);
-      void record(text, history);
+      const observedAt = new Date().toISOString();
+      void requests.current.enqueue(check => record(text, history, check, observedAt)).catch(() => {});
     }
   }
 
@@ -171,7 +189,7 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
   function pick(key: string, patch: Partial<ChatAction>) {
     const found = findEntry(key);
     if (!found || !context) return;
-    void runEntry(found.itemId, context, key, { ...found.entry.action, ...patch });
+    void requests.current.enqueue(check => runEntry(found.itemId, context, key, { ...found.entry.action, ...patch }, check)).catch(() => {});
   }
 
   async function undo(key: string) {

@@ -1,10 +1,11 @@
 import { getCurrentAcademicTermLabel } from "../academic-term";
+import { captureStorageScope } from "../private-storage";
 import { getActiveTermCourses, getAllStoredCourses, saveStoredCourses } from "../course-storage";
 import { fetchDrivePdf, uploadNoteToDrive } from "../drive-connection";
 import { addNote, getMyNotes, updateNoteClassification, updateNoteTags, type MyNote } from "../my-notes-storage";
 import { analyzeProblemPdf, getProblemConsent, problemAiAvailable, saveAnalyzedProblems } from "../problem-bank/analyze";
 import {
-  createSubject, deleteFile, joinSourceFile, listSubjects, syncSubjectsWithCourses,
+  createSubject, joinSourceFile, listSubjects, syncSubjectsWithCourses,
 } from "../problem-bank-storage";
 import { SCHEDULE_COLORS } from "../schedule-colors";
 import { getTimetableTerms, saveTimetableTerms } from "../timetable-storage";
@@ -24,6 +25,7 @@ export interface IntakeContext {
   useAi: boolean;
   /** 분류한 파일을 Drive에도 올릴지 (Drive 연결 + 사용자가 켰을 때) */
   uploadToDrive: boolean;
+  assertActive?: () => void;
 }
 
 /** 이번 세션에서 올린 원본 파일. 결과에서 종류·과목을 바꿀 때 문제은행 번호를 다시 뽑는 데 쓴다. */
@@ -60,6 +62,7 @@ interface Decision {
 /** 1) 브라우저에서 읽고 2) 확실하면 바로, 아니면 AI로 종류·과목을 정한다 */
 async function decide(file: File, kind: IntakeFileKind, ctx: IntakeContext, courses: Course[]): Promise<Decision> {
   const extracted = await extractContent(file, kind);
+  ctx.assertActive?.();
   const guess = guessLocally(extracted.text, file.name, courses);
   const byId = (id: string | null) => courses.find((course) => course.id === id) ?? null;
   const fallbackType: DocType = guess.type ?? (extracted.text.trim() ? "lecture" : "notes");
@@ -75,6 +78,7 @@ async function decide(file: File, kind: IntakeFileKind, ctx: IntakeContext, cour
   }
   try {
     const ai = await classifyWithAi({ fileName: file.name, text: extracted.text, image: extracted.image, courses: hints(courses) });
+    ctx.assertActive?.();
     let course = byId(ai.course_id);
     if (!course && (ai.course_name || ai.course_code)) {
       const named = matchCourse(`${ai.course_code ?? ""} ${ai.course_name ?? ""}`, "", courses);
@@ -82,6 +86,7 @@ async function decide(file: File, kind: IntakeFileKind, ctx: IntakeContext, cour
     }
     return { docType: ai.doc_type, course: course ?? byId(guess.courseConfident ? guess.courseId : null), aiUsed: true };
   } catch (error) {
+    ctx.assertActive?.();
     return { docType: fallbackType, course: byId(guess.courseId), aiUsed: false, message: error instanceof Error ? error.message : undefined };
   }
 }
@@ -89,10 +94,12 @@ async function decide(file: File, kind: IntakeFileKind, ctx: IntakeContext, cour
 type Target = { kind: "new"; file: File } | { kind: "existing"; note: MyNote; file: File };
 
 /** 노트로 저장(새 파일) 또는 기존 Drive 노트의 분류만 바꾼다 */
-async function attachNote(target: Target, course: Course | null, docType: DocType): Promise<string> {
+async function attachNote(target: Target, course: Course | null, docType: DocType, assertCurrent: () => void): Promise<string> {
+  assertCurrent();
   const label = DOC_TYPE_LABELS[docType];
   if (target.kind === "existing") {
     await updateNoteClassification(target.note.id, course ? "course" : "unassigned", course?.id, course?.name);
+    assertCurrent();
     await updateNoteTags(target.note.id, [...typeTags(target.note.tags), label]);
     return target.note.id;
   }
@@ -112,9 +119,11 @@ async function attachNote(target: Target, course: Course | null, docType: DocTyp
   return note.id;
 }
 
-async function subjectFor(course: Course) {
+async function subjectFor(course: Course, assertCurrent: () => void) {
   await syncSubjectsWithCourses([{ id: course.id, name: course.name }]).catch(() => undefined);
+  assertCurrent();
   const subjects = await listSubjects();
+  assertCurrent();
   return subjects.find((subject) => subject.courseId === course.id)
     ?? subjects.find((subject) => subject.name.trim() === course.name.trim())
     ?? createSubject(course.name);
@@ -124,21 +133,26 @@ async function subjectFor(course: Course) {
  * 문제은행: 문제 파일은 문항 번호·내용을, 강의노트는 그 안의 문제를(p.12, p.12-1…) 과목의 중간/기말 범위에 저장.
  * AI 분석은 문제은행 탭에서 동의한 로그인 계정만. 동의 전에는 문제 파일의 번호와 영역 그림만 넣는다.
  */
-async function addToProblemBank(file: File, course: Course, record: IntakeRecord, docType: "problem_set" | "lecture") {
+async function addToProblemBank(file: File, course: Course, record: IntakeRecord, docType: "problem_set" | "lecture", assertCurrent: () => void) {
   const useAi = getProblemConsent() === "granted" && await problemAiAvailable();
+  assertCurrent();
   if (docType === "lecture" && !useAi) return;
   try {
     const mode = docType === "lecture" ? "lecture" : "problems";
     const result = await analyzeProblemPdf(file, { mode, useAi });
-    const subject = await subjectFor(course);
+    assertCurrent();
+    const subject = await subjectFor(course, assertCurrent);
+    assertCurrent();
     const sourceFile = joinSourceFile(examPeriodFor(new Date()), file.name.slice(0, 180));
-    const saved = await saveAnalyzedProblems(subject.id, sourceFile, result.problems, mode === "lecture" ? "lecture" : "problem");
+    const saved = await saveAnalyzedProblems(subject.id, sourceFile, result.problems, mode === "lecture" ? "lecture" : "problem", assertCurrent);
+    assertCurrent();
     record.problemSubjectId = subject.id;
     record.problemSourceFile = sourceFile;
     record.problemCount = saved.addedCount + saved.skippedCount;
     if (saved.check) record.message = `번호 확인이 필요한 문항 ${saved.check}개가 있어요. 문제은행에서 확인해 주세요.`;
     else if (docType === "problem_set" && !useAi && getProblemConsent() === null) record.message = "문제은행 탭에서 AI 분석에 동의하면 문제 내용과 수식도 정리돼요.";
   } catch (error) {
+    assertCurrent();
     // 강의노트에 문제가 없으면 조용히 넘어간다
     if (docType === "problem_set") record.message = `${error instanceof Error ? error.message : "문항 번호를 찾지 못했어요."} 문제은행에서 직접 입력해 주세요.`;
   }
@@ -153,9 +167,12 @@ async function applySyllabus(file: File, kind: IntakeFileKind, ctx: IntakeContex
   let info: SyllabusInfo;
   try {
     const full = await extractContent(file, kind, 3, 6000);
+    ctx.assertActive?.();
     info = await extractSyllabusWithAi({ fileName: file.name, text: full.text, image: full.image });
+    ctx.assertActive?.();
     record.aiUsed = true;
   } catch (error) {
+    ctx.assertActive?.();
     record.message = error instanceof Error ? error.message : "강의계획서를 읽지 못했어요.";
     return fallback;
   }
@@ -196,6 +213,7 @@ async function run(target: Target, record: IntakeRecord, ctx: IntakeContext, onU
   const normalized = normalizedFile(file, kind);
   const courses = matchableCourses();
   const decision = await decide(normalized, kind, ctx, courses);
+  ctx.assertActive?.();
   record.docType = decision.docType;
   record.aiUsed = decision.aiUsed;
   if (decision.message) record.message = decision.message;
@@ -203,65 +221,80 @@ async function run(target: Target, record: IntakeRecord, ctx: IntakeContext, onU
   onUpdate({ ...record });
 
   if (decision.docType === "syllabus") course = await applySyllabus(normalized, kind, ctx, record, course);
+  ctx.assertActive?.();
   const fileTarget: Target = target.kind === "new" ? { kind: "new", file: normalized } : { ...target, file: normalized };
-  record.noteId = await attachNote(fileTarget, course, decision.docType);
+  record.noteId = await attachNote(fileTarget, course, decision.docType, () => ctx.assertActive?.());
+  ctx.assertActive?.();
   record.courseId = course?.id ?? null;
   record.courseName = course?.name;
   record.term = record.term ?? course?.term;
   if (decision.docType === "syllabus" && course) linkSyllabusNote(course, record.noteId);
   if ((decision.docType === "problem_set" || decision.docType === "lecture") && course && kind === "pdf") {
-    await addToProblemBank(normalized, course, record, decision.docType);
+    await addToProblemBank(normalized, course, record, decision.docType, () => ctx.assertActive?.());
   }
   if (!course && !record.message) record.message = "과목을 찾지 못했어요. 과목을 골라 주세요.";
 
   if (target.kind === "new" && ctx.uploadToDrive && course) {
+    ctx.assertActive?.();
     try {
       await uploadNoteToDrive(record.noteId, { term: course.term, kind: DOC_TYPE_LABELS[decision.docType] });
+      ctx.assertActive?.();
       record.drive = "uploaded";
     } catch (error) {
+      ctx.assertActive?.();
       record.drive = "failed";
       record.message = error instanceof Error ? error.message : "Drive에 올리지 못했어요.";
     }
   }
 }
 
-async function track(record: IntakeRecord, work: () => Promise<void>, onUpdate: (record: IntakeRecord) => void) {
+async function track(record: IntakeRecord, work: () => Promise<void>, onUpdate: (record: IntakeRecord) => void, assertCurrent: () => void) {
+  assertCurrent();
   onUpdate({ ...record });
   try {
     await work();
+    assertCurrent();
     record.status = "done";
   } catch (error) {
+    assertCurrent();
     record.status = "error";
     record.message = error instanceof Error ? error.message : "파일을 처리하지 못했어요.";
   }
-  saveIntakeRecord(record);
+  assertCurrent(); saveIntakeRecord(record);
   onUpdate({ ...record });
   return record;
 }
 
 /** 대시보드에 넣은 파일 하나를 분류·저장한다 */
 export function processUpload(file: File, ctx: IntakeContext, onUpdate: (record: IntakeRecord) => void) {
+  const owner = captureStorageScope();
+  const assertCurrent = () => { owner(); ctx.assertActive?.(); };
+  const guarded = { ...ctx, assertActive: assertCurrent };
   const record: IntakeRecord = { id: makeId(), fileName: file.name, source: "upload", status: "processing", createdAt: new Date().toISOString() };
   sessionFiles.set(record.id, file);
-  return track(record, () => run({ kind: "new", file }, record, ctx, onUpdate), onUpdate);
+  return track(record, () => run({ kind: "new", file }, record, guarded, onUpdate), onUpdate, assertCurrent);
 }
 
 /** Drive에서 동기화돼 미분류로 들어온 노트를 같은 과정으로 분류한다 */
 export function processDriveNote(note: MyNote, ctx: IntakeContext, onUpdate: (record: IntakeRecord) => void) {
+  const owner = captureStorageScope();
+  const assertCurrent = () => { owner(); ctx.assertActive?.(); };
   const record: IntakeRecord = {
     id: makeId(), fileName: note.fileName ?? note.title, source: "drive", status: "processing", noteId: note.id, createdAt: new Date().toISOString(),
   };
   return track(record, async () => {
     if (!note.driveFileId) throw new Error("Drive 파일 정보가 없어요.");
     const blob = await fetchDrivePdf(note.driveFileId);
+    assertCurrent();
     const file = new File([blob], note.fileName || `${note.title}.pdf`, { type: "application/pdf" });
     sessionFiles.set(record.id, file);
-    await run({ kind: "existing", note, file }, record, { ...ctx, uploadToDrive: false }, onUpdate);
-  }, onUpdate);
+    await run({ kind: "existing", note, file }, record, { ...ctx, uploadToDrive: false, assertActive: assertCurrent }, onUpdate);
+  }, onUpdate, assertCurrent);
 }
 
 /** 결과 목록에서 사용자가 과목·종류를 고친다 */
 export async function reassignRecord(record: IntakeRecord, change: { courseId?: string | null; docType?: DocType }): Promise<IntakeRecord> {
+  const assertCurrent = captureStorageScope();
   const next: IntakeRecord = { ...record, message: undefined };
   const courseId = change.courseId !== undefined ? change.courseId : record.courseId ?? null;
   const docType = change.docType ?? record.docType ?? "other";
@@ -269,21 +302,21 @@ export async function reassignRecord(record: IntakeRecord, change: { courseId?: 
   if (!record.noteId) throw new Error("저장된 파일 정보가 없어요.");
 
   const note = (await getMyNotes()).find((item) => item.id === record.noteId);
+  assertCurrent();
   if (!note) throw new Error("노트를 찾지 못했어요. 나의 노트에서 확인해 주세요.");
   await updateNoteClassification(note.id, course ? "course" : "unassigned", course?.id, course?.name);
+  assertCurrent();
   await updateNoteTags(note.id, [...typeTags(note.tags), DOC_TYPE_LABELS[docType]]);
+  assertCurrent();
 
-  // 문제은행: 이전에 넣은 번호는 지우고, 새 과목·종류가 문제은행이면 다시 넣는다
+  // Classification must not delete independent learning observations or require an in-memory PDF.
   const movedProblems = record.problemSubjectId && record.problemSourceFile && (docType !== record.docType || courseId !== record.courseId);
   if (movedProblems) {
-    await deleteFile(record.problemSubjectId!, record.problemSourceFile!).catch(() => undefined);
-    next.problemSubjectId = undefined;
-    next.problemSourceFile = undefined;
-    next.problemCount = undefined;
+    next.message = "노트 분류를 변경했습니다. 기존 문항과 학습 단계는 원래 문제은행에 보존했습니다.";
   }
-  if ((docType === "problem_set" || docType === "lecture") && course && (movedProblems || !record.problemSourceFile)) {
+  if ((docType === "problem_set" || docType === "lecture") && course && !record.problemSourceFile) {
     const file = sessionFiles.get(record.id);
-    if (file && detectKind(file) === "pdf") await addToProblemBank(file, course, next, docType);
+    if (file && detectKind(file) === "pdf") await addToProblemBank(file, course, next, docType, assertCurrent);
     else if (docType === "problem_set") next.message = "문제 번호는 문제은행에서 직접 넣어 주세요.";
   }
   if (record.drive === "uploaded" && courseId !== record.courseId) next.message = "Drive에 이미 올린 파일은 원래 폴더에 남아 있어요.";
@@ -292,6 +325,6 @@ export async function reassignRecord(record: IntakeRecord, change: { courseId?: 
   next.courseName = course?.name;
   next.term = course?.term ?? record.term;
   next.docType = docType;
-  saveIntakeRecord(next);
+  assertCurrent(); saveIntakeRecord(next);
   return next;
 }

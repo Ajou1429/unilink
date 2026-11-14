@@ -21,7 +21,7 @@ export async function loadKnowledge(db: SupabaseClient, userId: string, goalId: 
     .eq("user_id", userId).eq("linked_type", goal.data.course_id ? "course" : "personal").in("linked_id", [...aliases]).order("id").limit(41);
   const artifacts = await db.from("course_knowledge_tasks").select("id,task_key,kind,status,note_id,source_revision,source_hash,page_start,page_end,payload,error_message,created_at")
     .eq("user_id", userId).eq("goal_id", goalId).order("created_at", { ascending: false }).limit(1501);
-  const progressResult = goal.data.course_id ? await db.from("course_sessions").select("id,session_date,memo,metadata")
+  const progressResult = goal.data.course_id ? await db.from("active_course_sessions").select("id,session_date,memo,metadata")
     .eq("user_id", userId).eq("course_id", goal.data.course_id).lte("session_date", asOf).order("session_date", { ascending: false }).limit(101) : { data: [], error: null };
   if (notesResult.error || artifacts.error || progressResult.error) throw new RequestError("과목 지식 DB를 확인하지 못했습니다. DB 마이그레이션과 연결을 확인해 주세요.", 503);
   if ((notesResult.data?.length ?? 0) > 40 || (artifacts.data?.length ?? 0) > 1500 || (progressResult.data?.length ?? 0) > 100) throw new RequestError("과목 분석 범위를 초과했습니다. 자료·수업 범위를 나누어 주세요.", 409);

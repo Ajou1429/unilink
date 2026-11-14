@@ -30,17 +30,24 @@ export function useFileIntake() {
   const busy = useRef(false);
   const queue = useRef<{ file: File; onRecord?: (id: string) => void }[]>([]);
   const driveChecked = useRef(false);
+  const lifecycle = useRef({ version: 0 });
 
-  const context = useCallback((): IntakeContext => ({
-    useAi: signedIn && getIntakeConsent() === "granted",
-    uploadToDrive: driveConnected && getIntakeDriveUpload(),
-  }), [signedIn, driveConnected]);
+  const context = useCallback((): IntakeContext => {
+    const version = lifecycle.current.version;
+    return {
+      useAi: signedIn && getIntakeConsent() === "granted",
+      uploadToDrive: driveConnected && getIntakeDriveUpload(),
+      assertActive: () => { if (version !== lifecycle.current.version) throw new Error("파일 처리가 중단되었습니다."); },
+    };
+  }, [signedIn, driveConnected]);
 
   const upsert = useCallback((record: IntakeRecord) => {
     setRecords((prev) => [record, ...prev.filter((item) => item.id !== record.id)]);
   }, []);
 
   useEffect(() => {
+    const lifecycleState = lifecycle.current;
+    lifecycleState.version++;
     function sync() {
       setRecords(getIntakeLog());
       setConsentState(getIntakeConsent());
@@ -55,6 +62,7 @@ export function useFileIntake() {
     aiClassificationAvailable().then(setSignedIn).catch(() => setSignedIn(false));
     getDriveConnectionStatus().then((status) => setDriveConnected(status.connected)).catch(() => setDriveConnected(false));
     return () => {
+      lifecycleState.version++; queue.current = [];
       window.clearTimeout(timeout);
       window.removeEventListener(FILE_INTAKE_CHANGED_EVENT, sync);
       window.removeEventListener(COURSES_CHANGED_EVENT, sync);
@@ -65,16 +73,20 @@ export function useFileIntake() {
   useEffect(() => {
     if (!signedIn || driveChecked.current) return;
     driveChecked.current = true;
-    (async () => {
+    const ctx = context();
+    void (async () => {
       const processed = getProcessedDriveNotes();
       const notes = (await getMyNotes().catch(() => []))
         .filter((note) => note.driveFileId && note.linkedType === "unassigned" && !processed.has(note.id))
         .slice(0, DRIVE_BATCH);
+      ctx.assertActive?.();
       for (const note of notes) {
-        markDriveNoteProcessed(note.id);
-        await processDriveNote(note, context(), upsert);
+        ctx.assertActive?.();
+        const result = await processDriveNote(note, ctx, upsert);
+        ctx.assertActive?.();
+        if (result.status === "done") markDriveNoteProcessed(note.id);
       }
-    })();
+    })().catch(() => { /* Account/lifecycle changes cancel the old queue. */ });
   }, [signedIn, context, upsert]);
 
   // 파일은 한 개씩 차례로 처리한다 (시간표·노트 저장이 서로 겹치지 않게)
@@ -89,6 +101,8 @@ export function useFileIntake() {
           upsert(record);
         });
       }
+    } catch {
+      queue.current = [];
     } finally {
       busy.current = false;
     }

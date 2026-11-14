@@ -38,8 +38,8 @@ export interface CourseSessionProgress {
   noteTitle: string;
   pageStart: string;
   pageEnd: string;
-  difficulty: PaceLevel;
-  pace: PaceLevel;
+  difficulty: PaceLevel | null;
+  pace: PaceLevel | null;
   updatedAt: string;
   createdAt: string;
 }

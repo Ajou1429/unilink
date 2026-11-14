@@ -129,20 +129,23 @@ export function TodayPlans({ date: today, plans, courses }: { date: string; plan
   async function postponeAiItem(item: PlanItem) {
     const db = getSupabaseBrowserClient();
     if (!db || !item.scheduled_start || !item.scheduled_end) return;
-    const shift = (value: string) => new Date(Date.parse(value) + DAY_MS).toISOString();
-    const metadata = { schema_version: 1, ...(item.metadata ?? {}), postpone_count: postponeCountOf(item.metadata) + 1 };
-    const { error } = await db.from("study_plan_items")
-      .update({ scheduled_start: shift(item.scheduled_start), scheduled_end: shift(item.scheduled_end), metadata })
-      .eq("id", item.id);
-    if (error) throw error;
+    const user = (await db.auth.getUser()).data.user;
+    if (!user || getStorageUser() !== user.id) throw new Error("다시 로그인해 주세요.");
+    await flushP0Changes();
+    if (getStorageUser() !== user.id) throw new Error("계정이 변경됐습니다.");
+    const { error } = await db.rpc("postpone_coaching_plan_item", {
+      p_item: item.id, p_expected_start: item.scheduled_start, p_request: crypto.randomUUID(),
+    });
+    if (error) throw new Error(error.code === "PGRST202" ? "일정 검증 DB 업데이트(0037)가 필요합니다." : error.message);
     setReload((value) => value + 1);
+    window.dispatchEvent(new Event("unilink:studyPlansChanged"));
   }
 
   async function run(row: Row) {
     if (busyId) return;
     setBusyId(row.id);
     try { await row.postpone(); }
-    catch { setMessage("미루지 못했습니다. 잠시 후 다시 시도해 주세요."); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "미루지 못했습니다. 잠시 후 다시 시도해 주세요."); }
     finally { setBusyId(null); }
   }
 

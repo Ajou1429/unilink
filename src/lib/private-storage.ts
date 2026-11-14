@@ -3,9 +3,23 @@
 import { isDemoMode } from "./demo-mode.ts";
 
 let userId: string | null = null;
+let identityVersion = 0;
 export const PRIVATE_STORAGE_CHANGED_EVENT = "unilink:privateStorageChanged";
-export function setStorageUser(id: string | null) { userId = id; }
+export function setStorageUser(id: string | null) {
+  if (userId !== id) identityVersion++;
+  userId = id;
+}
 export function getStorageUser() { return userId; }
+export function captureStorageScope(expectedUser = userId) {
+  const version = identityVersion, demo = isDemoMode();
+  const assertCurrent = () => {
+    if (version !== identityVersion || userId !== expectedUser || demo !== isDemoMode()) {
+      throw new Error("계정이 변경되었습니다. 다시 시도해주세요.");
+    }
+  };
+  assertCurrent();
+  return assertCurrent;
+}
 export function privateStorageKey(key: string) {
   return `unilink:private:${isDemoMode() ? "demo" : userId ? "user:" + encodeURIComponent(userId) : "guest"}:${key}`;
 }

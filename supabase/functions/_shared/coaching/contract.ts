@@ -5,7 +5,7 @@ export class CoachingError extends Error {
   constructor(message: string, status = 400) { super(message); this.status = status; }
 }
 
-export const COACHING_POLICY_VERSION = "manual-plan-preservation-v6";
+export const COACHING_POLICY_VERSION = "state-integrity-v7";
 
 export type TimeWindow = { start: string; end: string };
 export type DayBudget = { date: string; minutes: number; windows: TimeWindow[] };
@@ -190,8 +190,26 @@ function clockFromMinutes(minutes: number): string {
   return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 }
 
+function intervalError(intervals: { start: number; end: number; goal: string }[], rules: PlanningRules): string | null {
+  const ordered = [...intervals].sort((a, b) => a.start - b.start);
+  let continuous = 0;
+  for (let i = 0; i < ordered.length; i++) {
+    const current = ordered[i], previous = ordered[i - 1];
+    if (previous) {
+      const gap = current.start - previous.end;
+      if (gap < 0 || (previous.goal !== current.goal && gap < rules.transition_minutes)) return "Plan items overlap or lack transition time";
+      if (gap >= Math.max(1, rules.break_minutes)) continuous = 0;
+    }
+    continuous += current.end - current.start;
+    if (continuous > rules.break_after_minutes) return "Plan lacks required break";
+  }
+  return null;
+}
+
 export function fitProposalSchedule(value: unknown, request: CoachingRequest, context: CoachingContext): unknown {
   if (!record(value) || !Array.isArray(value.items)) return value;
+  try { validateProposal(value, request, context); return value; }
+  catch (error) { if (!(error instanceof CoachingError) || error.status !== 502) throw error; }
   const fitted: Record<string, unknown>[] = [];
   const byDate = new Map<string, { start: number; end: number; goal: string }[]>();
   const sourceItems = value.items.map((raw, index) => ({ raw, index })).sort((a, b) => {
@@ -227,15 +245,13 @@ export function fitProposalSchedule(value: unknown, request: CoachingRequest, co
       let placed = false;
       for (const start of [...new Set(candidates)]) {
         for (let length = Math.min(remaining, request.rules.break_after_minutes); length >= minimum; length--) {
+          if (raw.completion_criteria !== undefined && length !== duration) continue;
           if (remaining !== length && remaining - length < minimum) continue;
           const end = start + length;
           if (!day.windows.some((window) => start >= minuteOfDay(window.start) && end <= minuteOfDay(window.end))) continue;
           if (fixed.some((block) => start < block.end + request.rules.transition_minutes && end > block.start - request.rules.transition_minutes)) continue;
           if (scheduled.reduce((total, item) => total + item.end - item.start, 0) + length > day.minutes) continue;
-          if (!scheduled.every((item) => {
-            const gap = Math.max(request.rules.break_minutes, item.goal === raw.goal_id ? 0 : request.rules.transition_minutes);
-            return end + gap <= item.start || start >= item.end + gap;
-          })) continue;
+          if (intervalError([...scheduled, { start, end, goal: raw.goal_id }], request.rules)) continue;
           scheduled.push({ start, end, goal: raw.goal_id });
           pieces.push({ ...raw, start_time: clockFromMinutes(start), planned_minutes: length });
           remaining -= length;
@@ -319,20 +335,8 @@ export function validateProposal(value: unknown, request: CoachingRequest, conte
   }
   if (items.length === 0) throw new CoachingError("Model returned no plan items", 502);
   for (const intervals of scheduled.values()) {
-    intervals.sort((a, b) => a.start - b.start);
-    let continuous = 0;
-    for (let i = 0; i < intervals.length; i++) {
-      const current = intervals[i];
-      const previous = intervals[i - 1];
-      if (previous) {
-        const gap = current.start - previous.end;
-        const required = previous.goal !== current.goal ? request.rules.transition_minutes : 0;
-        if (gap < required || gap < 0) throw new CoachingError("Plan items overlap or lack transition time", 502);
-        continuous = gap >= Math.max(1, request.rules.break_minutes) ? 0 : continuous;
-      }
-      continuous += current.end - current.start;
-      if (continuous > request.rules.break_after_minutes) throw new CoachingError("Plan lacks required break", 502);
-    }
+    const error = intervalError(intervals, request.rules);
+    if (error) throw new CoachingError(error, 502);
   }
   const selected = new Set(items.map((item) => item.goal_id));
   for (const intervals of scheduled.values()) {

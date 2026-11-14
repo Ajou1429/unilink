@@ -252,7 +252,7 @@ export function CoachingRequestPanel() {
       setResult(data);
       setRequestNote("");
       const advancedRequested = useRelatedLearning || (intent !== "daily_plan" && reviewOtherGoals) || (intent === "exam_prep" && preparationDays === 21);
-      setStatus(advancedRequested && data.prompt_version !== "diagnostic-coaching-v17"
+      setStatus(advancedRequested && !["diagnostic-coaching-v17", "diagnostic-manual-preservation-v18", "state-integrity-v19"].includes(data.prompt_version ?? "")
         ? "연결된 코칭 서버는 추가 검토와 21일 전망을 지원하지 않습니다. 아래는 기존 방식의 제안이며, 아직 계획으로 저장되지 않았습니다."
         : "제안이 생성됐습니다. 아직 DB 계획으로 저장되지는 않았습니다.");
     } catch (error) {
@@ -278,12 +278,14 @@ export function CoachingRequestPanel() {
 
   async function approve() {
     const db = getSupabaseBrowserClient();
-    if (!db || !result?.proposal_run_id || approving) return;
+    if (!db || !result?.proposal_run_id || approving || busy || learningPending > 0) return;
     setApproving(true);
     setStatus("AI 계획을 저장하는 중입니다…");
     try {
       const user = (await db.auth.getUser()).data.user;
       if (!user || getStorageUser() !== user.id) throw new Error("로그인 상태가 변경됐습니다. 다시 로그인해 주세요.");
+      await flushP0Changes();
+      if (getStorageUser() !== user.id) throw new Error("계정이 변경됐습니다. 다시 요청해 주세요.");
       const { data, error } = await db.rpc("approve_coaching_proposal", { p_run_id: result.proposal_run_id });
       if (error) throw error;
       if (typeof data !== "string") throw new Error("저장된 계획을 확인하지 못했습니다.");
@@ -433,7 +435,7 @@ export function CoachingRequestPanel() {
                   <strong>{goals.find(g => g.id === a.goal_id)?.title ?? "학습 목표"}</strong><p>{a.reason}</p><p>{a.suggested_action}</p>
                 </li>)}</ul></section>}
               {result.proposal.preparation_outlook && <section className="border-t pt-3" aria-label="이후 시험 준비 전망"><h4>이후 준비 전망 · 일정 미반영</h4><p className="break-words">{result.proposal.preparation_outlook}</p></section>}
-              <button type="button" className={styles.save} disabled={approving || Boolean(approvedPlanId) || !result.proposal_run_id}
+              <button type="button" className={styles.save} disabled={approving || busy || learningPending > 0 || Boolean(approvedPlanId) || !result.proposal_run_id}
                 onClick={() => void approve()}>{approving ? "저장 중…" : approvedPlanId ? "저장 완료" : "이 계획 사용하기"}</button>
               <p>{approvedPlanId ? "승인된 계획은 DB에 저장되며 다시 눌러도 중복 생성되지 않습니다." : "확인 후 승인하면 실행할 학습 계획으로 저장됩니다."}</p>
               {result.proposal_run_id&&<CoachingSatisfactionPanel key={result.proposal_run_id} runId={result.proposal_run_id}/>}

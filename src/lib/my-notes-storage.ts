@@ -1,4 +1,4 @@
-import { getStorageUser, privateStorage } from "./private-storage.ts";
+import { captureStorageScope, getStorageUser, privateStorage } from "./private-storage.ts";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 export const MY_NOTES_STORAGE_KEY = "unilink:my-notes";
@@ -378,9 +378,10 @@ async function getSupabaseNotes(): Promise<MyNote[]> {
   return (data as NoteRow[]).map(rowToNote);
 }
 
-async function addSupabaseNote(input: NewNoteInput): Promise<MyNote> {
+async function addSupabaseNote(input: NewNoteInput, assertCurrent: () => void): Promise<MyNote> {
   const supabase = getSupabaseClient()!;
   const { data: userData, error: userError } = await supabase.auth.getUser();
+  assertCurrent();
   if (userError) {
     throw new Error(`Supabase 로그인 확인에 실패했습니다: ${userError.message}`);
   }
@@ -388,6 +389,7 @@ async function addSupabaseNote(input: NewNoteInput): Promise<MyNote> {
   if (!userId) {
     throw new Error("Supabase 로그인 세션이 없습니다. 로그아웃 후 다시 로그인해주세요.");
   }
+  if (userId !== getStorageUser()) throw new Error("로그인 상태가 변경되었습니다.");
   let filePath: string | undefined;
   if (input.file) {
     const safeFileName = input.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -401,6 +403,7 @@ async function addSupabaseNote(input: NewNoteInput): Promise<MyNote> {
 
     if (uploadError) throw uploadError;
   }
+  assertCurrent();
   const { data, error } = await supabase
     .from("notes")
     .insert({
@@ -429,6 +432,7 @@ async function addSupabaseNote(input: NewNoteInput): Promise<MyNote> {
     if (filePath) await supabase.storage.from("note-files").remove([filePath]);
     throw error;
   }
+  assertCurrent();
   return rowToNote(data as NoteRow);
 }
 
@@ -520,7 +524,7 @@ export async function getMyNotes(): Promise<MyNote[]> {
 }
 
 export async function addNote(input: NewNoteInput): Promise<MyNote> {
-  const owner = getStorageUser();
+  const assertCurrent = captureStorageScope();
   if (input.file) {
     const allowed = [
       "application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif", "text/plain",
@@ -534,8 +538,8 @@ export async function addNote(input: NewNoteInput): Promise<MyNote> {
       throw new Error("유효한 PDF 파일이 필요합니다.");
     }
   }
-  if (owner !== getStorageUser()) throw new Error("계정이 변경되었습니다. 다시 시도해주세요.");
-  if (isSupabaseConfigured) return addSupabaseNote(input);
+  assertCurrent();
+  if (isSupabaseConfigured) return addSupabaseNote(input, assertCurrent);
   return addLocalNote(input);
 }
 

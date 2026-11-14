@@ -5,6 +5,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-client";
 import { getStorageUser } from "@/lib/private-storage";
 import { flushP0Changes } from "@/lib/p0-sync";
 import { TopicCheckPanel } from "./TopicCheckPanel";
+import { SELF_RATING_NAMES } from "../../../supabase/functions/_shared/learningScales.ts";
 
 type Goal = { id: string; title: string; course_id: string | null; metadata: { legacy_record?: { courseId?: string } } };
 type Topic = { id: string; goal_id: string; title: string };
@@ -55,7 +56,7 @@ function TopicEditor({ topic, state, sessions, notes, onSaved, disabled, onPendi
       {state && <p className="text-xs text-muted-foreground">마지막 관측: {new Date(state.observed_at).toLocaleString("ko-KR")} · 수정 기록은 새 이력으로 보존됩니다.</p>}
       <div className="grid grid-cols-2 gap-3">
         <label className="text-xs">학습 상태<select className={control} value={status} onChange={(e) => { setStatus(e.target.value); if (e.target.value === "not_started") setRating(""); }}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <label className="text-xs">자기 이해도<select className={control} value={rating} disabled={status === "not_started"} onChange={(e) => setRating(e.target.value)}><option value="">미평가</option>{["설명하기 어려움", "일부만 이해", "기본 개념 이해", "스스로 적용 가능", "다른 사람에게 설명 가능"].map((label, index) => <option key={index} value={index + 1}>{index + 1} · {label}</option>)}</select></label>
+        <label className="text-xs">자기 이해도<select className={control} value={rating} disabled={status === "not_started"} onChange={(e) => setRating(e.target.value)}><option value="">미평가</option>{SELF_RATING_NAMES.map((label, index) => <option key={index} value={index + 1}>{index + 1} · {label}</option>)}</select></label>
       </div>
       <label className="block text-xs">학습 메모<textarea className={control} maxLength={1000} rows={2} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="예: 개념은 이해했지만 계산 문제에서 막힘" /></label>
       <details><summary className="cursor-pointer text-xs text-muted-foreground">수업 회차·노트·페이지 연결 (선택)</summary>
@@ -104,7 +105,7 @@ export function TopicLearningPanel({ goalIds, courseId, disabled = false, onPend
         db.from("goal_topics").select("id,goal_id,title").eq("user_id", user.id).in("goal_id", goalKeys).eq("status", "confirmed").order("created_at").limit(201),
         db.from("topic_learning_states").select("id,topic_id,learning_status,self_rating,memo,observed_at,note_id,session_id,page_start,page_end").eq("user_id", user.id).in("goal_id", goalKeys).limit(201),
         db.from("notes").select("id,title").eq("user_id", user.id).order("updated_at", { ascending: false }).limit(100),
-        courses.length ? db.from("course_sessions").select("id,course_id,session_date,memo").eq("user_id", user.id).in("course_id", courses).order("session_date", { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
+        courses.length ? db.from("active_course_sessions").select("id,course_id,session_date,memo").eq("user_id", user.id).in("course_id", courses).order("session_date", { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
       ]);
       if ([topicRows, stateRows, noteRows, sessionRows].some((r) => r.error)) throw new Error("학습 상태를 불러오지 못했습니다.");
       if (!active || getStorageUser() !== user.id) return;

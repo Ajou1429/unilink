@@ -304,8 +304,8 @@ export default function TimetablePage() {
     noteId: "",
     pageStart: "",
     pageEnd: "",
-    difficulty: "중" as PaceLevel,
-    pace: "중" as PaceLevel,
+    difficulty: null as PaceLevel | null,
+    pace: null as PaceLevel | null,
   });
 
   useEffect(() => {
@@ -595,8 +595,8 @@ export default function TimetablePage() {
       noteId: saved?.noteId ?? "",
       pageStart: saved?.pageStart ?? "",
       pageEnd: saved?.pageEnd ?? "",
-      difficulty: saved?.difficulty ?? "중",
-      pace: saved?.pace ?? "중",
+      difficulty: saved?.difficulty ?? null,
+      pace: saved?.pace ?? null,
     });
   }
 
@@ -1468,11 +1468,11 @@ export default function TimetablePage() {
                           <div className="space-y-2">
                             <Label>내용 난이도</Label>
                             <Select
-                              value={sessionForm.difficulty}
+                              value={sessionForm.difficulty ?? "unknown"}
                               onValueChange={(value) =>
                                 setSessionForm((prev) => ({
                                   ...prev,
-                                  difficulty: (value as PaceLevel) ?? prev.difficulty,
+                                  difficulty: value === "unknown" ? null : (value as PaceLevel) ?? prev.difficulty,
                                 }))
                               }
                             >
@@ -1480,6 +1480,7 @@ export default function TimetablePage() {
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
+                                <SelectItem value="unknown">미입력</SelectItem>
                                 {LEVELS.map((level) => (
                                   <SelectItem key={level} value={level}>
                                     {level}
@@ -1491,11 +1492,11 @@ export default function TimetablePage() {
                           <div className="space-y-2">
                             <Label>수업 빠르기</Label>
                             <Select
-                              value={sessionForm.pace}
+                              value={sessionForm.pace ?? "unknown"}
                               onValueChange={(value) =>
                                 setSessionForm((prev) => ({
                                   ...prev,
-                                  pace: (value as PaceLevel) ?? prev.pace,
+                                  pace: value === "unknown" ? null : (value as PaceLevel) ?? prev.pace,
                                 }))
                               }
                             >
@@ -1503,6 +1504,7 @@ export default function TimetablePage() {
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
+                                <SelectItem value="unknown">미입력</SelectItem>
                                 {LEVELS.map((level) => (
                                   <SelectItem key={level} value={level}>
                                     {level}

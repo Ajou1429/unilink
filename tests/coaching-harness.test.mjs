@@ -248,10 +248,10 @@ test("progress queries are owner/course scoped, bounded per course and fail visi
       lt() { return query; }, gte() { return query; }, not() { return query; }, order() { return query; },
       limit(count) { call.limit = count; return query; }, maybeSingle() { return query; },
       then(resolve, reject) {
-        return Promise.resolve({ error: table === "course_sessions" && failProgress ? { message: "failed" } : null,
+        return Promise.resolve({ error: table === "active_course_sessions" && failProgress ? { message: "failed" } : null,
           data: table === "learning_goals" ? [{ ...context.goals[0], course_id: course }]
             : table === "user_preferences" ? { timezone: "Asia/Seoul" }
-              : table === "course_sessions" ? [{ id: id(11), course_id: course, session_date: "2026-09-30", pace: null, memo: "Progress", metadata: {} }]
+              : table === "active_course_sessions" ? [{ id: id(11), course_id: course, session_date: "2026-09-30", pace: null, memo: "Progress", metadata: {} }]
                 : table === "study_plan_items" ? call.columns.startsWith("id,")
                   ? [{ id: id(91), plan_id: id(92), goal_id: goal, title: "Manual", status: "planned", metadata: {} }]
                   : [{ title: "Other goal manual work", scheduled_start: "2026-10-01T00:00:00Z", scheduled_end: "2026-10-01T00:45:00Z" }]
@@ -267,7 +267,7 @@ test("progress queries are owner/course scoped, bounded per course and fail visi
   assert.deepEqual(loaded.blocked_events, [{ start: "2026-10-01T09:00", end: "2026-10-01T09:45", label: "기존 학습 계획 (변경 금지)" }]);
   const plannedQuery = calls.find(c => c.table === "study_plan_items" && c.columns.startsWith("title,"));
   assert.deepEqual(plannedQuery.filters, [["eq", "user_id", id(100)], ["eq", "status", "planned"]]);
-  const progressQuery = calls.find((c) => c.table === "course_sessions");
+  const progressQuery = calls.find((c) => c.table === "active_course_sessions");
   assert.deepEqual(progressQuery.filters, [["eq", "user_id", id(100)], ["eq", "course_id", course], ["lte", "session_date", body.period_start]]);
   assert.equal(progressQuery.limit, 10);
   assert.match(calls.find((c) => c.table === "study_sessions").columns, /mastery_before,mastery_after/);

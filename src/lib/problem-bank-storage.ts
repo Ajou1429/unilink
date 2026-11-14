@@ -1,4 +1,4 @@
-import { privateStorage } from "./private-storage.ts";
+import { captureStorageScope, privateStorage } from "./private-storage.ts";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { MAX_LABEL_LENGTH, MAX_LABELS } from "./problem-bank-labels.ts";
 import { flushP0Changes } from "./p0-sync";
@@ -336,11 +336,14 @@ async function loadSubjectCourses() {
  * 이름이 같은 기존 미연결 과목이 있으면 새로 만들지 않고 그 과목을 연결한다.
  */
 async function syncSupabaseSubjects(courses: SyncCourse[]) {
+  const assertCurrent = captureStorageScope();
   const supabase = getSupabaseClient()!;
   const { data: userData } = await supabase.auth.getUser();
+  assertCurrent();
   const userId = userData.user?.id;
   if (!userId || !courses.length) return;
   await flushP0Changes();
+  assertCurrent();
 
   const links = await supabase.from("problem_bank_coaching_links").select("subject_id,goal_id");
   if (links.error) {
@@ -348,14 +351,17 @@ async function syncSupabaseSubjects(courses: SyncCourse[]) {
     throw new Error(links.error.message);
   }
   const goalToCourse = await loadCourseGoals();
+  assertCurrent();
   const courseToGoal = new Map([...goalToCourse].map(([goal, course]) => [course, goal]));
   const linkedGoals = new Set((links.data ?? []).map((l: { goal_id: string }) => l.goal_id));
   const linkedSubjects = new Set((links.data ?? []).map((l: { subject_id: string }) => l.subject_id));
   const { data: subjects, error } = await supabase.from("problem_bank_subjects").select("id,name");
+  assertCurrent();
   if (error) throw new Error(error.message);
   const dismissed = getDismissedCourses();
 
   for (const course of courses) {
+    assertCurrent();
     const goalId = courseToGoal.get(course.id);
     if (!goalId || linkedGoals.has(goalId) || dismissed.has(course.id)) continue;
     const sameName = ((subjects ?? []) as { id: string; name: string }[])
@@ -363,11 +369,13 @@ async function syncSupabaseSubjects(courses: SyncCourse[]) {
     let subjectId = sameName?.id;
     if (!subjectId) {
       const created = await supabase.from("problem_bank_subjects").insert({ user_id: userId, name: course.name }).select("id").single();
+      assertCurrent();
       if (created.error) throw new Error(created.error.message);
       subjectId = (created.data as { id: string }).id;
     }
     const link = await supabase.from("problem_bank_coaching_links")
       .upsert({ subject_id: subjectId, user_id: userId, goal_id: goalId, topic_id: null }, { onConflict: "subject_id,user_id" });
+    assertCurrent();
     if (link.error) throw new Error(link.error.message);
     linkedGoals.add(goalId);
     linkedSubjects.add(subjectId);
@@ -381,8 +389,10 @@ async function deleteSupabaseSubject(id: string) {
 }
 
 async function createSupabaseSubject(name: string): Promise<ProblemBankSubject> {
+  const assertCurrent = captureStorageScope();
   const supabase = getSupabaseClient()!;
   const { data: userData } = await supabase.auth.getUser();
+  assertCurrent();
   const userId = userData.user?.id;
   if (!userId) throw new Error("로그인이 필요합니다.");
 
@@ -427,8 +437,10 @@ async function deleteSupabaseProblem(id: string): Promise<void> {
 }
 
 async function saveSupabaseProblems(subjectId: string, sourceFile: string, labels: string[]): Promise<ProblemBankSaveResult> {
+  const assertCurrent = captureStorageScope();
   const supabase = getSupabaseClient()!;
   const { data: userData } = await supabase.auth.getUser();
+  assertCurrent();
   const userId = userData.user?.id;
   if (!userId) throw new Error("로그인이 필요합니다.");
 
@@ -438,6 +450,7 @@ async function saveSupabaseProblems(subjectId: string, sourceFile: string, label
     .eq("subject_id", subjectId)
     .eq("source_file", sourceFile);
   if (existingError) throw new Error(existingError.message);
+  assertCurrent();
   const existing = new Set((rows ?? []).map((r: { label: string }) => r.label));
   const fresh = labels.filter((l) => !existing.has(l));
   if (fresh.length) {

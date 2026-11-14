@@ -32,7 +32,7 @@ export async function loadUnderstandingHistory(
   const records: UnderstandingObservation[] = [],
     truncated_goal_ids: string[] = [];
   for (const goalId of goalIds) {
-    const result = await db.from("topic_observations").select(
+    const result = await db.from("active_topic_observations").select(
       "id,goal_id,topic_id,learning_status,self_rating,observed_at",
     )
       .eq("user_id", userId).eq("goal_id", goalId).order("observed_at", {

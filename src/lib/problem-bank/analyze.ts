@@ -4,7 +4,7 @@
 // 3) 동의했으면 페이지 이미지(+글자 줄)를 AI로 보내 번호·영역·본문(LaTeX)·그림 영역을 받는다.
 // 4) 규칙과 AI 번호를 맞춰 보고, 필요한 영역을 고해상도로 렌더링해 크롭한다.
 import { getSupabaseBrowserClient } from "../supabase-client";
-import { getStorageUser, privateStorage } from "../private-storage";
+import { captureStorageScope, getStorageUser, privateStorage } from "../private-storage";
 import { extractLabelPositions, MIN_CHARS_PER_PAGE, pageLinesDetailed, type PageLine, type PdfTextItem } from "../problem-bank-labels";
 import { MAX_PDF_BYTES, MAX_PDF_PAGES, ProblemExtractionError } from "../problem-bank-pdf";
 import {
@@ -151,14 +151,16 @@ function contentBounds(canvas: HTMLCanvasElement, x: number, y: number, w: numbe
 
 class AiStop extends Error {}
 
-async function analyzePage(pdf: PdfDocument, pages: PageInfo[], n: number, mode: "problems" | "lecture", fileName: string): Promise<PageAnalysis> {
+async function analyzePage(pdf: PdfDocument, pages: PageInfo[], n: number, mode: "problems" | "lecture", fileName: string, assertCurrent: () => void): Promise<PageAnalysis> {
   const db = getSupabaseBrowserClient();
   if (!db) throw new AiStop("로그인이 필요합니다.");
   const canvas = await renderPage(pdf, n, AI_IMAGE_WIDTH);
+  assertCurrent();
   const image = canvas.toDataURL("image/jpeg", 0.82);
   const page = pages[n - 1];
   const lines = page.chars >= MIN_CHARS_PER_PAGE ? page.lines.slice(0, 300).map((line) => ({ text: line.text, box: lineBox(line, page) })) : [];
   const { data, error } = await db.functions.invoke<{ result: PageAnalysis }>("problem-analyze", { body: { consent: true, mode, fileName, page: n, image, lines } });
+  assertCurrent();
   if (error || !data?.result) {
     let message = "AI 분석을 하지 못했습니다.";
     let status = 0;
@@ -212,9 +214,12 @@ export async function analyzeProblemPdf(
   file: File,
   options: { mode: "problems" | "lecture"; useAi: boolean; onProgress?: (done: number, total: number) => void },
 ): Promise<AnalysisResult> {
+  const assertCurrent = captureStorageScope();
   const pdf = await openPdf(file);
   try {
+    assertCurrent();
     const pages = await readPages(pdf);
+    assertCurrent();
     const imagePages = pages.filter((page) => page.chars < MIN_CHARS_PER_PAGE).length;
     const rule = options.mode === "problems" ? ruleHits(pages) : [];
     const targets = !options.useAi ? []
@@ -229,9 +234,10 @@ export async function analyzeProblemPdf(
     for (let i = 0; i < targets.length && !aiError; i += 3) {
       await Promise.all(targets.slice(i, i + 3).map(async (n) => {
         try {
-          results.push({ page: n, analysis: await analyzePage(pdf, pages, n, options.mode, file.name) });
+          results.push({ page: n, analysis: await analyzePage(pdf, pages, n, options.mode, file.name, assertCurrent) });
           analyzed.add(n);
         } catch (error) {
+          assertCurrent();
           if (error instanceof AiStop) aiError = error.message;
           results.push({ page: n, analysis: null });
         } finally {
@@ -249,6 +255,7 @@ export async function analyzeProblemPdf(
       throw new ProblemExtractionError("NO_PROBLEMS", options.mode === "problems" ? "PDF에서 문항 번호를 찾지 못했어요." : "강의노트에서 문제를 찾지 못했어요.");
     }
     const crops = await cropRegions(pdf, merged);
+    assertCurrent();
     const problems = merged.map(({ crops: regions, ...item }) => ({ ...item, images: regions.flatMap((region) => crops.get(region) ?? []) }));
     return { problems, aiUsed: analyzed.size > 0, aiError, imagePages, pageCount: pages.length };
   } finally {
@@ -257,21 +264,31 @@ export async function analyzeProblemPdf(
 }
 
 /** 번호를 저장하고(이미 있으면 그대로) 본문·그림을 채운다. 기존 이해도는 바꾸지 않는다. */
-export async function saveAnalyzedProblems(subjectId: string, sourceFile: string, problems: ReadyProblem[], kind: ProblemContent["kind"]) {
+export async function saveAnalyzedProblems(subjectId: string, sourceFile: string, problems: ReadyProblem[], kind: ProblemContent["kind"], assertActive?: () => void) {
+  const owner = captureStorageScope();
+  const assertCurrent = () => { owner(); assertActive?.(); };
+  assertCurrent();
   const result = await saveProblems(subjectId, sourceFile, problems.map((problem) => problem.label));
+  assertCurrent();
   const existing = (await listProblems(subjectId)).filter((problem) => problem.sourceFile === sourceFile);
+  assertCurrent();
   const byLabel = new Map(existing.map((problem) => [problem.label, problem]));
   let filled = 0;
   for (const problem of problems) {
+    assertCurrent();
     const target = byLabel.get(problem.label.trim());
     if (!target) continue;
     const images = [];
-    for (const image of problem.images) images.push({ src: await saveCrop(image.blob), w: image.w, h: image.h });
+    for (const image of problem.images) {
+      const src = await saveCrop(image.blob); assertCurrent();
+      images.push({ src, w: image.w, h: image.h });
+    }
     const old = target.content?.images.map((image) => image.src) ?? [];
     await setProblemContent(target.id, {
       v: 1, kind, page: problem.page, text: problem.text, images,
       check: problem.status === "check", origin: problem.origin,
     });
+    assertCurrent();
     if (old.length) await removeCrops(old);
     filled++;
   }

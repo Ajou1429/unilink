@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import type { Course } from "@/lib/types";
 import type { PaceLevel } from "@/lib/timetable-storage";
 import type { Applied, AppliedEdit } from "@/lib/chat-record/apply";
+import { BANK_STAGE_NAMES, SELF_RATING_NAMES } from "../../../supabase/functions/_shared/learningScales.ts";
 import {
   formatDate, recentClassDates, STATUS_LABELS, type ChatAction, type Missing, type ProblemFileIndex,
 } from "@/lib/chat-record/plan";
@@ -19,6 +20,8 @@ export interface RecordEntry {
   missing: Missing | null;
   applied?: Applied;
   error?: string;
+  requestId?: string;
+  observedAt?: string;
 }
 
 const STATUSES = Object.keys(STATUS_LABELS) as (keyof typeof STATUS_LABELS)[];
@@ -43,21 +46,21 @@ function detail(entry: RecordEntry) {
   if (a?.kind === "topic") return [STATUS_LABELS[a.status], a.rating ? `이해도 ${a.rating}/5` : null].filter(Boolean).join(" · ");
   if (a?.kind === "session") {
     const s = a.current;
-    return [s.progressTitle && `진도 ${s.progressTitle}`, s.pageStart && `${s.pageStart}–${s.pageEnd}쪽`, `난이도 ${s.difficulty}`, `빠르기 ${s.pace}`].filter(Boolean).join(" · ");
+    return [s.progressTitle && `진도 ${s.progressTitle}`, s.pageStart && `${s.pageStart}–${s.pageEnd}쪽`, s.difficulty && `난이도 ${s.difficulty}`, s.pace && `빠르기 ${s.pace}`].filter(Boolean).join(" · ");
   }
-  if (a?.kind === "problem") return `${a.items.map((item) => item.label).join(", ")}번 → 이해도 ${a.level}/5`;
+  if (a?.kind === "problem") return `${a.items.map((item) => item.label).join(", ")}번 → ${BANK_STAGE_NAMES[a.level]}`;
   const x = entry.action;
   if (x.kind === "topic") return [x.status && STATUS_LABELS[x.status], x.rating ? `이해도 ${x.rating}/5` : null].filter(Boolean).join(" · ");
   if (x.kind === "session") return [x.progress_title && `진도 ${x.progress_title}`, x.difficulty && `난이도 ${x.difficulty}`, x.pace && `빠르기 ${x.pace}`].filter(Boolean).join(" · ");
-  return `이해도 ${x.problem_level}/5`;
+  return x.problem_level === null ? "단계 미확인" : BANK_STAGE_NAMES[x.problem_level];
 }
 
 function Editor({ applied, onSave, onCancel }: { applied: Applied; onSave: (edit: AppliedEdit) => void; onCancel: () => void }) {
   const [status, setStatus] = useState(applied.kind === "topic" ? applied.status : "in_progress");
   const [rating, setRating] = useState(applied.kind === "topic" ? applied.rating ?? 0 : 0);
   const [progress, setProgress] = useState(applied.kind === "session" ? applied.current.progressTitle : "");
-  const [difficulty, setDifficulty] = useState<PaceLevel>(applied.kind === "session" ? applied.current.difficulty : "중");
-  const [pace, setPace] = useState<PaceLevel>(applied.kind === "session" ? applied.current.pace : "중");
+  const [difficulty, setDifficulty] = useState<PaceLevel | null>(applied.kind === "session" ? applied.current.difficulty : null);
+  const [pace, setPace] = useState<PaceLevel | null>(applied.kind === "session" ? applied.current.pace : null);
   const [level, setLevel] = useState(applied.kind === "problem" ? applied.level : 0);
 
   function save() {
@@ -75,24 +78,26 @@ function Editor({ applied, onSave, onCancel }: { applied: Applied; onSave: (edit
           </select>
           <select aria-label="이해도" className={control} value={rating} disabled={status === "not_started"} onChange={(e) => setRating(Number(e.target.value))}>
             <option value={0}>이해도 없음</option>
-            {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>이해도 {value}/5</option>)}
+            {SELF_RATING_NAMES.map((name, i) => <option key={name} value={i + 1}>{i + 1} · {name}</option>)}
           </select>
         </>
       )}
       {applied.kind === "session" && (
         <>
           <input aria-label="진도" className={cn(control, "w-40")} value={progress} maxLength={100} onChange={(e) => setProgress(e.target.value)} placeholder="진도" />
-          <select aria-label="난이도" className={control} value={difficulty} onChange={(e) => setDifficulty(e.target.value as PaceLevel)}>
+          <select aria-label="난이도" className={control} value={difficulty ?? ""} onChange={(e) => setDifficulty(e.target.value ? e.target.value as PaceLevel : null)}>
+            <option value="">난이도 미입력</option>
             {LEVELS.map((value) => <option key={value} value={value}>난이도 {value}</option>)}
           </select>
-          <select aria-label="빠르기" className={control} value={pace} onChange={(e) => setPace(e.target.value as PaceLevel)}>
+          <select aria-label="빠르기" className={control} value={pace ?? ""} onChange={(e) => setPace(e.target.value ? e.target.value as PaceLevel : null)}>
+            <option value="">빠르기 미입력</option>
             {LEVELS.map((value) => <option key={value} value={value}>빠르기 {value}</option>)}
           </select>
         </>
       )}
       {applied.kind === "problem" && (
         <select aria-label="문항 이해도" className={control} value={level} onChange={(e) => setLevel(Number(e.target.value))}>
-          {[0, 1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>이해도 {value}/5</option>)}
+          {BANK_STAGE_NAMES.map((name, i) => <option key={name} value={i}>{i} · {name}</option>)}
         </select>
       )}
       <button type="button" onClick={save} className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground">저장</button>

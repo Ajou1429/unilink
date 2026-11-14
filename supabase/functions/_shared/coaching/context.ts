@@ -47,7 +47,7 @@ export async function loadCoachingContext(
     db.from("recurring_commitments").select("title,day_of_week,start_time,end_time,effective_from,effective_to")
       .eq("user_id", userId).eq("is_blocking", true).limit(caps.blocks + 1),
     db.from("courses").select("id").eq("user_id", userId).eq("status", "active").limit(caps.blocks + 1),
-    db.from("course_schedules").select("course_id,day_of_week,start_time,end_time,effective_from,effective_to")
+    db.from("coaching_course_schedules").select("course_id,day_of_week,start_time,end_time,effective_from,effective_to")
       .eq("user_id", userId).limit(caps.blocks + 1),
     db.from("study_plan_items").select("title,scheduled_start,scheduled_end")
       .eq("user_id", userId).eq("status", "planned").not("scheduled_start", "is", null)
@@ -79,7 +79,7 @@ export async function loadCoachingContext(
   const understandingHistory = await loadUnderstandingHistory(db, userId, request.goal_ids);
   const learningStates = await db.from("topic_learning_states")
     .select("id,goal_id,topic_id,learning_status,self_rating,memo,observed_at,source,session_id,session_date,note_id,page_start,page_end")
-    .eq("user_id", userId).in("goal_id", request.goal_ids).limit(caps.topics + 1);
+    .eq("user_id", userId).in("goal_id", request.goal_ids).in("topic_id", (topics.data ?? []).map(t => t.id)).limit(caps.topics + 1);
   if (learningStates.error) throw new CoachingError("학습 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
   if ((learningStates.data?.length ?? 0) > caps.topics) throw new CoachingError("학습 주제가 많습니다. 목표 범위를 나눠 주세요.", 409);
   const courseKnowledge: Record<string, unknown>[] = [];
@@ -99,12 +99,12 @@ export async function loadCoachingContext(
   // Bound history per selected course so one busy course cannot hide the others.
   const selectedCourses = [...new Set((goals.data ?? []).flatMap((goal) => goal.course_id ? [goal.course_id] : []))];
   const progressResults = await Promise.all(selectedCourses.map((courseId) =>
-    db.from("course_sessions").select("id,course_id,session_date,pace,memo,metadata")
+    db.from("active_course_sessions").select("id,course_id,session_date,pace,memo,metadata")
       .eq("user_id", userId).eq("course_id", courseId).lte("session_date", request.period_start)
       .order("session_date", { ascending: false }).order("id", { ascending: false }).limit(10)));
   if (progressResults.some((result) => result.error)) throw new CoachingError("Course progress is unavailable", 503);
   const checkStates = await db.from("topic_check_states").select("id,check_id,goal_id,topic_id,correct_count,question_count,source,grader_version,created_at,note_id,note_version,source_stale,voided_at")
-    .eq("user_id", userId).in("goal_id", request.goal_ids).limit(caps.topics + 1);
+    .eq("user_id", userId).in("goal_id", request.goal_ids).in("topic_id", (topics.data ?? []).map(t => t.id)).limit(caps.topics + 1);
   if (checkStates.error) throw new CoachingError("문제풀이 결과를 확인하지 못했습니다.", 503);
   if ((checkStates.data?.length ?? 0) > caps.topics) throw new CoachingError("확인 주제가 많습니다. 목표 범위를 나눠 주세요.", 409);
   for (const [rows, cap] of [
@@ -201,7 +201,7 @@ export function modelContext(context: CoachingContext) {
     topic_learning_states: (context.topic_learning_states ?? []).filter((state) => context.topics.some((topic) => topic.status === "confirmed" && topic.id === state.topic_id && topic.goal_id === state.goal_id)).map((state) => ({
       observation_id: state.id, goal_id: state.goal_id, topic_id: state.topic_id,
       learning_status: state.learning_status, self_rating_1_to_5: level(state.self_rating),
-      memo: text(state.memo, 1000), observed_at: state.observed_at, source: state.source,
+      memo: state.memo?.startsWith("대화: ") ? null : text(state.memo, 1000), observed_at: state.observed_at, source: state.source,
       session_id: state.session_id, session_date: state.session_date, note_id: state.note_id,
       page_start: state.page_start, page_end: state.page_end,
     })),

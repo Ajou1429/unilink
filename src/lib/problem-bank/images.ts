@@ -2,7 +2,7 @@
 // 로그인: 기존 note-files 저장소의 "<사용자>/problem-bank/…" (다른 기기에서도 보임)
 // 비로그인·데모: 이 브라우저의 IndexedDB (용량이 큰 그림을 sessionStorage에 넣지 않는다)
 import { getSupabaseBrowserClient } from "../supabase-client";
-import { getStorageUser } from "../private-storage";
+import { captureStorageScope, getStorageUser } from "../private-storage";
 
 const BUCKET = "note-files";
 const DB_NAME = "unilink-problem-images";
@@ -38,11 +38,14 @@ async function signedIn() {
 }
 
 export async function saveCrop(blob: Blob): Promise<string> {
+  const assertCurrent = captureStorageScope();
   const id = crypto.randomUUID();
   const session = await signedIn();
+  assertCurrent();
   if (session) {
     const path = `${session.userId}/problem-bank/${id}.webp`;
     const { error } = await session.db.storage.from(BUCKET).upload(path, blob, { contentType: blob.type || "image/webp", upsert: false });
+    assertCurrent();
     if (error) throw new Error("문제 그림을 저장하지 못했습니다.");
     return `storage:${path}`;
   }

@@ -1,12 +1,12 @@
 // 홈 채팅 기록을 기존 저장 경로에 그대로 넣는다. 새 표를 만들지 않는다.
-// - 주제 이해도: goal_topics(없으면 사용자 주제로 추가) + record_topic_observation (자기 보고, 이력 보존)
+// - 주제 이해도: 원자적 주제 확인·관측 저장, 원문 제외, 관측 단위 취소
 // - 수업 회차: 시간표 회차 진도(브라우저 저장 → DB 동기화)
 // - 문제은행: 문항 이해도(0~5)
 import { getSupabaseBrowserClient } from "../supabase-client";
-import { getStorageUser, privateStorage } from "../private-storage";
+import { captureStorageScope, getStorageUser, privateStorage } from "../private-storage";
 import { flushP0Changes } from "../p0-sync";
 import { getActiveTermCourses } from "../course-storage";
-import { EXAM_PERIODS, listProblems, listSubjects, setProblemLevel, splitSourceFile } from "../problem-bank-storage";
+import { EXAM_PERIODS, listProblems, listSubjects, splitSourceFile } from "../problem-bank-storage";
 import { getCourseSession, removeCourseSession, saveCourseSession, type CourseSessionProgress, type PaceLevel } from "../timetable-storage";
 import type { Course } from "../types";
 import type { ChatResult, TopicStatus } from "../../../supabase/functions/_shared/chatRecord.ts";
@@ -39,6 +39,7 @@ async function signedInDb(): Promise<{ db: Db; userId: string } | null> {
 
 export interface ChatContext {
   signedIn: boolean;
+  userId: string | null;
   courses: Course[];
   /** 시간표 과목 id → 과목 학습 목표 id(DB) */
   goals: Map<string, string>;
@@ -50,17 +51,21 @@ export interface ChatContext {
 
 /** 해석에 필요한 과목·주제·문제은행 목록을 모은다 */
 export async function loadChatContext(): Promise<ChatContext> {
+  const assertCurrent = captureStorageScope();
   const courses = getActiveTermCourses().courses;
-  const context: ChatContext = { signedIn: false, courses, goals: new Map(), topics: new Map(), files: new Map(), subjects: new Map() };
+  const context: ChatContext = { signedIn: false, userId: getStorageUser(), courses, goals: new Map(), topics: new Map(), files: new Map(), subjects: new Map() };
   const session = await signedInDb();
+  assertCurrent();
   if (session) {
     context.signedIn = true;
     await flushP0Changes();
+    assertCurrent();
     const goals = await session.db.from("learning_goals").select("id,course_id,metadata")
       .eq("user_id", session.userId).eq("goal_type", "course").eq("status", "active");
     if (goals.error) throw new Error("과목 정보를 불러오지 못했습니다.");
-    for (const goal of (goals.data ?? []) as { id: string; metadata: { legacy_record?: { courseId?: string } } | null }[]) {
-      const courseId = goal.metadata?.legacy_record?.courseId;
+    assertCurrent();
+    for (const goal of (goals.data ?? []) as { id: string; course_id: string | null; metadata: { legacy_record?: { courseId?: string } } | null }[]) {
+      const courseId = goal.metadata?.legacy_record?.courseId ?? goal.course_id;
       if (courseId && courses.some((course) => course.id === courseId)) context.goals.set(courseId, goal.id);
     }
     if (context.goals.size) {
@@ -88,12 +93,15 @@ export async function loadChatContext(): Promise<ChatContext> {
   } catch {
     // 문제은행을 못 읽어도 다른 기록은 계속한다
   }
+  assertCurrent();
   return context;
 }
 
 export async function interpretMessage(context: ChatContext, message: string, history: { role: "user" | "assistant"; text: string }[], today: string): Promise<ChatResult> {
+  const assertCurrent = captureStorageScope(context.userId);
   const session = await signedInDb();
   if (!session) throw new Error("로그인이 필요합니다.");
+  assertCurrent();
   const { data, error } = await session.db.functions.invoke<{ result: ChatResult }>("chat-record", {
     body: {
       consent: true, message, history, today,
@@ -105,6 +113,7 @@ export async function interpretMessage(context: ChatContext, message: string, hi
       problems: [...context.files].map(([courseId, files]) => ({ course_id: courseId, files })),
     },
   });
+  assertCurrent();
   if (error || !data?.result) {
     let text = "대화를 해석하지 못했습니다.";
     try {
@@ -121,139 +130,156 @@ export async function interpretMessage(context: ChatContext, message: string, hi
 
 // ── 저장 ──────────────────────────────────────────────────────────────
 
-interface TopicState { learning_status: TopicStatus; self_rating: number | null; memo: string; session_id: string | null; note_id: string | null; page_start: number | null; page_end: number | null }
-
 export type Applied =
-  | { kind: "topic"; courseId: string; courseName: string; topicId: string; topicTitle: string; created: boolean; status: TopicStatus; rating: number | null; memo: string; previous: TopicState | null }
-  | { kind: "session"; courseId: string; courseName: string; date: string; startTime: string; current: CourseSessionProgress; previous: CourseSessionProgress | null }
-  | { kind: "problem"; courseId: string; courseName: string; fileLabel: string; level: number; items: { id: string; label: string; previous: number }[] };
+  | { kind: "topic"; userId: string; courseId: string; courseName: string; topicId: string; topicTitle: string; observationId: string; created: boolean; status: TopicStatus; rating: number | null }
+  | { kind: "session"; userId: string | null; courseId: string; courseName: string; date: string; startTime: string; current: CourseSessionProgress; previous: CourseSessionProgress | null }
+  | { kind: "problem"; userId: string; courseId: string; courseName: string; fileLabel: string; level: number; items: { id: string; label: string; previous: number; updatedAt: string }[] };
+
+export type ObservationIdentity = { requestId: string; observedAt: string };
 
 const normalize = (value: string) => value.replace(/\s+/g, "").toLowerCase();
 
-async function recordObservation(db: Db, topicId: string, state: Omit<TopicState, "learning_status"> & { learning_status: TopicStatus }) {
-  const result = await db.rpc("record_topic_observation", {
-    p_topic: topicId, p_status: state.learning_status,
-    p_rating: state.learning_status === "not_started" ? null : state.self_rating,
-    p_memo: state.memo.slice(0, 1000), p_observed_at: new Date().toISOString(),
-    p_session: state.session_id, p_note: state.note_id, p_page_start: state.page_start, p_page_end: state.page_end,
-    p_request: crypto.randomUUID(),
-  });
-  if (result.error) throw new Error(result.error.message || "학습 상태를 저장하지 못했습니다.");
+function rpcError(error: { code?: string; message: string }) {
+  return new Error(error.code === "PGRST202" || error.code === "42883"
+    ? "학습 기록 DB 업데이트(0037)가 필요합니다. 저장하지 않았습니다." : error.message);
 }
 
-async function applyTopic(context: ChatContext, course: Course, action: ChatAction): Promise<Applied> {
+async function applyTopic(context: ChatContext, course: Course, action: ChatAction, identity: ObservationIdentity, assertCurrent: () => void): Promise<Applied> {
   const session = await signedInDb();
+  assertCurrent();
   if (!session) throw new Error("주제별 이해도는 로그인해야 저장돼요.");
   const goalId = context.goals.get(course.id);
   if (!goalId) throw new Error("이 과목의 학습 목표를 찾지 못했어요. 잠시 후 다시 시도해 주세요.");
   const title = action.topic!.slice(0, 60);
-  let topic = (context.topics.get(course.id) ?? []).find((item) => normalize(item.title) === normalize(title));
-  let created = false;
-  if (!topic) {
-    const inserted = await session.db.from("goal_topics")
-      .insert({ user_id: session.userId, goal_id: goalId, title, source_type: "user", metadata: { schema_version: 1, origin: "chat" } })
-      .select("id,title").single();
-    if (inserted.error || !inserted.data) throw new Error("주제를 추가하지 못했습니다.");
-    topic = inserted.data as { id: string; title: string };
-    created = true;
-    context.topics.set(course.id, [...(context.topics.get(course.id) ?? []), topic]);
-  }
-  const prev = await session.db.from("topic_learning_states").select("learning_status,self_rating,memo,session_id,note_id,page_start,page_end")
-    .eq("user_id", session.userId).eq("topic_id", topic.id).maybeSingle();
-  const previous = (prev.data as TopicState | null) ?? null;
-  const memo = action.quote ? `대화: ${action.quote}` : "대화로 기록";
-  await recordObservation(session.db, topic.id, { learning_status: action.status!, self_rating: action.rating, memo, session_id: null, note_id: null, page_start: null, page_end: null });
-  return { kind: "topic", courseId: course.id, courseName: course.name, topicId: topic.id, topicTitle: topic.title, created, status: action.status!, rating: action.status === "not_started" ? null : action.rating, memo, previous };
+  const topic = (context.topics.get(course.id) ?? []).find((item) => normalize(item.title) === normalize(title));
+  const rating = action.status === "not_started" ? null : action.rating;
+  const result = await session.db.rpc("record_chat_topic_observation", {
+    p_goal: goalId, p_topic: topic?.id ?? null, p_title: title, p_status: action.status!, p_rating: rating,
+    p_observed_at: identity.observedAt, p_request: identity.requestId,
+  });
+  assertCurrent();
+  if (result.error) throw rpcError(result.error);
+  const saved = result.data as { observation_id: string; topic_id: string; title: string; created: boolean };
+  if (!saved?.observation_id || !saved.topic_id) throw new Error("저장된 관측을 확인하지 못했습니다.");
+  if (!topic) context.topics.set(course.id, [...(context.topics.get(course.id) ?? []), { id: saved.topic_id, title: saved.title }]);
+  return { kind: "topic", userId: session.userId, courseId: course.id, courseName: course.name, topicId: saved.topic_id,
+    topicTitle: saved.title, observationId: saved.observation_id, created: saved.created, status: action.status!, rating };
 }
 
-function applySession(course: Course, action: ChatAction): Applied {
+function applySession(course: Course, action: ChatAction, userId: string | null): Applied {
   const date = action.date!;
   const { startTime, endTime } = slotFor(course, date);
   const previous = getCourseSession(course.id, date, startTime);
   const now = new Date().toISOString();
   const current: CourseSessionProgress = {
-    id: previous?.id ?? `${course.id}-${date}`,
+    id: previous?.id ?? crypto.randomUUID(),
     courseId: course.id, courseName: course.name, date, startTime, endTime,
     progressTitle: action.progress_title ?? previous?.progressTitle ?? "",
     progressMemo: previous?.progressMemo ?? "",
     noteId: previous?.noteId ?? "", noteTitle: previous?.noteTitle ?? "",
     pageStart: action.page_start ? String(action.page_start) : previous?.pageStart ?? "",
     pageEnd: action.page_end ? String(action.page_end) : previous?.pageEnd ?? "",
-    difficulty: action.difficulty ?? previous?.difficulty ?? "중",
-    pace: action.pace ?? previous?.pace ?? "중",
+    difficulty: action.difficulty ?? previous?.difficulty ?? null,
+    pace: action.pace ?? previous?.pace ?? null,
     createdAt: previous?.createdAt ?? now, updatedAt: now,
   };
   saveCourseSession(current);
-  return { kind: "session", courseId: course.id, courseName: course.name, date, startTime, current, previous };
+  return { kind: "session", userId, courseId: course.id, courseName: course.name, date, startTime, current, previous };
 }
 
-async function applyProblem(context: ChatContext, course: Course, action: ChatAction): Promise<Applied> {
+async function applyProblem(context: ChatContext, course: Course, action: ChatAction, assertCurrent: () => void): Promise<Applied> {
   const subjectId = context.subjects.get(course.id);
   if (!subjectId) throw new Error("이 과목의 문제은행을 찾지 못했어요.");
   const problems = (await listProblems(subjectId)).filter((problem) => problem.sourceFile === action.problem_file && action.problem_labels.includes(problem.label));
-  if (!problems.length) throw new Error("말씀하신 문항을 문제은행에서 찾지 못했어요.");
+  assertCurrent();
+  if (problems.length !== new Set(action.problem_labels).size) throw new Error("문항이 변경됐습니다. 다시 확인해 주세요.");
   const level = action.problem_level!;
-  for (const problem of problems) await setProblemLevel(problem.id, level);
+  const saved = await changeProblemLevels(problems.map(p => ({ id: p.id, expected: p.updatedAt, level })), context.userId!, assertCurrent);
+  assertCurrent();
   const file = (context.files.get(course.id) ?? []).find((item) => item.file === action.problem_file);
   return {
-    kind: "problem", courseId: course.id, courseName: course.name, fileLabel: file?.label ?? "", level,
-    items: problems.map((problem) => ({ id: problem.id, label: problem.label, previous: problem.level })),
+    kind: "problem", userId: context.userId!, courseId: course.id, courseName: course.name, fileLabel: file?.label ?? "", level,
+    items: problems.map((problem) => ({ id: problem.id, label: problem.label, previous: problem.level, updatedAt: saved.find(p => p.id === problem.id)!.updated_at })),
   };
 }
 
-export async function applyAction(context: ChatContext, action: ChatAction): Promise<Applied> {
+export async function applyAction(context: ChatContext, action: ChatAction, identity: ObservationIdentity = { requestId: crypto.randomUUID(), observedAt: new Date().toISOString() }, assertActive?: () => void): Promise<Applied> {
+  const owner = captureStorageScope(context.userId);
+  const assertCurrent = () => { owner(); assertActive?.(); }; assertCurrent();
   const course = context.courses.find((item) => item.id === action.course_id);
   if (!course) throw new Error("과목을 찾지 못했어요.");
-  if (action.kind === "topic") return applyTopic(context, course, action);
-  if (action.kind === "session") return applySession(course, action);
-  return applyProblem(context, course, action);
+  if (action.kind === "topic") return applyTopic(context, course, action, identity, assertCurrent);
+  if (action.kind === "session") return applySession(course, action, context.userId);
+  return applyProblem(context, course, action, assertCurrent);
 }
 
-/** 되돌리기: 주제는 이전 상태를 새 기록으로 남기고(대화로 만든 주제는 숨김), 회차·문항은 이전 값으로 돌린다. */
+async function changeProblemLevels(changes: { id: string; expected: string; level: number }[], userId: string, assertActive?: () => void) {
+  const owner = captureStorageScope(userId);
+  const assertCurrent = () => { owner(); assertActive?.(); };
+  const session = await signedInDb(); assertCurrent();
+  if (!session) throw new Error("다시 로그인해 주세요.");
+  const result = await session.db.rpc("set_chat_problem_levels", { p_changes: changes });
+  assertCurrent();
+  if (result.error) throw rpcError(result.error);
+  return result.data as { id: string; updated_at: string }[];
+}
+
+function assertSessionUnchanged(applied: Extract<Applied, { kind: "session" }>) {
+  if (JSON.stringify(getCourseSession(applied.courseId, applied.date, applied.startTime)) !== JSON.stringify(applied.current)) {
+    throw new Error("이후에 수업 기록이 변경됐습니다. 최신 기록에서 수정해 주세요.");
+  }
+}
+
+/** Cancel only this observation; never turn a rollback into a new learning result. */
 export async function undoApplied(applied: Applied) {
+  const assertCurrent = captureStorageScope(applied.userId);
   if (applied.kind === "topic") {
     const session = await signedInDb();
+    assertCurrent();
     if (!session) throw new Error("다시 로그인해 주세요.");
-    if (applied.created) {
-      const result = await session.db.from("goal_topics").update({ status: "archived" }).eq("id", applied.topicId).eq("user_id", session.userId);
-      if (result.error) throw new Error("되돌리지 못했습니다.");
-      return;
-    }
-    await recordObservation(session.db, applied.topicId, applied.previous ?? {
-      learning_status: "not_started", self_rating: null, memo: "", session_id: null, note_id: null, page_start: null, page_end: null,
-    });
+    const result = await session.db.rpc("void_chat_topic_observation", { p_observation: applied.observationId });
+    assertCurrent();
+    if (result.error) throw rpcError(result.error);
     return;
   }
   if (applied.kind === "session") {
+    assertSessionUnchanged(applied);
     if (applied.previous) saveCourseSession(applied.previous);
     else removeCourseSession(applied.courseId, applied.date, applied.startTime);
     return;
   }
-  for (const item of applied.items) await setProblemLevel(item.id, item.previous);
+  await changeProblemLevels(applied.items.map(item => ({ id: item.id, expected: item.updatedAt, level: item.previous })), applied.userId, assertCurrent);
 }
 
 export type AppliedEdit =
   | { kind: "topic"; status: TopicStatus; rating: number | null }
-  | { kind: "session"; progressTitle: string; difficulty: PaceLevel; pace: PaceLevel }
+  | { kind: "session"; progressTitle: string; difficulty: PaceLevel | null; pace: PaceLevel | null }
   | { kind: "problem"; level: number };
 
 /** 카드에서 고친 값을 다시 저장한다 */
 export async function editApplied(applied: Applied, edit: AppliedEdit): Promise<Applied> {
+  const assertCurrent = captureStorageScope(applied.userId);
   if (applied.kind === "topic" && edit.kind === "topic") {
     const session = await signedInDb();
+    assertCurrent();
     if (!session) throw new Error("다시 로그인해 주세요.");
     const rating = edit.status === "not_started" ? null : edit.rating;
-    await recordObservation(session.db, applied.topicId, { learning_status: edit.status, self_rating: rating, memo: applied.memo, session_id: null, note_id: null, page_start: null, page_end: null });
-    return { ...applied, status: edit.status, rating };
+    const result = await session.db.rpc("revise_chat_topic_observation", {
+      p_observation: applied.observationId, p_status: edit.status, p_rating: rating, p_request: crypto.randomUUID(),
+    });
+    assertCurrent();
+    if (result.error) throw rpcError(result.error);
+    return { ...applied, status: edit.status, rating, observationId: result.data as string };
   }
   if (applied.kind === "session" && edit.kind === "session") {
+    assertSessionUnchanged(applied);
     const current = { ...applied.current, progressTitle: edit.progressTitle.trim(), difficulty: edit.difficulty, pace: edit.pace, updatedAt: new Date().toISOString() };
     saveCourseSession(current);
     return { ...applied, current };
   }
   if (applied.kind === "problem" && edit.kind === "problem") {
-    for (const item of applied.items) await setProblemLevel(item.id, edit.level);
-    return { ...applied, level: edit.level };
+    const saved = await changeProblemLevels(applied.items.map(item => ({ id: item.id, expected: item.updatedAt, level: edit.level })), applied.userId, assertCurrent);
+    return { ...applied, level: edit.level, items: applied.items.map(item => ({ ...item, updatedAt: saved.find(p => p.id === item.id)!.updated_at })) };
   }
   return applied;
 }
