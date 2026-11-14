@@ -316,6 +316,7 @@ export default function NotesPage() {
   const [driveBusy, setDriveBusy] = useState(false);
   const [driveMessage, setDriveMessage] = useState<string | null>(null);
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
+  const [syncDisplay, setSyncDisplay] = useState<{ state: "running" | "done" | "error"; names: string[]; message?: string; filesFound?: number; upserted?: number; folders: SelectedDriveFolder[] } | null>(null);
   const [folderPickerBusy, setFolderPickerBusy] = useState(false);
   const [folderPickerError, setFolderPickerError] = useState<string | null>(null);
   const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([]);
@@ -654,32 +655,8 @@ export default function NotesPage() {
         return;
       }
 
-      setDriveBusy(true);
-      setDriveMessage(null);
-      try {
-        const result = await syncDriveFolders(
-          folderSelection.map((folder) => folder.id),
-          folderSelection.map((folder) => folder.name),
-        );
-        assertCurrent();
-        setLastSyncAt(result.syncedAt);
-        privateStorage.setItem("unilink:drive-last-success", result.syncedAt);
-        setSearch("");
-        setClassificationFilter({ linkedType: "all", linkedId: "" });
-        setActiveNoteFolderPath([]);
-        setDriveMessage(
-          result.filesFound === 0
-            ? "선택한 폴더와 하위 폴더에서 PDF를 찾지 못했습니다. Google 문서나 바로가기는 PDF로 가져오지 않습니다."
-            : `동기화 완료: PDF ${result.filesFound}개 중 ${result.upserted}개 반영`,
-        );
-        await loadNotes();
-        await loadDriveStatus();
-      } catch (error) {
-        setDriveMessage(error instanceof Error ? error.message : "동기화 실패");
-        await loadDriveStatus().catch(() => undefined);
-      } finally {
-        setDriveBusy(false);
-      }
+      assertCurrent();
+      await syncSelectedDriveFolders(folderSelection);
       return;
     }
 
@@ -771,6 +748,8 @@ export default function NotesPage() {
 
     setDriveBusy(true);
     setDriveMessage(null);
+    setFolderPickerOpen(false);
+    setSyncDisplay({ state: "running", names: folders.map((folder) => folder.name), folders });
     try {
       const result = await syncDriveFolders(
         folders.map((folder) => folder.id),
@@ -790,10 +769,11 @@ export default function NotesPage() {
           ? "선택한 폴더와 하위 폴더에서 PDF를 찾지 못했습니다. Google 문서나 바로가기는 PDF로 가져오지 않습니다."
           : `선택한 폴더 ${folders.length}개를 동기화했습니다. PDF ${result.filesFound}개 중 ${result.upserted}개를 반영했습니다.`,
       );
-      await loadNotes();
-      await loadDriveStatus();
+      setSyncDisplay({ state: "done", names: folders.map((folder) => folder.name), filesFound: result.filesFound, upserted: result.upserted, folders });
+      await Promise.all([loadNotes(), loadDriveStatus()]).catch(() => setDriveMessage("동기화는 완료됐지만 화면을 새로 불러오지 못했습니다. 새로고침해 주세요."));
     } catch (error) {
       setDriveMessage(error instanceof Error ? error.message : "폴더 동기화에 실패했습니다.");
+      setSyncDisplay({ state: "error", names: folders.map((folder) => folder.name), message: error instanceof Error ? error.message : "폴더 동기화에 실패했습니다.", folders });
       await loadDriveStatus().catch(() => undefined);
     } finally {
       setDriveBusy(false);
@@ -1379,7 +1359,7 @@ export default function NotesPage() {
                           </div>
                         </div>
                       )}
-                      <Dialog open={folderPickerOpen} onOpenChange={setFolderPickerOpen}>
+                      <Dialog open={folderPickerOpen} onOpenChange={(open) => { if (!driveBusy) setFolderPickerOpen(open); }}>
                         <DialogContent className="max-h-[82vh] max-w-xl overflow-y-auto">
                           <DialogHeader>
                             <DialogTitle>Drive 폴더 선택</DialogTitle>
@@ -1510,6 +1490,26 @@ export default function NotesPage() {
                               </div>
                             )}
                           </div>
+                        </DialogContent>
+                      </Dialog>
+                      <Dialog open={syncDisplay !== null} onOpenChange={(open) => { if (!open && syncDisplay?.state !== "running") setSyncDisplay(null); }}>
+                        <DialogContent className="max-w-md">
+                          <DialogHeader><DialogTitle>Drive 폴더 동기화</DialogTitle></DialogHeader>
+                          {syncDisplay && <div className="space-y-5 py-2" role="status" aria-live="polite">
+                            <div className="flex items-start gap-3">
+                              {syncDisplay.state === "running" ? <Loader2 className="mt-1 h-6 w-6 animate-spin text-primary" /> : syncDisplay.state === "done" ? <CheckCircle2 className="mt-1 h-6 w-6 text-green-600" /> : <Cloud className="mt-1 h-6 w-6 text-destructive" />}
+                              <div><p className="font-semibold">{syncDisplay.state === "running" ? "동기화 중" : syncDisplay.state === "done" ? "동기화 완료" : "동기화 실패"}</p>
+                                <p className="mt-1 text-sm text-muted-foreground">{syncDisplay.state === "running" ? "하위 폴더와 PDF를 확인하고 있어요. 잠시만 기다려 주세요." : syncDisplay.state === "done" ? `확인한 PDF ${syncDisplay.filesFound}개 · 변경 반영 ${syncDisplay.upserted}개` : syncDisplay.message}</p>
+                                {syncDisplay.state === "done" && syncDisplay.filesFound === 0 && <p className="mt-1 text-xs text-muted-foreground">PDF를 찾지 못했습니다. Google 문서와 바로가기는 가져오지 않습니다.</p>}
+                              </div>
+                            </div>
+                            <div className="rounded-md border p-3 text-sm"><Folder className="mr-2 inline h-4 w-4 text-primary" />{syncDisplay.names.join(", ")}</div>
+                            {syncDisplay.state === "running" && <p className="text-xs text-muted-foreground">완료되면 결과가 표시됩니다.</p>}
+                            {syncDisplay.state !== "running" && <div className="flex justify-end gap-2">
+                              {syncDisplay.state === "error" && <Button variant="outline" onClick={() => void syncSelectedDriveFolders(syncDisplay.folders)}><RefreshCw className="h-4 w-4" /> 다시 시도</Button>}
+                              <Button onClick={() => setSyncDisplay(null)}>{syncDisplay.state === "done" ? "노트 보기" : "닫기"}</Button>
+                            </div>}
+                          </div>}
                         </DialogContent>
                       </Dialog>
 
