@@ -21,6 +21,9 @@ try {
     }, { fileDataUrl });
     await page.goto((process.env.AJOU_TEST_URL || 'http://127.0.0.1:3041') + '/course?courseId=pdf-test-course&demo=1');
     await page.getByRole('button', { name: /직접 추가한 노트.*1개 노트/ }).click();
+    await page.getByLabel('정렬', { exact: true }).selectOption('name');
+    await page.getByLabel('정렬 순서').selectOption('asc');
+    assert.equal(await page.getByLabel('정렬 순서').inputValue(), 'asc');
     await page.getByRole('button', { name: '노트 열기', exact: true }).click();
     await page.getByText('1 / 2', { exact: true }).waitFor();
     await page.getByRole('button', { name: '다음 페이지', exact: true }).click();

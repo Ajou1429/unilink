@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
+import { sortCourseNotes, type CourseNoteSort, type CourseNoteSortDirection } from "@/lib/course-note-sort";
 import { CourseEvents } from "@/components/course/CourseEvents";
 import { TopicLearningPanel } from "@/components/coaching/TopicLearningPanel";
 import { Badge } from "@/components/ui/badge";
@@ -207,6 +208,8 @@ function CourseContent() {
   const [planDueDate, setPlanDueDate] = useState("");
   const [planFeedback, setPlanFeedback] = useState("");
   const [linkedNoteFolderPath, setLinkedNoteFolderPath] = useState<string[]>([]);
+  const [noteSort, setNoteSort] = useState<CourseNoteSort>("modified");
+  const [noteSortDirection, setNoteSortDirection] = useState<CourseNoteSortDirection>("desc");
 
   useEffect(() => {
     let cancelled = false, request = 0;
@@ -267,6 +270,7 @@ function CourseContent() {
     }
     return current;
   }, [linkedNoteFolderPath, linkedNoteFolderTree]);
+  const sortedLinkedNotes = useMemo(() => sortCourseNotes(activeLinkedNoteFolder.directNotes, noteSort, noteSortDirection), [activeLinkedNoteFolder, noteSort, noteSortDirection]);
 
   const courseTime = useMemo(() => {
     if (!course) return "";
@@ -559,6 +563,15 @@ function CourseContent() {
                     <p className="text-xs font-semibold text-muted-foreground">
                       이 수업의 강의 노트
                     </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label htmlFor="course-note-sort" className="text-sm text-muted-foreground">정렬</label>
+                      <select id="course-note-sort" value={noteSort} onChange={(event) => setNoteSort(event.target.value as CourseNoteSort)} className="h-9 rounded-md border bg-background px-2 text-sm">
+                        <option value="name">이름</option><option value="modified">최종 수정일</option><option value="type">파일 형식</option>
+                      </select>
+                      <select aria-label="정렬 순서" value={noteSortDirection} onChange={(event) => setNoteSortDirection(event.target.value as CourseNoteSortDirection)} className="h-9 rounded-md border bg-background px-2 text-sm">
+                        <option value="asc">오름차순</option><option value="desc">내림차순</option>
+                      </select>
+                    </div>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                         <button
@@ -623,7 +636,7 @@ function CourseContent() {
                       </div>
                     )}
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    {activeLinkedNoteFolder.directNotes.map((note) => (
+                    {sortedLinkedNotes.map((note) => (
                       <Card key={note.id} className="border-0 shadow-sm">
                         <CardContent className="p-4">
                           <div className="flex items-start gap-3">
@@ -635,7 +648,7 @@ function CourseContent() {
                               </div>
                               <p className="text-xs text-muted-foreground mt-1">
                                 {note.fileName ?? note.source} ·{" "}
-                                {new Date(note.updatedAt).toLocaleString("ko-KR")}
+                                {new Date(note.driveModifiedTime ?? note.updatedAt).toLocaleString("ko-KR")}
                               </p>
                               <p className="text-sm text-muted-foreground mt-3 whitespace-pre-wrap">
                                 {note.content || "내용이 비어 있습니다."}
