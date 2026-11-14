@@ -316,18 +316,33 @@ export async function listDriveFolderIdsInTree(
   return new Set(folders.map((folder) => folder.id));
 }
 
-export async function listDriveFolderTree(
+export async function getDriveFolderPath(
   accessToken: string,
   rootFolderId: string,
-): Promise<DriveFolderTreeItem[]> {
+): Promise<DriveFolderTreeItem> {
   const root = await getDriveFolder(accessToken, rootFolderId);
-  const folders: DriveFolderTreeItem[] = [
-    {
-      ...root,
-      path: [root.name],
-      pathIds: [root.id],
-    },
-  ];
+  // Sync scope is not a new display root. Resolve actual ancestors even when
+  // a descendant is selected directly or found through Drive search.
+  const ancestors: DriveFolder[] = [];
+  const seen = new Set([root.id]);
+  let parentId = root.parents?.[0];
+  while (parentId) {
+    if (seen.has(parentId) || seen.size >= 64) throw new Error("Drive 폴더 경로를 확인하지 못했습니다.");
+    seen.add(parentId);
+    const parent = await getDriveFolder(accessToken, parentId);
+    if (!parent.parents?.length) break; // Do not display the account's My Drive root.
+    ancestors.unshift(parent);
+    parentId = parent.parents[0];
+  }
+  return {
+    ...root,
+    path: [...ancestors.map((folder) => folder.name), root.name],
+    pathIds: [...ancestors.map((folder) => folder.id), root.id],
+  };
+}
+
+export async function listDriveFolderTree(accessToken: string, rootFolderId: string): Promise<DriveFolderTreeItem[]> {
+  const folders: DriveFolderTreeItem[] = [await getDriveFolderPath(accessToken, rootFolderId)];
 
   for (let index = 0; index < folders.length; index += 1) {
     if (folders.length > MAX_DRIVE_FOLDER_SCAN) {
@@ -357,18 +372,23 @@ export async function listPdfFilesInFolderTree(
   const folders = await listDriveFolderTree(accessToken, rootFolderId);
   const filesById = new Map<string, DriveChangeFile>();
 
-  for (const folder of folders) {
-    const files = await listPdfFilesInFolder(accessToken, folder.id, modifiedAfter);
-    for (const file of files) {
-      filesById.set(file.id, {
-        ...file,
-        driveFolderId: folder.id,
-        driveFolderName: folder.name,
-        driveFolderPath: folder.path,
-        driveFolderPathIds: folder.pathIds,
-      });
+  let next = 0;
+  // Bound concurrent requests; still consume every page for every descendant.
+  await Promise.all(Array.from({ length: Math.min(4, folders.length) }, async () => {
+    while (next < folders.length) {
+      const folder = folders[next++];
+      const files = await listPdfFilesInFolder(accessToken, folder.id, modifiedAfter);
+      for (const file of files) {
+        filesById.set(file.id, {
+          ...file,
+          driveFolderId: folder.id,
+          driveFolderName: folder.name,
+          driveFolderPath: folder.path,
+          driveFolderPathIds: folder.pathIds,
+        });
+      }
     }
-  }
+  }));
 
   return [...filesById.values()].sort((a, b) =>
     (b.modifiedTime ?? "").localeCompare(a.modifiedTime ?? ""),

@@ -310,7 +310,11 @@ export async function runSimulation({ seed = 20260929, users: userCount = 12, di
     }, 'simulated-external');
     await check('expired authorization fails visibly and reconnect resets old folder/cursor state', async () => {
       external.state.expired.add(a.id);
-      assert.equal((await external.invoke('drive-sync', a.id, syncBody)).status, 502);
+      assert.equal((await external.invoke('drive-sync', a.id, syncBody)).status, 409);
+      assert.equal((await rows('drive_connections', a.id))[0].connection_status, 'reconnect_required');
+      const preview = await external.invoke('drive-file', a.id, { fileId: `pdf-0-${a.id}` });
+      assert.equal(preview.status, 409);
+      assert.equal((await preview.json()).code, 'reconnect_required');
       await connect(a);
       const connection = (await rows('drive_connections', a.id))[0];
       assert.deepEqual(connection.folder_ids, []);

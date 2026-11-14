@@ -2,7 +2,7 @@
 
 import { getAllStoredCourses } from "@/lib/course-storage";
 import { docTypeLabelFromTags } from "@/lib/file-intake/classify-local";
-import { privateStorage } from "@/lib/private-storage";
+import { captureStorageScope, privateStorage } from "@/lib/private-storage";
 
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -71,7 +71,7 @@ import {
   enableRealtimeWatch,
   getDriveConnectionStatus,
   listDriveFolderContents,
-  listDriveFolders,
+  getDriveFolderPaths,
   completeDriveConnection,
   startDriveConnection,
   syncDriveFolders,
@@ -362,7 +362,7 @@ export default function NotesPage() {
         const notes = await getMyNotes();
         if (cancelled) return;
         setNotes(notes);
-        setLastSyncAt(new Date().toISOString());
+        setLastSyncAt(privateStorage.getItem("unilink:drive-last-success"));
       } catch {
         if (!cancelled) setFeedbackMessage("노트를 불러오지 못했습니다.");
       } finally {
@@ -428,34 +428,15 @@ export default function NotesPage() {
       return;
     }
     const selectedFolderIds = currentDriveStatus.folderIds;
-    const selectedFolderNames = currentDriveStatus.folderNames;
 
     let cancelled = false;
 
     async function loadDriveFolderPaths() {
       const paths: DriveFolderPath[] = [];
 
-      async function walk(parentId: string, names: string[], ids: string[]) {
-        const children = await listDriveFolders(parentId);
-        await Promise.all(
-          children.map(async (folder) => {
-            const nextNames = [...names, folder.name];
-            const nextIds = [...ids, folder.id];
-            paths.push({ names: nextNames, ids: nextIds });
-            await walk(folder.id, nextNames, nextIds);
-          }),
-        );
+      for (const folderId of selectedFolderIds) {
+        paths.push(...await getDriveFolderPaths(folderId));
       }
-
-      await Promise.all(
-        selectedFolderIds.map(async (folderId, index) => {
-          const rootName = selectedFolderNames[index] ?? folderId;
-          const rootNames = [rootName];
-          const rootIds = [folderId];
-          paths.push({ names: rootNames, ids: rootIds });
-          await walk(folderId, rootNames, rootIds);
-        }),
-      );
 
       if (!cancelled) setDriveFolderPaths(paths);
     }
@@ -654,6 +635,7 @@ export default function NotesPage() {
   }
 
   async function refreshSync() {
+    const assertCurrent = captureStorageScope();
     const now = new Date().toISOString();
 
     if (isSupabaseConfigured) {
@@ -679,10 +661,12 @@ export default function NotesPage() {
           folderSelection.map((folder) => folder.id),
           folderSelection.map((folder) => folder.name),
         );
+        assertCurrent();
         setLastSyncAt(result.syncedAt);
+        privateStorage.setItem("unilink:drive-last-success", result.syncedAt);
         setSearch("");
         setClassificationFilter({ linkedType: "all", linkedId: "" });
-        setActiveNoteFolderPath([folderSelection[0].id]);
+        setActiveNoteFolderPath([]);
         setDriveMessage(
           result.filesFound === 0
             ? "선택한 폴더와 하위 폴더에서 PDF를 찾지 못했습니다. Google 문서나 바로가기는 PDF로 가져오지 않습니다."
@@ -692,6 +676,7 @@ export default function NotesPage() {
         await loadDriveStatus();
       } catch (error) {
         setDriveMessage(error instanceof Error ? error.message : "동기화 실패");
+        await loadDriveStatus().catch(() => undefined);
       } finally {
         setDriveBusy(false);
       }
@@ -782,6 +767,7 @@ export default function NotesPage() {
 
   async function syncSelectedDriveFolders(folders = selectedDriveFolders) {
     if (folders.length === 0) return;
+    const assertCurrent = captureStorageScope();
 
     setDriveBusy(true);
     setDriveMessage(null);
@@ -790,13 +776,15 @@ export default function NotesPage() {
         folders.map((folder) => folder.id),
         folders.map((folder) => folder.name),
       );
+      assertCurrent();
       setDriveFolderInput(folders[0].id);
       setLastSyncAt(result.syncedAt);
+      privateStorage.setItem("unilink:drive-last-success", result.syncedAt);
       setFolderPickerOpen(false);
       setSelectedDriveFolders(folders);
       setSearch("");
       setClassificationFilter({ linkedType: "all", linkedId: "" });
-      setActiveNoteFolderPath([folders[0].id]);
+      setActiveNoteFolderPath([]);
       setDriveMessage(
         result.filesFound === 0
           ? "선택한 폴더와 하위 폴더에서 PDF를 찾지 못했습니다. Google 문서나 바로가기는 PDF로 가져오지 않습니다."
@@ -806,6 +794,7 @@ export default function NotesPage() {
       await loadDriveStatus();
     } catch (error) {
       setDriveMessage(error instanceof Error ? error.message : "폴더 동기화에 실패했습니다.");
+      await loadDriveStatus().catch(() => undefined);
     } finally {
       setDriveBusy(false);
     }
@@ -1567,7 +1556,7 @@ export default function NotesPage() {
               )}
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Clock className="h-3.5 w-3.5" />
-                마지막 확인: {lastSyncAt ? formatDate(lastSyncAt) : "아직 확인하지 않음"}
+                이 브라우저의 마지막 수동 동기화 성공: {lastSyncAt ? formatDate(lastSyncAt) : "성공 기록 없음"}
               </p>
             </CardContent>
           </Card>

@@ -80,6 +80,7 @@ export function createExternalRuntime(db, users, pdf) {
       return json({ files: found.slice(start, end).map(({ bytes, ...file }) => { void bytes; return file; }), ...(end < found.length ? { nextPageToken: String(end) } : {}) });
     }
     if (route.startsWith('/files/')) {
+      if (route === '/files/root') return json({ id: 'root', name: 'My Drive', mimeType: 'application/vnd.google-apps.folder' });
       const file = tree.get(decodeURIComponent(route.slice('/files/'.length)));
       if (!file) return json({ error: 'not_found' }, 404);
       if (url.searchParams.get('alt') === 'media') return new Response(file.bytes, { headers: { 'Content-Type': file.mimeType } });
@@ -100,7 +101,7 @@ export function createExternalRuntime(db, users, pdf) {
       return createClient(db, { admin: key === env.SUPABASE_SERVICE_ROLE_KEY, userId: userFor(token, 'sim-')?.id ?? null });
     } } : specifier.startsWith('npm:pdf-lib') ? pdfLib : undefined);
     const exports = load(path.join(root, 'supabase/functions', name, 'index.ts'));
-    const fn = serve ?? exports.handleGoogleAuth;
+    const fn = serve ?? exports.handleGoogleAuth ?? exports.handleDriveSync;
     if (!fn) throw new Error(`No handler for ${name}`);
     handlers.set(name, fn);
     return fn;

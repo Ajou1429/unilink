@@ -10,18 +10,22 @@ import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.
 import { decryptSecret } from "../_shared/crypto.ts";
 import {
   listPdfFilesInFolderTree,
+  getDriveFolderPath,
+  GoogleTokenError,
   refreshAccessToken,
 } from "../_shared/google.ts";
 import { saveDriveNote } from "../_shared/driveNotes.ts";
 
-Deno.serve(async (req) => {
+export async function handleDriveSync(req: Request): Promise<Response> {
   const optionsResponse = handleOptions(req);
   if (optionsResponse) return optionsResponse;
 
   if (req.method !== "POST") return jsonResponse({ error: "method not allowed" }, { status: 405 });
+  let owner: string | null = null;
   try {
   const user = await getUserFromAuthHeader(req);
   if (!user) return jsonResponse({ error: "인증이 필요합니다." }, { status: 401 });
+  owner = user.id;
 
   const admin = getAdminClient();
   const body = await readSmallJson(req);
@@ -56,53 +60,56 @@ Deno.serve(async (req) => {
   if (requestedFolderIds.length > 0) {
     folderIds = requestedFolderIds;
     folderNames = requestedFolderNames;
-    const { error: folderError } = await admin
-      .from("drive_connections")
-      .update({
-        folder_id: folderIds[0] ?? null,
-        folder_ids: folderIds,
-        folder_names: folderNames,
-      })
-      .eq("user_id", user.id);
-    if (folderError) throw new Error("Cannot save selected Drive folders");
   }
 
   if (folderIds.length === 0) {
-    return jsonResponse(
-      { error: "GoodNotes 백업 폴더를 먼저 지정해주세요." },
-      { status: 400 },
-    );
+    return jsonResponse({ error: "GoodNotes 백업 폴더를 먼저 지정해주세요." }, { status: 400 });
   }
 
-  const refreshToken = await decryptSecret(
-    connection.refresh_token_encrypted,
-    connection.refresh_token_iv,
-  );
+  const refreshToken = await decryptSecret(connection.refresh_token_encrypted, connection.refresh_token_iv);
   const { access_token } = await refreshAccessToken(refreshToken);
-
+  const storedIds: string[] = connection.folder_ids?.length ? connection.folder_ids : connection.folder_id ? [connection.folder_id] : [];
+  const requestedPaths = await Promise.all(folderIds.map((id) => getDriveFolderPath(access_token, id)));
+  const retainScope = storedIds.length > 0 && requestedPaths.every((folder) => folder.pathIds.some((id) => storedIds.includes(id)));
   const filesById = new Map<string, Awaited<ReturnType<typeof listPdfFilesInFolderTree>>[number]>();
   for (const folderId of folderIds) {
     const folderFiles = await listPdfFilesInFolderTree(access_token, folderId);
     for (const file of folderFiles) filesById.set(file.id, file);
   }
-  const files = [...filesById.values()].sort((a, b) =>
-    (b.modifiedTime ?? "").localeCompare(a.modifiedTime ?? ""),
-  );
-
-  const now = new Date().toISOString();
+  const files = [...filesById.values()].sort((a, b) => (b.modifiedTime ?? "").localeCompare(a.modifiedTime ?? ""));
   let upserted = 0;
-
-  for (const file of files) {
-    if (await saveDriveNote(admin, user.id, file)) upserted += 1;
-  }
+  let nextFile = 0;
+  await Promise.all(Array.from({ length: Math.min(4, files.length) }, async () => {
+    while (nextFile < files.length) {
+      if (await saveDriveNote(admin, user.id, files[nextFile++])) upserted += 1;
+    }
+  }));
+  // Never replace watch scope or report success before the whole scan/save succeeds.
+  const { error: folderError } = await admin
+      .from("drive_connections")
+      .update({
+        folder_id: retainScope ? storedIds[0] : folderIds[0] ?? null,
+        folder_ids: retainScope ? storedIds : folderIds,
+        folder_names: retainScope ? connection.folder_names ?? [] : folderNames,
+        connection_status: "active",
+        last_error_code: null,
+        last_error_at: null,
+      })
+      .eq("user_id", user.id);
+  if (folderError) throw new Error("Cannot save selected Drive folders");
+  const now = new Date().toISOString();
 
   return jsonResponse(
     { syncedAt: now, filesFound: files.length, upserted },
     { headers: corsHeaders },
   );
   } catch (error) {
-    const status = error instanceof RequestError ? error.status : 502;
+    const expired = error instanceof GoogleTokenError && error.code === "invalid_grant";
+    if (expired && owner) await getAdminClient().from("drive_connections").update({ connection_status: "reconnect_required", last_error_code: "invalid_grant", last_error_at: new Date().toISOString() }).eq("user_id", owner);
+    const status = error instanceof RequestError ? error.status : expired ? 409 : 502;
     console.error("drive-sync failed", { status });
-    return jsonResponse({ error: error instanceof RequestError ? error.message : "Drive 요청을 처리하지 못했습니다." }, { status });
+    return jsonResponse({ error: expired || error instanceof RequestError ? error.message : "전체 동기화를 완료하지 못했습니다. 일부 파일만 반영되었을 수 있습니다. 연결 상태를 확인하고 다시 시도해 주세요.", code: expired ? "reconnect_required" : "sync_failed" }, { status });
   }
-});
+}
+
+if (import.meta.main) Deno.serve(handleDriveSync);

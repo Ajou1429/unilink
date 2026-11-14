@@ -5,7 +5,7 @@ import { readSmallJson, RequestError } from "../_shared/requestLimits.ts";
 
 import { corsHeaders, handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { decryptSecret } from "../_shared/crypto.ts";
-import { GoogleTokenError, listDriveFolders, listPdfFilesInFolder, refreshAccessToken, searchDriveContents } from "../_shared/google.ts";
+import { GoogleTokenError, listDriveFolderTree, listDriveFolders, listPdfFilesInFolder, refreshAccessToken, searchDriveContents } from "../_shared/google.ts";
 import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
@@ -49,6 +49,10 @@ Deno.serve(async (req) => {
   stage = "refresh_token";
   const { access_token } = await refreshAccessToken(refreshToken);
   stage = "list_folders";
+  if (body.tree === true && parentId) {
+    const tree = await listDriveFolderTree(access_token, parentId);
+    return jsonResponse({ paths: tree.map((folder) => ({ names: folder.path, ids: folder.pathIds })) });
+  }
   if (typeof body.search === "string" && body.search.trim()) return jsonResponse(await searchDriveContents(access_token, body.search.trim()));
   const [folders, pdfs] = await Promise.all([
     listDriveFolders(access_token, parentId),

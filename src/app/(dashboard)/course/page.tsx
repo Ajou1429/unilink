@@ -161,6 +161,10 @@ function buildCourseNoteFolderTree(notes: MyNote[]): CourseNoteFolderNode {
   return root;
 }
 
+function countFolderNotes(folder: CourseNoteFolderNode): number {
+  return folder.directNotes.length + folder.children.reduce((total, child) => total + countFolderNotes(child), 0);
+}
+
 function EmptyCourseState() {
   return (
     <div className="flex flex-col min-h-screen">
@@ -191,6 +195,7 @@ function CourseContent() {
   const [plans, setPlans] = useState<StudyPlan[]>([]);
   const [files, setFiles] = useState<CourseFile[]>([]);
   const [linkedMyNotes, setLinkedMyNotes] = useState<MyNote[]>([]);
+  const [linkedNotesError, setLinkedNotesError] = useState("");
   const [noteTitle, setNoteTitle] = useState("");
   const [noteContent, setNoteContent] = useState("");
   const [noteFile, setNoteFile] = useState<File | null>(null);
@@ -204,17 +209,25 @@ function CourseContent() {
   const [linkedNoteFolderPath, setLinkedNoteFolderPath] = useState<string[]>([]);
 
   useEffect(() => {
-    const timeout = window.setTimeout(async () => {
+    let cancelled = false, request = 0;
+    async function refreshLinkedNotes() {
+      const currentRequest = ++request;
+      try {
+        const myNotes = courseId ? await getMyNotes() : [];
+        if (cancelled || currentRequest !== request) return;
+        setLinkedMyNotes(myNotes.filter((note) => note.linkedType === "course" && note.linkedId === courseId));
+        setLinkedNotesError("");
+      } catch {
+        if (!cancelled && currentRequest === request) setLinkedNotesError("강의 자료를 불러오지 못했습니다. 로그인·네트워크 상태를 확인한 뒤 다시 시도해 주세요.");
+      }
+    }
+    const timeout = window.setTimeout(() => {
       setCourses(getStoredCourses());
       setNotes(courseId ? getCourseNotes(courseId) : []);
       setPlans(courseId ? getCoursePlans(courseId) : []);
       setFiles(courseId ? getCourseFiles(courseId) : []);
-      const myNotes = courseId ? await getMyNotes().catch(() => []) : [];
-      setLinkedMyNotes(
-        myNotes.filter(
-          (note) => note.linkedType === "course" && note.linkedId === courseId,
-        ),
-      );
+      setLinkedMyNotes([]);
+      void refreshLinkedNotes();
       setNoteTitle("");
       setNoteContent("");
       setNoteFile(null);
@@ -227,23 +240,13 @@ function CourseContent() {
       setLinkedNoteFolderPath([]);
     }, 0);
 
-    return () => window.clearTimeout(timeout);
-  }, [courseId]);
-
-  useEffect(() => {
-    async function syncLinkedNotes() {
-      const myNotes = courseId ? await getMyNotes().catch(() => []) : [];
-      setLinkedMyNotes(
-        myNotes.filter(
-          (note) => note.linkedType === "course" && note.linkedId === courseId,
-        ),
-      );
-    }
-
+    const syncLinkedNotes = () => { void refreshLinkedNotes(); };
     window.addEventListener(MY_NOTES_CHANGED_EVENT, syncLinkedNotes);
     window.addEventListener("storage", syncLinkedNotes);
 
     return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
       window.removeEventListener(MY_NOTES_CHANGED_EVENT, syncLinkedNotes);
       window.removeEventListener("storage", syncLinkedNotes);
     };
@@ -496,6 +499,10 @@ function CourseContent() {
           <TabsContent value="events"><CourseEvents key={course.id} courseId={course.id} /></TabsContent>
           <TabsContent value="progress"><TopicLearningPanel key={course.id} courseId={course.id} /></TabsContent>
           <TabsContent value="notes">
+            {linkedNotesError && <div role="alert" className="mb-4 flex flex-wrap items-center gap-3 text-sm text-destructive">
+              <p>{linkedNotesError}</p>
+              <Button variant="outline" size="sm" onClick={() => window.dispatchEvent(new Event(MY_NOTES_CHANGED_EVENT))}>다시 불러오기</Button>
+            </div>}
             <div className="grid items-start gap-6 lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)]">
               <Card className="self-start border-0 shadow-sm lg:sticky lg:top-20">
                 <CardHeader>
@@ -608,7 +615,7 @@ function CourseContent() {
                                 {folder.name}
                               </span>
                               <span className="block text-xs text-muted-foreground">
-                                {folder.directNotes.length}개 노트
+                                {countFolderNotes(folder)}개 노트
                               </span>
                             </span>
                           </button>

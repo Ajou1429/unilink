@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { MyNote } from "@/lib/my-notes-storage";
 import { getSupabaseClient } from "@/lib/supabase/client";
-import { fetchDrivePdf, uploadNoteToDrive } from "@/lib/drive-connection";
+import { fetchDrivePdf, startDriveConnection, uploadNoteToDrive } from "@/lib/drive-connection";
 import { PdfPreview } from "@/components/notes/PdfPreview";
 import { NoteAnalysisPanel } from "@/components/notes/NoteAnalysisPanel";
 import { MY_NOTES_CHANGED_EVENT } from "@/lib/my-notes-storage";
@@ -26,6 +26,8 @@ import {
   Maximize2,
   Minimize2,
   Scaling,
+  RefreshCw,
+  Link2,
 } from "lucide-react";
 
 interface NoteViewerDialogProps {
@@ -60,6 +62,17 @@ export function NoteViewerDialog({
   const [open, setOpen] = useState(false);
   const [fileUrl, setFileUrl] = useState<string | null>(note.fileDataUrl ?? null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [fileRetry, setFileRetry] = useState(0);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  async function reconnectDrive() {
+    setReconnecting(true);
+    try { await startDriveConnection(); }
+    catch (error) {
+      setFileError(error instanceof Error ? error.message : "Drive 연결을 시작하지 못했습니다.");
+      setReconnecting(false);
+    }
+  }
   const [expanded, setExpanded] = useState(false);
   const [driveUploading, setDriveUploading] = useState(false);
   const [driveUploaded, setDriveUploaded] = useState(false);
@@ -124,48 +137,39 @@ export function NoteViewerDialog({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    if (note.filePath && !note.fileDataUrl && !(note.driveFileId && note.fileName?.toLowerCase().endsWith(".pdf"))) {
-      const supabase = getSupabaseClient();
-      if (!supabase) return;
-
-      supabase.storage
-        .from("note-files")
-        .createSignedUrl(note.filePath, 60 * 60)
-        .then(({ data, error }) => {
-          if (cancelled) return;
-          if (error || !data?.signedUrl) {
-            setFileError("파일을 불러오지 못했습니다.");
-            return;
-          }
-          setFileUrl(data.signedUrl);
-        });
-
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const isDrivePdf = note.fileName?.toLowerCase().endsWith(".pdf");
-    if (!note.driveFileId || !isDrivePdf) return;
-
     let objectUrl: string | null = null;
-    fetchDrivePdf(note.driveFileId)
-      .then((blob) => {
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setFileUrl(objectUrl);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setFileError(error instanceof Error ? error.message : "Drive PDF를 불러오지 못했습니다.");
+    async function loadFile() {
+      setFileError(null);
+      setFileUrl(note.fileDataUrl ?? null);
+      setFileLoading(true);
+      try {
+        if (note.driveFileId && note.fileName?.toLowerCase().endsWith(".pdf")) {
+          const blob = await fetchDrivePdf(note.driveFileId);
+          if (cancelled) return;
+          objectUrl = URL.createObjectURL(blob);
+          setFileUrl(objectUrl);
+        } else if (note.filePath && !note.fileDataUrl) {
+          const supabase = getSupabaseClient();
+          if (!supabase) throw new Error("로그인 상태를 확인한 뒤 다시 시도해 주세요.");
+          const { data, error } = await supabase.storage.from("note-files").createSignedUrl(note.filePath, 60 * 60);
+          if (error || !data?.signedUrl) throw new Error("저장된 파일을 불러오지 못했습니다. 다시 시도해 주세요.");
+          if (!cancelled) setFileUrl(data.signedUrl);
+        } else if (note.fileName && !note.fileDataUrl) {
+          throw new Error("이 노트에는 열 수 있는 원본 파일이 연결되어 있지 않습니다.");
         }
-      })
+      } catch (error) {
+        if (!cancelled) setFileError(error instanceof Error ? error.message : "파일을 불러오지 못했습니다.");
+      } finally {
+        if (!cancelled) setFileLoading(false);
+      }
+    }
+    void loadFile();
 
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [open, note.driveFileId, note.fileDataUrl, note.fileName, note.filePath]);
+  }, [open, note.driveFileId, note.fileDataUrl, note.fileName, note.filePath, note.version, fileRetry]);
 
   const fileExtension = note.fileName?.split(".").pop()?.toLowerCase();
   const isImage = Boolean(
@@ -268,7 +272,14 @@ export function NoteViewerDialog({
                 {note.syncStatus === "synced" ? "동기화됨" : "수동"}
               </Badge>
             </div>
-            {fileError && <p className="mb-3 text-sm text-destructive">{fileError}</p>}
+            {fileLoading && <p role="status" className="mb-3 text-sm text-muted-foreground">파일을 불러오는 중입니다.</p>}
+            {fileError && <div role="alert" className="mb-3 space-y-2">
+              <p className="text-sm text-destructive">{fileError}</p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => setFileRetry((value) => value + 1)}><RefreshCw className="size-4" /> 다시 불러오기</Button>
+                {note.driveFileId && fileError.includes("다시 연결") && <Button size="sm" disabled={reconnecting} onClick={() => void reconnectDrive()}><Link2 className="size-4" /> Drive 다시 연결</Button>}
+              </div>
+            </div>}
             {fileUrl && (
               <div className="mb-4 space-y-3">
                 <a

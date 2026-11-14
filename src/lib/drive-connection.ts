@@ -235,6 +235,14 @@ export async function listDriveFolders(parentId?: string | null): Promise<DriveF
   return (await listDriveFolderContents(parentId, false)).folders;
 }
 
+export async function getDriveFolderPaths(parentId: string): Promise<{ names: string[]; ids: string[] }[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error("Supabase가 설정되지 않았습니다.");
+  const { data, error } = await supabase.functions.invoke<{ paths: { names: string[]; ids: string[] }[] }>("drive-folders", { body: { parentId, tree: true } });
+  if (error || !Array.isArray(data?.paths)) throw new Error(await describeFunctionError(error, "Drive 폴더 경로를 확인하지 못했습니다."));
+  return data.paths;
+}
+
 export async function syncDriveFolders(
   folderIds?: string[],
   folderNames?: string[],

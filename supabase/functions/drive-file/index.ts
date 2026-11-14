@@ -1,7 +1,7 @@
 // Only authenticated, bounded PDF content may be returned as a preview.
 import { corsHeaders, handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { decryptSecret } from "../_shared/crypto.ts";
-import { driveFetch, refreshAccessToken } from "../_shared/google.ts";
+import { driveFetch, GoogleTokenError, refreshAccessToken } from "../_shared/google.ts";
 import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.ts";
 import { readLimitedBody, readSmallJson, RequestError } from "../_shared/requestLimits.ts";
 import { MAX_PDF_BYTES, validatePdf } from "../_shared/pdfLimits.ts";
@@ -34,8 +34,9 @@ Deno.serve(async (req) => {
       "Content-Security-Policy": "sandbox",
     } });
   } catch (error) {
-    const status = error instanceof RequestError ? error.status : 502;
+    const expired = error instanceof GoogleTokenError && error.code === "invalid_grant";
+    const status = error instanceof RequestError ? error.status : expired ? 409 : 502;
     console.error("drive-file failed", { status });
-    return jsonResponse({ error: error instanceof RequestError ? error.message : "PDF를 불러오지 못했습니다." }, { status });
+    return jsonResponse({ error: expired || error instanceof RequestError ? error.message : "PDF를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", code: expired ? "reconnect_required" : "preview_failed" }, { status });
   }
 });
