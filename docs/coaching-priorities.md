@@ -60,7 +60,7 @@
 
 2026-11-13 3차(main 반영): 문제은행 문항에 본문(LaTeX)·크롭 그림을 붙였다. 새 함수 `problem-analyze`, 마이그레이션 0036(`problem_bank_problems.content`, AI 한도 `problem`)이다. 규칙+AI 번호 이중 확인, 스캔 PDF, 강의노트 안의 문제(p.N-k)를 포함한다. 운영 반영에는 0033~0036 적용과 `chat-record`·`problem-analyze`·`file-classify`·`drive-upload` 배포가 필요하다. 실제 AI 분석 품질과 페이지당 비용은 미측정. 문항 본문이 생기므로 이후 코칭의 문제은행 근거(우선순위 5, 원문 분석)에 쓸 수 있다. 상세는 [changelog/2026-11-13-problem-content.md](changelog/2026-11-13-problem-content.md).
 
-2026-11-16(`feature/course-overview`, main 미반영): 과목 화면을 보기 전용 요약(중간·기말 탭, 강의자료/문제/계획 3칸)으로 바꿨다. 이전 탭(과제·시험·일정, 진도·이해도 입력 등)은 화면에서만 뺐다. 설정에서 채팅으로 저장된 주제 이해도(`record_topic_observation` 새 기록)·수업 진도·문제 이해도·계획을 고친다. AI 계획 삭제는 항목을 `cancelled`로 바꾼다. 마이그레이션 0038(`dismissed_drive_files`)과 `driveNotes.ts` 확인을 추가했다. 운영 반영에는 0033~0038 적용과 Drive 함수 재배포가 필요하다. 로그인 계정 왕복은 미확인. 상세는 [changelog/2026-11-16-course-overview.md](changelog/2026-11-16-course-overview.md). 코칭 우선순위 순서는 변경 없음.
+2026-11-16(main 반영): 과목 화면을 보기 전용 요약(중간·기말 탭, 강의자료/문제/계획 3칸)으로 바꿨다. 이전 탭(과제·시험·일정, 진도·이해도 입력 등)은 화면에서만 뺐다. 설정에서 채팅으로 저장된 주제 이해도(`record_topic_observation` 새 기록)·수업 진도·문제 이해도·계획을 고친다. AI 계획 삭제는 항목을 `cancelled`로 바꾼다. 마이그레이션 0038(`dismissed_drive_files`)과 `driveNotes.ts` 확인을 추가했다. 운영 반영에는 0033~0038 적용과 Drive 함수 재배포가 필요하다. 로그인 계정 왕복은 미확인. 상세는 [changelog/2026-11-16-course-overview.md](changelog/2026-11-16-course-overview.md). 코칭 우선순위 순서는 변경 없음.
 
 ## 2026-11-11 로컬 최신 코드 통합
 
