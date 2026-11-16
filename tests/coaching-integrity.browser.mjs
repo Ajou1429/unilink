@@ -19,7 +19,7 @@ try {
     await page.getByRole('button',{name:'기록하지 않기',exact:true}).click();
     assert.ok(!(await page.locator('body').innerText()).includes('이해도 2/5'));
     if(name==='mobile')await page.getByRole('button',{name:/^목록 (열기|닫기)$/}).filter({visible:true}).click();
-    await page.getByRole('link',{name:'새 채팅',exact:true}).filter({visible:true}).click();
+    await page.getByRole('link',{name:'채팅하기',exact:true}).filter({visible:true}).click();
     await page.getByRole('textbox',{name:'메시지 입력'}).waitFor();
     assert.ok(!(await page.locator('body').innerText()).includes('동기화 부분이 어려워요'));
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
