@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { AlertCircle, CheckCircle2, CircleDashed, Loader2, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DOC_TYPE_LABELS, DOC_TYPES, type DocType } from "@/lib/file-intake/classify-local";
 import type { IntakeRecord } from "@/lib/file-intake/settings";
@@ -21,11 +21,6 @@ export function IntakeResultRow({ record, courses, onChange, onRemove }: {
   onRemove: (id: string) => void;
 }) {
   const processing = record.status === "processing";
-  const review = record.status === "review";
-  const editable = review || (record.status === "done" && Boolean(record.noteId));
-  // 강의계획서로 새로 만들 과목: 저장 전에는 '새 과목'으로 보여 준다
-  const NEW = "__new__";
-  const courseValue = record.courseId ?? (record.docType === "syllabus" && record.newCourseName ? NEW : "");
   const dest = destination(record);
   const control = "h-7 min-w-0 rounded-md border bg-white px-1.5 text-xs disabled:opacity-50";
   return (
@@ -33,7 +28,6 @@ export function IntakeResultRow({ record, courses, onChange, onRemove }: {
       <span className="shrink-0">
         {processing ? <Loader2 className="h-4 w-4 animate-spin text-primary" />
           : record.status === "error" ? <AlertCircle className="h-4 w-4 text-destructive" />
-          : review ? <CircleDashed className="h-4 w-4 text-amber-500" aria-label="저장 전" />
           : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
       </span>
       <span className="min-w-0 flex-1 basis-40 truncate text-sm font-medium" title={record.fileName}>{record.fileName}</span>
@@ -42,7 +36,7 @@ export function IntakeResultRow({ record, courses, onChange, onRemove }: {
           <select
             aria-label={`${record.fileName} 종류`}
             className={control}
-            disabled={!editable}
+            disabled={processing || !record.noteId}
             value={record.docType ?? "other"}
             onChange={(event) => onChange(record, { docType: event.target.value as DocType })}
           >
@@ -50,14 +44,13 @@ export function IntakeResultRow({ record, courses, onChange, onRemove }: {
           </select>
           <select
             aria-label={`${record.fileName} 과목`}
-            className={cn(control, "max-w-48", !courseValue && !processing && "border-amber-400 text-amber-700")}
-            disabled={!editable}
-            value={courseValue}
-            onChange={(event) => onChange(record, { courseId: event.target.value === NEW ? null : event.target.value || null })}
+            className={cn(control, "max-w-40", !record.courseId && !processing && "border-amber-400 text-amber-700")}
+            disabled={processing || !record.noteId}
+            value={record.courseId ?? ""}
+            onChange={(event) => onChange(record, { courseId: event.target.value || null })}
           >
             <option value="">미분류</option>
-            {record.docType === "syllabus" && record.newCourseName && <option value={NEW}>새 과목: {record.newCourseName}</option>}
-            {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
+            {courses.map((course) => <option key={course.id} value={course.id}>{course.name}{course.term ? ` (${course.term})` : ""}</option>)}
           </select>
           {record.status === "done" && (
             <Link href={dest.href} className="text-xs text-primary hover:underline">{dest.label}</Link>

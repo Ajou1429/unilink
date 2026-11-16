@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { COURSES_CHANGED_EVENT, getActiveTermCourses } from "@/lib/course-storage";
+import { COURSES_CHANGED_EVENT, getActiveTermCourses, getAllStoredCourses } from "@/lib/course-storage";
 import { getDriveConnectionStatus } from "@/lib/drive-connection";
 import { getMyNotes } from "@/lib/my-notes-storage";
 import { aiClassificationAvailable } from "@/lib/file-intake/ai";
 import type { DocType } from "@/lib/file-intake/classify-local";
-import { classifyUpload, commitUpload, discardUpload, processDriveNote, reassignRecord, type IntakeContext } from "@/lib/file-intake/pipeline";
+import { processDriveNote, processUpload, reassignRecord, type IntakeContext } from "@/lib/file-intake/pipeline";
 import {
   FILE_INTAKE_CHANGED_EVENT, getIntakeConsent, getIntakeDriveUpload, getIntakeLog, getProcessedDriveNotes,
   markDriveNoteProcessed, removeIntakeRecord, setIntakeConsent, setIntakeDriveUpload, type IntakeRecord,
@@ -31,8 +31,6 @@ export function useFileIntake() {
   const queue = useRef<{ file: File; onRecord?: (id: string) => void }[]>([]);
   const driveChecked = useRef(false);
   const lifecycle = useRef({ version: 0 });
-  const recordsRef = useRef<IntakeRecord[]>([]);
-  useEffect(() => { recordsRef.current = records; }, [records]);
 
   const context = useCallback((): IntakeContext => {
     const version = lifecycle.current.version;
@@ -51,12 +49,12 @@ export function useFileIntake() {
     const lifecycleState = lifecycle.current;
     lifecycleState.version++;
     function sync() {
-      // 저장 전(확인 대기) 결과는 기록에 없으므로 화면에 남겨 둔다
-      setRecords((prev) => [...prev.filter((item) => item.status === "review" || item.status === "processing"), ...getIntakeLog().filter((item) => !prev.some((p) => p.id === item.id && (p.status === "review" || p.status === "processing")))]);
+      setRecords(getIntakeLog());
       setConsentState(getIntakeConsent());
       setDriveUploadState(getIntakeDriveUpload());
-      // 지금 진행 중인 학기 과목만 고를 수 있다
-      setCourses(getActiveTermCourses().courses);
+      const active = getActiveTermCourses().courses;
+      const activeIds = new Set(active.map((course) => course.id));
+      setCourses([...active, ...getAllStoredCourses().filter((course) => !activeIds.has(course.id))]);
     }
     const timeout = window.setTimeout(sync, 0);
     window.addEventListener(FILE_INTAKE_CHANGED_EVENT, sync);
@@ -98,8 +96,7 @@ export function useFileIntake() {
     try {
       while (queue.current.length) {
         const { file, onRecord } = queue.current.shift()!;
-        // 채팅에 올린 파일은 분류만 하고, 사용자가 확인하면 commit으로 저장한다
-        await classifyUpload(file, context(), (record) => {
+        await processUpload(file, context(), (record) => {
           onRecord?.(record.id);
           upsert(record);
         });
@@ -119,12 +116,6 @@ export function useFileIntake() {
   }, [drain]);
 
   const change = useCallback(async (record: IntakeRecord, patch: { courseId?: string | null; docType?: DocType }) => {
-    // 저장 전(확인 대기)에는 화면의 분류만 고친다. 저장은 commit에서 한다.
-    if (record.status === "review") {
-      const course = patch.courseId ? getActiveTermCourses().courses.find((item) => item.id === patch.courseId) : undefined;
-      upsert({ ...record, ...patch, ...(patch.courseId !== undefined ? { courseName: course?.name } : {}) });
-      return;
-    }
     upsert({ ...record, status: "processing" });
     try {
       upsert(await reassignRecord(record, patch));
@@ -133,23 +124,7 @@ export function useFileIntake() {
     }
   }, [upsert]);
 
-  /** 확인 대기 중인 분류를 지금 화면의 종류·과목대로 저장한다 */
-  const commit = useCallback(async (ids: string[], patches: Record<string, { docType?: DocType; courseId?: string | null }> = {}) => {
-    const ctx = context();
-    for (const id of ids) {
-      const found = recordsRef.current.find((item) => item.id === id && item.status === "review");
-      if (!found) continue;
-      const record = { ...found, ...patches[id] };
-      try {
-        await commitUpload(record, ctx, upsert);
-      } catch (error) {
-        upsert({ ...record, status: "error", message: error instanceof Error ? error.message : "저장하지 못했어요." });
-      }
-    }
-  }, [context, upsert]);
-
   const remove = useCallback((id: string) => {
-    discardUpload(id);
     removeIntakeRecord(id);
     setRecords((prev) => prev.filter((item) => item.id !== id));
   }, []);
@@ -164,5 +139,5 @@ export function useFileIntake() {
     setDriveUploadState(value);
   }, []);
 
-  return { records, courses, consent, setConsent, signedIn, driveConnected, driveUpload, setDriveUpload, add, change, commit, remove };
+  return { records, courses, consent, setConsent, signedIn, driveConnected, driveUpload, setDriveUpload, add, change, remove };
 }

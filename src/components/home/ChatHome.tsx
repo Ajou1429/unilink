@@ -16,7 +16,6 @@ import { ChatRecordCard, type RecordEntry } from "./ChatRecordCard";
 import { IntakeResultRow } from "./IntakeResultRow";
 import { useFileIntake } from "./useFileIntake";
 import { createChatQueue } from "@/lib/chat-record/queue";
-import type { DocType } from "@/lib/file-intake/classify-local";
 
 type ThreadItem =
   | { id: string; kind: "user"; text: string; fileNames: string[] }
@@ -38,16 +37,12 @@ const nextId = () => `t-${Date.now()}-${++threadSeq}`;
  */
 export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: React.ReactNode }) {
   const intake = useFileIntake();
-  const intakeRef = useRef(intake);
-  useEffect(() => { intakeRef.current = intake; });
   const [thread, setThread] = useState<ThreadItem[]>([]);
   // 대화 중에는 아래 일정 박스를 접어 대화창을 넓히고, 손잡이로 다시 펼친다
   const [widgetsOpen, setWidgetsOpen] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const [context, setContext] = useState<ChatContext | null>(null);
   const threadRef = useRef<ThreadItem[]>([]);
-  // 분류가 끝나 GPT에게 알린 파일 묶음
-  const announced = useRef(new Set<string>());
   const requests = useRef(createChatQueue());
   useEffect(() => { threadRef.current = thread; }, [thread]);
 
@@ -122,70 +117,6 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
     }
   }
 
-  /** 저장을 기다리는 업로드 파일. GPT는 f1, f2… 이름으로 가리킨다. */
-  function pendingFiles() {
-    const waiting = intakeRef.current.records.filter((record) => record.status === "review");
-    return {
-      ids: new Map(waiting.map((record, index) => [`f${index + 1}`, record.id])),
-      list: waiting.map((record, index) => ({
-        ref: `f${index + 1}`, file_name: record.fileName, doc_type: record.docType ?? "other",
-        course_id: record.courseId ?? null, new_course_name: record.newCourseName ?? null,
-      })),
-    };
-  }
-
-  /** GPT가 정한 파일 처리(저장·수정·제외)를 반영한다 */
-  async function applyFileActions(actions: { ref: string; op: "save" | "set" | "discard"; doc_type: string | null; course_id: string | null }[], ids: Map<string, string>) {
-    const patches: Record<string, { docType?: DocType; courseId?: string | null }> = {};
-    const save: string[] = [];
-    for (const action of actions) {
-      const id = ids.get(action.ref);
-      const record = intakeRef.current.records.find((item) => item.id === id && item.status === "review");
-      if (!id || !record) continue;
-      if (action.op === "discard") { intakeRef.current.remove(id); continue; }
-      const patch = { ...(action.doc_type ? { docType: action.doc_type as DocType } : {}), ...(action.course_id ? { courseId: action.course_id } : {}) };
-      if (Object.keys(patch).length) {
-        patches[id] = { ...patches[id], ...patch };
-        void intakeRef.current.change(record, patch);
-      }
-      if (action.op === "save") save.push(id);
-    }
-    if (save.length) await intakeRef.current.commit(save, patches);
-  }
-
-  /** 파일 분류가 끝나면 GPT가 결과를 알려 주고 저장해도 될지 묻는다 (문장은 GPT가 쓴다) */
-  async function announceFiles(assertCurrent: () => void) {
-    assertCurrent();
-    if (getChatConsent() !== "granted") return;
-    const pending = pendingFiles();
-    if (!pending.list.length) return;
-    const ctx = await loadChatContext();
-    assertCurrent();
-    if (!ctx.signedIn) return;
-    setContext(ctx);
-    const history = threadRef.current.flatMap((item): { role: "user" | "assistant"; text: string }[] =>
-      item.kind === "user" && item.text ? [{ role: "user", text: item.text }]
-        : item.kind === "assistant" && item.text ? [{ role: "assistant", text: item.text }] : []).slice(-6);
-    try {
-      const result = await interpretMessage(ctx, "", history, dateKey(new Date()), { event: "files_ready", pending: pending.list });
-      assertCurrent();
-      if (result.reply) setThread((prev) => [...prev, { id: nextId(), kind: "assistant", text: result.reply }]);
-    } catch {
-      // GPT를 쓸 수 없으면 카드의 저장 버튼으로 저장한다
-    }
-  }
-
-  useEffect(() => {
-    const byId = new Map(intake.records.map((record) => [record.id, record]));
-    for (const item of thread) {
-      if (item.kind !== "files" || announced.current.has(item.id) || !item.recordIds.length) continue;
-      const records = item.recordIds.map((id) => byId.get(id)).filter((record) => record !== undefined);
-      if (records.some((record) => record.status === "processing") || !records.some((record) => record.status === "review")) continue;
-      announced.current.add(item.id);
-      void requests.current.enqueue((check) => announceFiles(check)).catch(() => {});
-    }
-  });
-
   async function record(text: string, history: { role: "user" | "assistant"; text: string }[], assertCurrent: () => void, observedAt: string) {
     assertCurrent();
     if (getChatConsent() !== "granted") {
@@ -200,14 +131,8 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
       assertCurrent();
       setContext(ctx);
       if (!ctx.signedIn) { say("로그인하면 대화 내용으로 진도·이해도가 기록돼요."); return; }
-      const pending = pendingFiles();
-      const result = await interpretMessage(ctx, text, history.slice(-8), dateKey(new Date()), { pending: pending.list });
+      const result = await interpretMessage(ctx, text, history.slice(-8), dateKey(new Date()));
       assertCurrent();
-      if (result.file_actions.length) {
-        say(result.reply || "");
-        await applyFileActions(result.file_actions, pending.ids);
-        if (!result.actions.length) return;
-      }
       if (!result.actions.length) {
         say(result.dropped > 0 ? "말씀하신 과목이나 문항 번호를 찾지 못해 기록하지 않았어요. 시간표·문제은행에 있는 이름과 번호로 말씀해 주세요."
           : result.reply || "기록할 진도나 이해도를 찾지 못했어요. 과목과 함께 말씀해 주세요.");
@@ -382,12 +307,6 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
                   <IntakeResultRow key={record.id} record={record} courses={intake.courses} onChange={intake.change} onRemove={intake.remove} />
                 ))}
               </ul>
-            )}
-            {records.some((record) => record.status === "review") && !records.some((record) => record.status === "processing") && (
-              <div className="flex justify-end border-t py-2">
-                <button type="button" onClick={() => void intake.commit(records.filter((record) => record.status === "review").map((record) => record.id))}
-                  className="rounded-lg bg-primary px-3 py-1 text-sm font-medium text-primary-foreground">저장</button>
-              </div>
             )}
           </div>
         );

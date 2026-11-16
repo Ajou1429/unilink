@@ -97,16 +97,7 @@ export async function loadChatContext(): Promise<ChatContext> {
   return context;
 }
 
-/** 저장을 기다리는 채팅 업로드 파일 (GPT가 확인을 구하고, 학생의 답을 해석해 저장·수정한다) */
-export interface PendingFileInput { ref: string; file_name: string; doc_type: string; course_id: string | null; new_course_name: string | null }
-
-export async function interpretMessage(
-  context: ChatContext,
-  message: string,
-  history: { role: "user" | "assistant"; text: string }[],
-  today: string,
-  files: { event?: "message" | "files_ready"; pending?: PendingFileInput[] } = {},
-): Promise<ChatResult> {
+export async function interpretMessage(context: ChatContext, message: string, history: { role: "user" | "assistant"; text: string }[], today: string): Promise<ChatResult> {
   const assertCurrent = captureStorageScope(context.userId);
   const session = await signedInDb();
   if (!session) throw new Error("로그인이 필요합니다.");
@@ -114,7 +105,6 @@ export async function interpretMessage(
   const { data, error } = await session.db.functions.invoke<{ result: ChatResult }>("chat-record", {
     body: {
       consent: true, message, history, today,
-      event: files.event ?? "message", pending_files: files.pending ?? [],
       courses: context.courses.map((course) => ({
         id: course.id, name: course.name, code: course.courseCode ?? null,
         days: [...new Set(courseSlots(course).map((slot) => slot.day))].join(","),

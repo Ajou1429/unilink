@@ -39,49 +39,10 @@ const PROBLEM = /연습\s*문제|문제\s*은행|exercises?\b|problems?\b|homewo
 const ASSIGNMENT = /과제|assignment|레포트|report|제출\s*(기한|마감)|due\s*date/i;
 const LECTURE = /lecture|chapter|강의|\bch\.?\s*\d|week\s*\d|\d+\s*주차|slide/i;
 
-const GRADING_ITEM = /(중간\s*(고사|시험)?|기말\s*(고사|시험)?|출석|과제|퀴즈|quiz|발표|프로젝트|project|midterm|final|attendance|homework|participation|실습|보고서|레포트)\s*[:：(]?\s*\d{1,3}(\.\d)?\s*(%|점)/gi;
-const WEEK = /(?:^|[\s(|])(?:제\s*)?(\d{1,2})\s*주(?:차)?(?=[\s).:|-]|$)|week\s*(\d{1,2})\b/gim;
-const SYLLABUS_SECTIONS = [
-  /수업\s*(목표|개요|내용)|강의\s*(목표|개요|내용)|교과\s*목표|course\s*(objectives?|description|overview)|learning\s*outcomes?/i,
-  /(성적|평가)\s*(평가|방법|비율|기준|반영)|grading|evaluation|assessment/i,
-  /(주교재|부교재|참고\s*(문헌|도서|교재)|교재)|textbook|references?\b/i,
-  /담당\s*교수|교수명|연구실|면담\s*시간|office\s*hours?|instructor|e-?mail/i,
-  /학수\s*번호|과목\s*코드|이수\s*구분|강의\s*시간|강의실|학점\s*[:：]?\s*\d|course\s*(code|number)|credits?\b/i,
-  /(주차별|주별)\s*(강의|수업)?\s*(계획|일정|내용)|weekly\s*(schedule|plan)|course\s*schedule/i,
-];
-
-const AJOU_FORM = ["학수구분", "교과목코드", "수강번호", "개설년도/학기", "강의시간 및 강의실", "교과목 개요", "학습평가 방법", "평가비율", "교재 및 참고자료", "진도 계획", "수업운영방법", "생성형 AI 활용 정책"];
-const GRADING_TABLE_ROW = /^(출석|중간고사|기말고사|과제|퀴즈|발표)\s+(?:\d{1,2}회?\s+)?\d{1,3}(?:\s*~\s*\d{1,3})?\s*%?/gm;
-
-/**
- * 강의계획서 점수. 강의계획서는 '주차별 계획(1주~15주)'과 '과제·퀴즈' 단어가 있어
- * 강의자료·문제은행 규칙에 먼저 걸리기 쉬우므로, 여러 특징을 함께 보고 따로 판단한다.
- */
-export function syllabusScore(text: string, fileName: string) {
-  const body = text.slice(0, 12000);
-  let score = 0;
-  if (SYLLABUS.test(fileName)) score += 5;
-  if (SYLLABUS.test(body.slice(0, 4000))) score += 4;
-  const grading = new Set([...body.matchAll(GRADING_ITEM)].map((m) => m[1].replace(/\s+/g, "").slice(0, 2).toLowerCase()));
-  if (grading.size >= 3) score += 3;
-  else if (grading.size === 2) score += 2;
-  const weeks = new Set([...body.matchAll(WEEK)].map((m) => Number(m[1] ?? m[2])).filter((n) => n >= 1 && n <= 16));
-  if (weeks.size >= 8) score += 3;
-  else if (weeks.size >= 4) score += 1;
-  score += SYLLABUS_SECTIONS.filter((pattern) => pattern.test(body)).length;
-  // 아주대 포털 강의계획서 양식: 항목 이름이 정해져 있고, 성적 표는 % 없이 "중간고사 1 30"처럼 적힌다
-  score += Math.min(6, AJOU_FORM.filter((label) => body.includes(label)).length);
-  const tableRows = new Set([...body.matchAll(GRADING_TABLE_ROW)].map((m) => m[1]));
-  if (tableRows.size >= 3) score += 2;
-  return score;
-}
-
 /** 텍스트·파일명으로 자료 종류를 추정한다. confident면 AI 없이 확정한다. */
 export function guessDocType(text: string, fileName: string): { type: DocType | null; confident: boolean } {
   const head = `${fileName}\n${text.slice(0, 3000)}`;
-  const score = syllabusScore(text, fileName);
-  if (score >= 7) return { type: "syllabus", confident: true };
-  if (score >= 5 || SYLLABUS.test(head)) return { type: "syllabus", confident: SYLLABUS_DETAIL.test(text) && score >= 5 };
+  if (SYLLABUS.test(head)) return { type: "syllabus", confident: SYLLABUS_DETAIL.test(text) || SYLLABUS.test(fileName) };
   const labels = text.trim() ? extractLabels(text.split(/\n/)) : [];
   if (PROBLEM.test(head) && labels.length >= 3) return { type: "problem_set", confident: true };
   if (ASSIGNMENT.test(fileName) && !labels.length) return { type: "assignment", confident: false };

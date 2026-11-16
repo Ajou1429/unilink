@@ -12,12 +12,12 @@ import { getTimetableTerms, saveTimetableTerms } from "../timetable-storage";
 import type { Course } from "../types";
 import { classifyWithAi, extractSyllabusWithAi, type AiCourseHint } from "./ai";
 import {
-  DOC_TYPE_LABELS, DOC_TYPES, examPeriodFor, guessLocally, matchCourse, needsAiClassification, syllabusScore, type DocType,
+  DOC_TYPE_LABELS, DOC_TYPES, examPeriodFor, guessLocally, matchCourse, needsAiClassification, type DocType,
 } from "./classify-local";
 import { detectKind, extractContent, MAX_INTAKE_BYTES, normalizedFile, type IntakeFileKind } from "./extract";
 import { saveIntakeRecord, type IntakeRecord } from "./settings";
 import {
-  buildSyllabusCourse, findSyllabusCourse, mergeSyllabusIntoCourse, parseAjouSyllabus, syllabusTerm, type SyllabusInfo,
+  buildSyllabusCourse, findSyllabusCourse, mergeSyllabusIntoCourse, syllabusTerm, type SyllabusInfo,
 } from "./syllabus";
 
 export interface IntakeContext {
@@ -35,9 +35,18 @@ const makeId = () => `intake-${Date.now()}-${Math.random().toString(16).slice(2,
 const titleOf = (fileName: string) => fileName.replace(/\.[^.]+$/, "").slice(0, 200) || fileName;
 const typeTags = (tags: string[]) => tags.filter((tag) => !DOC_TYPES.some((type) => DOC_TYPE_LABELS[type] === tag));
 
-/** 분류에 쓸 과목 목록: 지금 진행 중인 학기(방학 중엔 직전 학기) 과목만. 지난 학기 과목으로 잘못 넣지 않는다. */
+/** 분류에 쓸 과목 목록: 이번 학기(방학 중엔 직전 학기) 과목을 앞에, 같은 이름은 하나만 */
 function matchableCourses(): Course[] {
-  return getActiveTermCourses().courses;
+  const active = getActiveTermCourses().courses;
+  const all = getAllStoredCourses();
+  const seen = new Set<string>();
+  const activeIds = new Set(active.map((course) => course.id));
+  return [...active, ...all.filter((course) => !activeIds.has(course.id))].filter((course) => {
+    const key = course.name.replace(/\s+/g, "").toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 const hints = (courses: Course[]): AiCourseHint[] =>
@@ -75,9 +84,7 @@ async function decide(file: File, kind: IntakeFileKind, ctx: IntakeContext, cour
       const named = matchCourse(`${ai.course_code ?? ""} ${ai.course_name ?? ""}`, "", courses);
       course = byId(named.courseId);
     }
-    // 강의계획서 특징이 충분하면 AI가 강의자료·문제은행이라고 해도 강의계획서로 본다
-    const docType = ai.doc_type !== "syllabus" && syllabusScore(extracted.text, file.name) >= 5 ? "syllabus" : ai.doc_type;
-    return { docType, course: course ?? byId(guess.courseConfident ? guess.courseId : null), aiUsed: true };
+    return { docType: ai.doc_type, course: course ?? byId(guess.courseConfident ? guess.courseId : null), aiUsed: true };
   } catch (error) {
     ctx.assertActive?.();
     return { docType: fallbackType, course: byId(guess.courseId), aiUsed: false, message: error instanceof Error ? error.message : undefined };
@@ -151,57 +158,42 @@ async function addToProblemBank(file: File, course: Course, record: IntakeRecord
   }
 }
 
-/** 강의계획서 항목 읽기 (AI). 저장은 하지 않는다. */
-async function readSyllabus(file: File, kind: IntakeFileKind, ctx: IntakeContext, record: IntakeRecord): Promise<SyllabusInfo | null> {
-  // 아주대 포털 양식은 항목 이름이 정해져 있어 AI 없이 읽는다(과목명을 찾았을 때만)
-  const local = parseAjouSyllabus((await extractContent(file, kind, 5, 15000)).text);
-  ctx.assertActive?.();
-  if (local?.course_name) return local;
+/** 강의계획서: 항목을 읽어 시간표에 과목을 추가(없을 때)하고 성적 반영비율을 저장 */
+async function applySyllabus(file: File, kind: IntakeFileKind, ctx: IntakeContext, record: IntakeRecord, fallback: Course | null): Promise<Course | null> {
   if (!ctx.useAi) {
     record.message = "로그인 후 AI 분류에 동의하면 강의계획서로 시간표와 성적 반영비율을 자동으로 채워요.";
-    return null;
+    return fallback;
   }
+  let info: SyllabusInfo;
   try {
     const full = await extractContent(file, kind, 3, 6000);
     ctx.assertActive?.();
-    const info = await extractSyllabusWithAi({ fileName: file.name, text: full.text, image: full.image });
+    info = await extractSyllabusWithAi({ fileName: file.name, text: full.text, image: full.image });
     ctx.assertActive?.();
     record.aiUsed = true;
-    if (!info.course_name) {
-      record.message = "강의계획서에서 과목명을 찾지 못했어요. 과목을 직접 골라 주세요.";
-      return null;
-    }
-    return info;
   } catch (error) {
     ctx.assertActive?.();
     record.message = error instanceof Error ? error.message : "강의계획서를 읽지 못했어요.";
-    return null;
+    return fallback;
   }
-}
-
-/** 강의계획서가 가리키는 기존 과목(없으면 null → 새 과목) */
-function syllabusCourse(info: SyllabusInfo): Course | null {
+  if (!info.course_name) {
+    record.message = "강의계획서에서 과목명을 찾지 못했어요. 과목을 직접 골라 주세요.";
+    return fallback;
+  }
   const term = syllabusTerm(info, getCurrentAcademicTermLabel());
-  return findSyllabusCourse(getAllStoredCourses(), info, term) ?? null;
-}
-
-/** 강의계획서 반영: 고른 과목에 성적 반영비율 등을 합치거나, 없으면 시간표에 새 과목으로 추가 */
-function applySyllabusInfo(info: SyllabusInfo, chosen: Course | null, record: IntakeRecord): Course {
   const all = getAllStoredCourses();
-  if (chosen) {
-    const term = chosen.term ?? getCurrentAcademicTermLabel();
-    const course = mergeSyllabusIntoCourse(chosen, info);
-    saveStoredCourses(all.filter((item) => item.term === term).map((item) => (item.id === course.id ? course : item)), term);
-    record.term = term;
-    record.gradingCount = course.gradingWeights?.length ?? 0;
-    return course;
-  }
-  const term = syllabusTerm(info, getCurrentAcademicTermLabel());
   const termCourses = all.filter((course) => course.term === term);
-  const course = buildSyllabusCourse(info, term, `syllabus-${Date.now()}`, SCHEDULE_COLORS[termCourses.length % SCHEDULE_COLORS.length]);
-  saveStoredCourses([...termCourses, course], term);
-  saveTimetableTerms([...getTimetableTerms(), term]);
-  record.timetableAdded = true;
+  const existing = findSyllabusCourse(all, info, term);
+  let course: Course;
+  if (existing) {
+    course = mergeSyllabusIntoCourse(existing, info);
+    saveStoredCourses(termCourses.map((item) => (item.id === course.id ? course : item)), term);
+  } else {
+    course = buildSyllabusCourse(info, term, `syllabus-${Date.now()}`, SCHEDULE_COLORS[termCourses.length % SCHEDULE_COLORS.length]);
+    saveStoredCourses([...termCourses, course], term);
+    saveTimetableTerms([...getTimetableTerms(), term]);
+    record.timetableAdded = true;
+  }
   record.term = term;
   record.gradingCount = course.gradingWeights?.length ?? 0;
   return course;
@@ -213,62 +205,39 @@ function linkSyllabusNote(course: Course, noteId: string) {
   saveStoredCourses(termCourses.map((item) => (item.id === course.id ? { ...item, syllabusNoteId: noteId } : item)), term);
 }
 
-interface Classified { target: Target; kind: IntakeFileKind; docType: DocType; course: Course | null; syllabus: SyllabusInfo | null }
-
-/** 1단계: 종류·과목만 정한다(저장하지 않음). 강의계획서는 항목까지 읽어 어느 과목인지(또는 새 과목) 보여 준다. */
-async function classify(target: Target, record: IntakeRecord, ctx: IntakeContext, onUpdate: (record: IntakeRecord) => void): Promise<Classified> {
+async function run(target: Target, record: IntakeRecord, ctx: IntakeContext, onUpdate: (record: IntakeRecord) => void) {
   const file = target.file;
   const kind = detectKind(file);
   if (!kind) throw new Error("PDF, 이미지(JPG·PNG), PPTX, DOCX만 넣을 수 있어요.");
   if (file.size > MAX_INTAKE_BYTES) throw new Error("20MB 이하 파일만 넣을 수 있어요.");
   const normalized = normalizedFile(file, kind);
-  const decision = await decide(normalized, kind, ctx, matchableCourses());
+  const courses = matchableCourses();
+  const decision = await decide(normalized, kind, ctx, courses);
   ctx.assertActive?.();
   record.docType = decision.docType;
   record.aiUsed = decision.aiUsed;
   if (decision.message) record.message = decision.message;
-  onUpdate({ ...record });
   let course = decision.course;
-  let syllabus: SyllabusInfo | null = null;
-  if (decision.docType === "syllabus") {
-    syllabus = await readSyllabus(normalized, kind, ctx, record);
-    ctx.assertActive?.();
-    if (syllabus) {
-      course = syllabusCourse(syllabus);
-      record.newCourseName = course ? undefined : syllabus.course_name ?? undefined;
-    }
-  }
-  record.courseId = course?.id ?? null;
-  record.courseName = course?.name;
-  record.term = course?.term;
-  const fileTarget: Target = target.kind === "new" ? { kind: "new", file: normalized } : { ...target, file: normalized };
-  return { target: fileTarget, kind, docType: decision.docType, course, syllabus };
-}
+  onUpdate({ ...record });
 
-/** 2단계: 정해진(또는 사용자가 고친) 종류·과목으로 노트·시간표·문제은행·Drive에 저장한다 */
-async function save(item: Classified, record: IntakeRecord, ctx: IntakeContext) {
-  const { target, kind, docType, syllabus } = item;
-  let course = item.course;
-  record.docType = docType;
-  record.message = undefined;
-  if (docType === "syllabus" && syllabus && (course || record.newCourseName)) course = applySyllabusInfo(syllabus, course, record);
+  if (decision.docType === "syllabus") course = await applySyllabus(normalized, kind, ctx, record, course);
   ctx.assertActive?.();
-  record.noteId = await attachNote(target, course, docType, () => ctx.assertActive?.());
+  const fileTarget: Target = target.kind === "new" ? { kind: "new", file: normalized } : { ...target, file: normalized };
+  record.noteId = await attachNote(fileTarget, course, decision.docType, () => ctx.assertActive?.());
   ctx.assertActive?.();
   record.courseId = course?.id ?? null;
   record.courseName = course?.name;
-  record.newCourseName = undefined;
   record.term = record.term ?? course?.term;
-  if (docType === "syllabus" && course) linkSyllabusNote(course, record.noteId);
-  if ((docType === "problem_set" || docType === "lecture") && course && kind === "pdf") {
-    await addToProblemBank(target.file, course, record, docType, () => ctx.assertActive?.());
+  if (decision.docType === "syllabus" && course) linkSyllabusNote(course, record.noteId);
+  if ((decision.docType === "problem_set" || decision.docType === "lecture") && course && kind === "pdf") {
+    await addToProblemBank(normalized, course, record, decision.docType, () => ctx.assertActive?.());
   }
   if (!course && !record.message) record.message = "과목을 찾지 못했어요. 과목을 골라 주세요.";
 
   if (target.kind === "new" && ctx.uploadToDrive && course) {
     ctx.assertActive?.();
     try {
-      await uploadNoteToDrive(record.noteId, { term: course.term, kind: DOC_TYPE_LABELS[docType] });
+      await uploadNoteToDrive(record.noteId, { term: course.term, kind: DOC_TYPE_LABELS[decision.docType] });
       ctx.assertActive?.();
       record.drive = "uploaded";
     } catch (error) {
@@ -277,11 +246,6 @@ async function save(item: Classified, record: IntakeRecord, ctx: IntakeContext) 
       record.message = error instanceof Error ? error.message : "Drive에 올리지 못했어요.";
     }
   }
-}
-
-/** Drive 노트처럼 확인 없이 바로 처리할 때 */
-async function run(target: Target, record: IntakeRecord, ctx: IntakeContext, onUpdate: (record: IntakeRecord) => void) {
-  await save(await classify(target, record, ctx, onUpdate), record, ctx);
 }
 
 async function track(record: IntakeRecord, work: () => Promise<void>, onUpdate: (record: IntakeRecord) => void, assertCurrent: () => void) {
@@ -301,52 +265,7 @@ async function track(record: IntakeRecord, work: () => Promise<void>, onUpdate: 
   return record;
 }
 
-/** 저장을 기다리는 분류 결과 (채팅에서 올린 파일). 새로고침하면 사라진다. */
-const drafts = new Map<string, Classified>();
-
-/** 채팅에 올린 파일 하나를 분류만 한다. 사용자가 확인하면 commitUpload로 저장한다. */
-export async function classifyUpload(file: File, ctx: IntakeContext, onUpdate: (record: IntakeRecord) => void) {
-  const owner = captureStorageScope();
-  const assertCurrent = () => { owner(); ctx.assertActive?.(); };
-  const record: IntakeRecord = { id: makeId(), fileName: file.name, source: "upload", status: "processing", createdAt: new Date().toISOString() };
-  sessionFiles.set(record.id, file);
-  onUpdate({ ...record });
-  try {
-    drafts.set(record.id, await classify({ kind: "new", file }, record, { ...ctx, assertActive: assertCurrent }, onUpdate));
-    assertCurrent();
-    record.status = "review";
-  } catch (error) {
-    assertCurrent();
-    record.status = "error";
-    record.message = error instanceof Error ? error.message : "파일을 분류하지 못했어요.";
-  }
-  onUpdate({ ...record });
-  return record;
-}
-
-/** 확인된 분류(사용자가 고친 종류·과목 포함)로 저장한다 */
-export function commitUpload(record: IntakeRecord, ctx: IntakeContext, onUpdate: (record: IntakeRecord) => void) {
-  const draft = drafts.get(record.id);
-  if (!draft) throw new Error("분류 결과가 만료됐어요. 파일을 다시 올려 주세요.");
-  const owner = captureStorageScope();
-  const assertCurrent = () => { owner(); ctx.assertActive?.(); };
-  const next: IntakeRecord = { ...record, status: "processing" };
-  const docType = record.docType ?? draft.docType;
-  const course = record.courseId ? getAllStoredCourses().find((item) => item.id === record.courseId) ?? null : null;
-  const item: Classified = { ...draft, docType, course, syllabus: docType === "syllabus" ? draft.syllabus : null };
-  if (!(docType === "syllabus" && !course && record.newCourseName)) next.newCourseName = undefined;
-  return track(next, async () => {
-    await save(item, next, { ...ctx, assertActive: assertCurrent });
-    drafts.delete(record.id);
-  }, onUpdate, assertCurrent);
-}
-
-export function discardUpload(id: string) {
-  drafts.delete(id);
-  sessionFiles.delete(id);
-}
-
-/** 대시보드에 넣은 파일 하나를 바로 분류·저장한다 (확인 단계 없음) */
+/** 대시보드에 넣은 파일 하나를 분류·저장한다 */
 export function processUpload(file: File, ctx: IntakeContext, onUpdate: (record: IntakeRecord) => void) {
   const owner = captureStorageScope();
   const assertCurrent = () => { owner(); ctx.assertActive?.(); };

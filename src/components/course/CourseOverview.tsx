@@ -4,10 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookMarked, CalendarCheck, ChevronRight, Circle, CircleCheck, FileText, Loader2, Sparkles, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
 import { ProblemDetail } from "@/components/problem-bank/ProblemDetail";
-import { MY_NOTES_CHANGED_EVENT, type MyNote } from "@/lib/my-notes-storage";
-import { getIntakeLog } from "@/lib/file-intake/settings";
-import { hasOriginal, openOriginal } from "@/lib/course-overview/open";
+import { MY_NOTES_CHANGED_EVENT } from "@/lib/my-notes-storage";
 import { compareLabels, understandingPercent } from "@/lib/problem-bank-labels";
 import { splitSourceFile, type ProblemBankProblem } from "@/lib/problem-bank-storage";
 import {
@@ -54,9 +53,8 @@ function DeleteButton({ label, onClick }: { label: string; onClick: () => void }
   );
 }
 
-function MaterialRow({ material, onDelete, onOpen }: { material: Material; onDelete: () => void; onOpen: (note: MyNote) => void }) {
+function MaterialRow({ material, onDelete }: { material: Material; onDelete: () => void }) {
   const [open, setOpen] = useState(false);
-  const openable = material.kind === "note" && hasOriginal(material.note);
   return (
     <li className="group rounded-lg hover:bg-muted/60">
       <div className="flex items-center gap-2 px-2 py-2">
@@ -64,11 +62,10 @@ function MaterialRow({ material, onDelete, onOpen }: { material: Material; onDel
         <div className="min-w-0 flex-1">
           {material.kind === "legacy" ? (
             <button type="button" onClick={() => setOpen((v) => !v)} className="block w-full truncate text-left text-sm">{material.title}</button>
-          ) : openable && material.kind === "note" ? (
-            <button type="button" onClick={() => onOpen(material.note)} title="새 탭에서 열기" className="block w-full truncate text-left text-sm hover:underline">{material.title}</button>
           ) : <p className="truncate text-sm">{material.title}</p>}
           <p className="text-xs text-muted-foreground">{material.label} · {shortDate(material.date)}</p>
         </div>
+        {material.kind === "note" && <span className="shrink-0 [&_button]:h-7 [&_button]:px-2 [&_button]:text-xs"><NoteViewerDialog note={material.note} triggerLabel="열기" /></span>}
         <DeleteButton label={material.title} onClick={onDelete} />
       </div>
       {open && material.kind === "legacy" && <p className="whitespace-pre-wrap px-8 pb-3 text-sm text-muted-foreground">{material.content || "내용 없음"}</p>}
@@ -76,7 +73,7 @@ function MaterialRow({ material, onDelete, onOpen }: { material: Material; onDel
   );
 }
 
-function ProblemFile({ name, problems, source, onDelete, onOpen }: { name: string; problems: ProblemBankProblem[]; source: MyNote | null; onDelete: () => void; onOpen: (note: MyNote) => void }) {
+function ProblemFile({ name, problems, onDelete }: { name: string; problems: ProblemBankProblem[]; onDelete: () => void }) {
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState<string | null>(null);
   const sorted = [...problems].sort((a, b) => (a.content?.page ?? 0) - (b.content?.page ?? 0) || compareLabels(a.label, b.label));
@@ -85,13 +82,12 @@ function ProblemFile({ name, problems, source, onDelete, onOpen }: { name: strin
   return (
     <li className="rounded-lg">
       <div className="group flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-muted/60">
-        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label={`${name} 문항 펼치기`} className="shrink-0 rounded p-0.5 hover:bg-muted">
-          <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-90")} />
-        </button>
-        <button type="button" onClick={() => (source ? onOpen(source) : setOpen((v) => !v))} title={source ? "새 탭에서 열기" : undefined}
-          className={cn("min-w-0 flex-1 text-left", source && "[&>span:first-child]:hover:underline")}>
-          <span className="block truncate text-sm">{name || "파일 정보 없음"}</span>
-          <span className="text-xs text-muted-foreground">{lecture ? "강의노트 · " : ""}{problems.length}문항 · 이해도 {percent}%</span>
+        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+          <ChevronRight className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm">{name || "파일 정보 없음"}</span>
+            <span className="text-xs text-muted-foreground">{lecture ? "강의노트 · " : ""}{problems.length}문항 · 이해도 {percent}%</span>
+          </span>
         </button>
         <DeleteButton label={name} onClick={onDelete} />
       </div>
@@ -170,20 +166,6 @@ export function CourseOverview({ courseId }: { courseId: string }) {
       + plans.filter((p) => resolvePeriod(p.key, p.date, midterm, overrides) === "final").length,
   }), [materials, problems, plans, midterm, overrides]);
 
-  async function open(note: MyNote) {
-    try { await openOriginal(note); }
-    catch (err) { setError(err instanceof Error ? err.message : "파일을 열지 못했습니다."); }
-  }
-
-  /** 문제 파일의 원본 PDF: 자동 분류 기록 → 같은 파일 이름의 강의자료 */
-  function sourceOf(sourceFile: string): MyNote | null {
-    const notes = (materials ?? []).flatMap((m) => (m.kind === "note" ? [m.note] : []));
-    const logged = getIntakeLog().find((record) => record.problemSourceFile === sourceFile && record.noteId)?.noteId;
-    const name = splitSourceFile(sourceFile).name;
-    const note = notes.find((item) => item.id === logged) ?? notes.find((item) => item.fileName === name || item.title === name);
-    return note && hasOriginal(note) ? note : null;
-  }
-
   async function askMaterial(material: Material) {
     const linked = await linkedProblemFiles(courseId, material).catch(() => []);
     const problemCount = linked.reduce((n, f) => n + f.count, 0);
@@ -241,14 +223,14 @@ export function CourseOverview({ courseId }: { courseId: string }) {
             </select>
           </>}>
             {shownMaterials.length ? (
-              <ul>{shownMaterials.map((m) => <MaterialRow key={m.key} material={m} onDelete={() => void askMaterial(m)} onOpen={(note) => void open(note)} />)}</ul>
+              <ul>{shownMaterials.map((m) => <MaterialRow key={m.key} material={m} onDelete={() => void askMaterial(m)} />)}</ul>
             ) : <Empty text="등록된 강의자료가 없어요" />}
           </Column>
 
           <Column icon={<BookMarked className="h-4 w-4" />} title="문제" count={files.reduce((n, [, list]) => n + list.length, 0)}>
             {files.length ? (
               <ul>{files.map(([file, list]) => (
-                <ProblemFile key={file} name={splitSourceFile(file).name} problems={list} source={sourceOf(file)} onOpen={(note) => void open(note)} onDelete={() => setPending({
+                <ProblemFile key={file} name={splitSourceFile(file).name} problems={list} onDelete={() => setPending({
                   title: `「${splitSourceFile(file).name}」의 문제 ${list.length}개를 삭제할까요?`,
                   detail: "문제은행과 이해도 기록에서도 지워져요.",
                   run: () => deleteProblemFile(problems.subjectId!, file, problems.problems),
