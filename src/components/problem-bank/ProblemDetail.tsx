@@ -23,8 +23,9 @@ function Crop({ src, w, h }: { src: string; w: number; h: number }) {
 /** 번호를 누르면 펼쳐지는 문제 본문: 글(수식 포함) + 크롭 그림 */
 export function ProblemDetail({ content, onConfirm, onRemove }: {
   content: ProblemContent | null | undefined;
-  onConfirm: () => void;
-  onRemove: () => void;
+  /** 없으면 보기 전용(과목 화면) */
+  onConfirm?: () => void;
+  onRemove?: () => void;
 }) {
   if (!content) {
     return <p className="py-2 text-[13px] text-slate-500">문제 내용이 아직 없어요. 같은 PDF를 다시 올리면 채워져요.</p>;
@@ -37,8 +38,8 @@ export function ProblemDetail({ content, onConfirm, onRemove }: {
           <span className="min-w-0 flex-1">
             {content.origin === "rule" ? "AI는 이 번호를 찾지 못했어요." : content.origin === "ai" ? "PDF 글자에서는 이 번호를 찾지 못했어요." : ""} 원본과 번호가 맞는지 확인해 주세요.
           </span>
-          <button type="button" onClick={onConfirm} className="rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white">번호 맞음</button>
-          <button type="button" onClick={onRemove} className="rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs">삭제</button>
+          {onConfirm && <button type="button" onClick={onConfirm} className="rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white">번호 맞음</button>}
+          {onRemove && <button type="button" onClick={onRemove} className="rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs">삭제</button>}
         </div>
       )}
       {content.text && <MathText text={content.text} className="text-[15px] leading-7 text-slate-800 [&_.katex-display]:my-2 [&_.katex-display]:overflow-x-auto" />}

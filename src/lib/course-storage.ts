@@ -106,6 +106,22 @@ export function saveCoursePlan(plan: StudyPlan) {
   writeJson(COURSE_PLANS_STORAGE_KEY, [plan, ...plans]);
 }
 
+export function removeCourseNote(noteId: string) {
+  writeJson(COURSE_NOTES_STORAGE_KEY, readJson<LectureNote[]>(COURSE_NOTES_STORAGE_KEY, []).filter((note) => note.id !== noteId));
+}
+
+export function saveCoursePlans(plans: StudyPlan[]) {
+  writeJson(COURSE_PLANS_STORAGE_KEY, plans);
+}
+
+export function getAllCoursePlans(): StudyPlan[] {
+  return readJson<StudyPlan[]>(COURSE_PLANS_STORAGE_KEY, []);
+}
+
+export function removeCourseFile(fileId: string) {
+  writeJson(COURSE_FILES_STORAGE_KEY, readJson<CourseFile[]>(COURSE_FILES_STORAGE_KEY, []).filter((file) => file.id !== fileId));
+}
+
 export function getCourseFiles(courseId: string): CourseFile[] {
   return readJson<CourseFile[]>(COURSE_FILES_STORAGE_KEY, []).filter(
     (file) => file.courseId === courseId,

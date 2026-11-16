@@ -1,169 +1,26 @@
 "use client";
 
-import { FileDropzone } from "@/components/ui/file-dropzone";
-
-import { ChangeEvent, Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { BookOpen, Clock, MapPin } from "lucide-react";
 import { Header } from "@/components/layout/Header";
-import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
-import { sortCourseNotes, type CourseNoteSort, type CourseNoteSortDirection } from "@/lib/course-note-sort";
-import { CourseEvents } from "@/components/course/CourseEvents";
-import { TopicLearningPanel } from "@/components/coaching/TopicLearningPanel";
+import { CourseOverview, COURSE_DATA_CHANGED_EVENT } from "@/components/course/CourseOverview";
+import { CourseSettingsDialog } from "@/components/course/CourseSettingsDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  BookOpen,
-  CalendarCheck,
-  ChevronLeft,
-  Clock,
-  FileText,
-  Folder,
-  MapPin,
-  Paperclip,
-  Plus,
-  Upload,
-  Users,
-} from "lucide-react";
-import { Course, LectureNote, StudyPlan } from "@/lib/types";
+import { Card, CardContent } from "@/components/ui/card";
+import type { Course } from "@/lib/types";
 import { UNSCHEDULED_LABEL, isUnscheduledCourse } from "@/lib/ajou-catalog";
-import {
-  CourseFile,
-  getCourseFiles,
-  getCourseNotes,
-  getCoursePlans,
-  getStoredCourses,
-  saveCourseFile,
-  saveCoursePlan,
-} from "@/lib/course-storage";
-import { addNote as saveMyNote, getMyNotes, MY_NOTES_CHANGED_EVENT, MyNote } from "@/lib/my-notes-storage";
-import {
-  getMonthlyStudyPlans,
-  getWeeklyStudyPlans,
-  MonthlyStudyPlan,
-  saveMonthlyStudyPlans,
-  saveWeeklyStudyPlans,
-} from "@/lib/study-storage";
-import {
-  getMonthlyEvents,
-  MonthlyEvent,
-  saveMonthlyEvents,
-} from "@/lib/timetable-storage";
+import { COURSES_CHANGED_EVENT, getCourseFiles, getCourseNotes, getStoredCourses } from "@/lib/course-storage";
+import { getMyNotes, MY_NOTES_CHANGED_EVENT } from "@/lib/my-notes-storage";
+import { listPlans } from "@/lib/course-overview/data";
+
+// 과목 화면: 위 과목 정보는 그대로, 아래는 중간·기말별 강의자료 | 문제 | 계획(보기 전용, 삭제만).
+// 추가·수정은 홈 채팅에서 하고, 채팅으로 저장된 기록은 오른쪽 위 설정에서 고친다.
 
 function formatDateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function addDays(date: Date, amount: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + amount);
-  return next;
-}
-
-function getSundayWeekStart(date: Date) {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  return addDays(next, -next.getDay());
-}
-
-function getMonthFromDate(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function formatBytes(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
-interface CourseNoteFolderNode {
-  id: string;
-  name: string;
-  pathIds: string[];
-  pathNames: string[];
-  directNotes: MyNote[];
-  children: CourseNoteFolderNode[];
-}
-
-function getCourseNoteFolderSegments(note: MyNote) {
-  if (note.driveFolderPath?.length && note.driveFolderPathIds?.length) {
-    return { names: note.driveFolderPath, ids: note.driveFolderPathIds };
-  }
-
-  if (note.driveFolderName && note.driveFolderId) {
-    return { names: [note.driveFolderName], ids: [note.driveFolderId] };
-  }
-
-  return { names: ["직접 추가한 노트"], ids: ["__manual_notes__"] };
-}
-
-function buildCourseNoteFolderTree(notes: MyNote[]): CourseNoteFolderNode {
-  const root: CourseNoteFolderNode = {
-    id: "root",
-    name: "강의 노트",
-    pathIds: [],
-    pathNames: [],
-    directNotes: [],
-    children: [],
-  };
-
-  const noteSegments = notes.map(getCourseNoteFolderSegments);
-  let commonPathLength = noteSegments[0]?.ids.length ?? 0;
-
-  for (const segments of noteSegments.slice(1)) {
-    let index = 0;
-    while (
-      index < commonPathLength &&
-      segments.ids[index] === noteSegments[0]?.ids[index]
-    ) {
-      index += 1;
-    }
-    commonPathLength = index;
-  }
-
-  const folderStartIndex = Math.max(commonPathLength - 1, 0);
-
-  for (const [index, note] of notes.entries()) {
-    const { names, ids } = noteSegments[index];
-    const relativeNames = names.slice(folderStartIndex);
-    const relativeIds = ids.slice(folderStartIndex);
-    let current = root;
-
-    relativeIds.forEach((id, folderIndex) => {
-      const name = relativeNames[folderIndex] ?? "이름 없는 폴더";
-      let child = current.children.find((item) => item.id === id);
-
-      if (!child) {
-        child = {
-          id,
-          name,
-          pathIds: [...current.pathIds, id],
-          pathNames: [...current.pathNames, name],
-          directNotes: [],
-          children: [],
-        };
-        current.children.push(child);
-      }
-
-      current = child;
-    });
-
-    current.directNotes.push(note);
-  }
-
-  return root;
-}
-
-function countFolderNotes(folder: CourseNoteFolderNode): number {
-  return folder.directNotes.length + folder.children.reduce((total, child) => total + countFolderNotes(child), 0);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function EmptyCourseState() {
@@ -191,248 +48,50 @@ function EmptyCourseState() {
 function CourseContent() {
   const searchParams = useSearchParams();
   const courseId = searchParams.get("courseId") ?? "";
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [notes, setNotes] = useState<LectureNote[]>([]);
-  const [plans, setPlans] = useState<StudyPlan[]>([]);
-  const [files, setFiles] = useState<CourseFile[]>([]);
-  const [linkedMyNotes, setLinkedMyNotes] = useState<MyNote[]>([]);
-  const [linkedNotesError, setLinkedNotesError] = useState("");
-  const [noteTitle, setNoteTitle] = useState("");
-  const [noteContent, setNoteContent] = useState("");
-  const [noteFile, setNoteFile] = useState<File | null>(null);
-  const [noteFileInputKey, setNoteFileInputKey] = useState(0);
-  const [noteSaving, setNoteSaving] = useState(false);
-  const [noteSaveError, setNoteSaveError] = useState("");
-  const [planTitle, setPlanTitle] = useState("");
-  const [planDescription, setPlanDescription] = useState("");
-  const [planDueDate, setPlanDueDate] = useState("");
-  const [planFeedback, setPlanFeedback] = useState("");
-  const [linkedNoteFolderPath, setLinkedNoteFolderPath] = useState<string[]>([]);
-  const [noteSort, setNoteSort] = useState<CourseNoteSort>("modified");
-  const [noteSortDirection, setNoteSortDirection] = useState<CourseNoteSortDirection>("desc");
+  const [courses, setCourses] = useState<Course[] | null>(null);
+  const [counts, setCounts] = useState({ notes: 0, plans: 0, files: 0 });
 
   useEffect(() => {
-    let cancelled = false, request = 0;
-    async function refreshLinkedNotes() {
-      const currentRequest = ++request;
-      try {
-        const myNotes = courseId ? await getMyNotes() : [];
-        if (cancelled || currentRequest !== request) return;
-        setLinkedMyNotes(myNotes.filter((note) => note.linkedType === "course" && note.linkedId === courseId));
-        setLinkedNotesError("");
-      } catch {
-        if (!cancelled && currentRequest === request) setLinkedNotesError("강의 자료를 불러오지 못했습니다. 로그인·네트워크 상태를 확인한 뒤 다시 시도해 주세요.");
-      }
-    }
-    const timeout = window.setTimeout(() => {
+    let alive = true;
+    async function refresh() {
       setCourses(getStoredCourses());
-      setNotes(courseId ? getCourseNotes(courseId) : []);
-      setPlans(courseId ? getCoursePlans(courseId) : []);
-      setFiles(courseId ? getCourseFiles(courseId) : []);
-      setLinkedMyNotes([]);
-      void refreshLinkedNotes();
-      setNoteTitle("");
-      setNoteContent("");
-      setNoteFile(null);
-      setNoteFileInputKey((key) => key + 1);
-      setNoteSaveError("");
-      setPlanTitle("");
-      setPlanDescription("");
-      setPlanDueDate("");
-      setPlanFeedback("");
-      setLinkedNoteFolderPath([]);
-    }, 0);
-
-    const syncLinkedNotes = () => { void refreshLinkedNotes(); };
-    window.addEventListener(MY_NOTES_CHANGED_EVENT, syncLinkedNotes);
-    window.addEventListener("storage", syncLinkedNotes);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-      window.removeEventListener(MY_NOTES_CHANGED_EVENT, syncLinkedNotes);
-      window.removeEventListener("storage", syncLinkedNotes);
-    };
+      if (!courseId) return;
+      const todayKey = formatDateKey(new Date());
+      const [myNotes, plans] = await Promise.all([getMyNotes().catch(() => []), listPlans(courseId).catch(() => [])]);
+      if (!alive) return;
+      setCounts({
+        notes: getCourseNotes(courseId).length + myNotes.filter((note) => note.linkedType === "course" && note.linkedId === courseId).length,
+        plans: plans.filter((plan) => !plan.done && plan.date.slice(0, 10) >= todayKey).length,
+        files: getCourseFiles(courseId).length,
+      });
+    }
+    const timeout = window.setTimeout(() => void refresh(), 0);
+    const reload = () => void refresh();
+    const events = [COURSES_CHANGED_EVENT, MY_NOTES_CHANGED_EVENT, COURSE_DATA_CHANGED_EVENT, "unilink:studyPlansChanged", "storage"];
+    events.forEach((event) => window.addEventListener(event, reload));
+    return () => { alive = false; window.clearTimeout(timeout); events.forEach((event) => window.removeEventListener(event, reload)); };
   }, [courseId]);
 
-  const course = courses.find((item) => item.id === courseId) ?? null;
-
-  const linkedNoteFolderTree = useMemo(
-    () => buildCourseNoteFolderTree(linkedMyNotes),
-    [linkedMyNotes],
-  );
-  const activeLinkedNoteFolder = useMemo(() => {
-    let current = linkedNoteFolderTree;
-    for (const folderId of linkedNoteFolderPath) {
-      const next = current.children.find((folder) => folder.id === folderId);
-      if (!next) return linkedNoteFolderTree;
-      current = next;
-    }
-    return current;
-  }, [linkedNoteFolderPath, linkedNoteFolderTree]);
-  const sortedLinkedNotes = useMemo(() => sortCourseNotes(activeLinkedNoteFolder.directNotes, noteSort, noteSortDirection), [activeLinkedNoteFolder, noteSort, noteSortDirection]);
-
+  const course = courses?.find((item) => item.id === courseId) ?? null;
   const courseTime = useMemo(() => {
     if (!course) return "";
     if (isUnscheduledCourse(course)) return UNSCHEDULED_LABEL;
     return `${course.days.join(", ")} ${course.startTime} - ${course.endTime}`;
   }, [course]);
 
-  const noteCount = notes.length + linkedMyNotes.length;
-  const todayKey = formatDateKey(new Date());
-  const openPlanCount = plans.filter(
-    (plan) => !plan.isCompleted && (!plan.dueDate || plan.dueDate >= todayKey),
-  ).length;
-
-  async function addCourseNote() {
-    if (!course || noteSaving) return;
-    const title = noteTitle.trim() || noteFile?.name.replace(/\.[^.]+$/, "").trim();
-    if (!title) {
-      setNoteSaveError("노트 제목이나 파일을 입력해주세요.");
-      return;
-    }
-
-    setNoteSaving(true);
-    setNoteSaveError("");
-    try {
-      const saved = await saveMyNote({
-        title,
-        courseName: course.name,
-        linkedType: "course",
-        linkedId: course.id,
-        linkedTitle: course.name,
-        source: "직접 작성",
-        content: noteContent.trim(),
-        file: noteFile ?? undefined,
-        tags: [course.name],
-      });
-      setLinkedMyNotes((current) => [saved, ...current.filter((note) => note.id !== saved.id)]);
-      setLinkedNoteFolderPath([]);
-      setNoteTitle("");
-      setNoteContent("");
-      setNoteFile(null);
-      setNoteFileInputKey((key) => key + 1);
-    } catch (error) {
-      setNoteSaveError(error instanceof Error ? error.message : "노트를 저장하지 못했습니다.");
-    } finally {
-      setNoteSaving(false);
-    }
-  }
-
-  function syncCoursePlan(plan: StudyPlan, linkedCourse: Course) {
-    const anchorDate = plan.dueDate
-      ? new Date(`${plan.dueDate}T00:00:00`)
-      : new Date();
-    const weekStart = formatDateKey(getSundayWeekStart(anchorDate));
-    const weeklyPlan: StudyPlan = {
-      ...plan,
-      weekStart,
-    };
-    const weeklyPlans = getWeeklyStudyPlans();
-    const nextWeeklyPlans = weeklyPlans.some((item) => item.id === weeklyPlan.id)
-      ? weeklyPlans.map((item) => (item.id === weeklyPlan.id ? weeklyPlan : item))
-      : [weeklyPlan, ...weeklyPlans];
-    const monthlyPlan: MonthlyStudyPlan = {
-      id: `weekly-${weeklyPlan.id}`,
-      month: getMonthFromDate(new Date(`${weekStart}T00:00:00`)),
-      weekStart,
-      courseId: weeklyPlan.courseId,
-      courseName: weeklyPlan.courseName,
-      title: weeklyPlan.title,
-      description: weeklyPlan.description,
-      isCompleted: weeklyPlan.isCompleted,
-      createdAt: weeklyPlan.createdAt,
-    };
-    const monthlyPlans = getMonthlyStudyPlans();
-    const nextMonthlyPlans = monthlyPlans.some((item) => item.id === monthlyPlan.id)
-      ? monthlyPlans.map((item) => (item.id === monthlyPlan.id ? monthlyPlan : item))
-      : [monthlyPlan, ...monthlyPlans];
-
-    saveWeeklyStudyPlans(nextWeeklyPlans);
-    saveMonthlyStudyPlans(nextMonthlyPlans);
-
-    if (!weeklyPlan.dueDate) return;
-
-    const monthlyEvent: MonthlyEvent = {
-      id: `course-plan-event-${weeklyPlan.id}`,
-      title: `학습 계획: ${weeklyPlan.title}`,
-      date: weeklyPlan.dueDate,
-      startTime: linkedCourse.startTime || "09:00",
-      endTime: linkedCourse.endTime || "10:00",
-      location: linkedCourse.name,
-      memo: weeklyPlan.description
-        ? `${linkedCourse.name} 학습 계획\n${weeklyPlan.description}`
-        : `${linkedCourse.name} 학습 계획 마감일`,
-      color: linkedCourse.color,
-      createdAt: weeklyPlan.createdAt,
-    };
-    const monthlyEvents = getMonthlyEvents();
-    const nextMonthlyEvents = monthlyEvents.some((event) => event.id === monthlyEvent.id)
-      ? monthlyEvents.map((event) =>
-          event.id === monthlyEvent.id ? monthlyEvent : event,
-        )
-      : [monthlyEvent, ...monthlyEvents];
-
-    saveMonthlyEvents(nextMonthlyEvents);
-  }
-
-  function addPlan() {
-    if (!course || !planTitle.trim()) return;
-
-    const plan: StudyPlan = {
-      id: `course-plan-${Date.now()}`,
-      userId: "me",
-      courseId: course.id,
-      courseName: course.name,
-      week: 1,
-      title: planTitle.trim(),
-      description: planDescription.trim(),
-      dueDate: planDueDate,
-      isCompleted: false,
-      createdAt: new Date().toISOString(),
-    };
-
-    saveCoursePlan(plan);
-    syncCoursePlan(plan, course);
-    setPlans((prev) => [plan, ...prev]);
-    setPlanTitle("");
-    setPlanDescription("");
-    setPlanDueDate("");
-    setPlanFeedback(
-      plan.dueDate
-        ? "수업 계획이 학습 계획, 월별 계획, 시간표 월간 일정에 등록되었습니다."
-        : "수업 계획이 학습 계획과 월별 계획에 등록되었습니다.",
-    );
-  }
-
-  function uploadFiles(event: ChangeEvent<HTMLInputElement>) {
-    if (!course || !event.target.files) return;
-
-    const uploaded = Array.from(event.target.files).map((file) => ({
-      id: `${Date.now()}-${file.name}`,
-      courseId: course.id,
-      name: file.name,
-      type: file.type || "파일",
-      size: file.size,
-      createdAt: new Date().toISOString(),
-    }));
-
-    uploaded.forEach(saveCourseFile);
-    setFiles((prev) => [...uploaded, ...prev]);
-    event.target.value = "";
-  }
-
-  if (!courseId || !course) {
-    return <EmptyCourseState />;
-  }
+  if (courses === null) return null;
+  if (!courseId || !course) return <EmptyCourseState />;
 
   return (
     <div className="flex flex-col min-h-screen">
       <Header title={course.name} />
       <div className="flex-1 p-6 max-w-6xl mx-auto w-full space-y-6">
         <Card className="border-0 shadow-sm">
-          <CardContent className="p-5">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <CardContent className="relative p-5">
+            <div className="absolute right-3 top-3">
+              <CourseSettingsDialog courseId={course.id} courseName={course.name} />
+            </div>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pr-10">
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
                   <div
@@ -469,15 +128,15 @@ function CourseContent() {
               </div>
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div>
-                  <div className="text-xl font-bold text-primary">{noteCount}</div>
+                  <div className="text-xl font-bold text-primary">{counts.notes}</div>
                   <div className="text-xs text-muted-foreground">노트</div>
                 </div>
                 <div>
-                  <div className="text-xl font-bold text-primary">{openPlanCount}</div>
+                  <div className="text-xl font-bold text-primary">{counts.plans}</div>
                   <div className="text-xs text-muted-foreground">계획</div>
                 </div>
                 <div>
-                  <div className="text-xl font-bold text-primary">{files.length}</div>
+                  <div className="text-xl font-bold text-primary">{counts.files}</div>
                   <div className="text-xs text-muted-foreground">파일</div>
                 </div>
               </div>
@@ -485,343 +144,7 @@ function CourseContent() {
           </CardContent>
         </Card>
 
-        <Tabs key={course.id} defaultValue="notes">
-          <TabsList className="bg-white border shadow-sm mb-6">
-            <TabsTrigger value="events">과제·시험·일정</TabsTrigger>
-            <TabsTrigger value="progress">진도·이해도</TabsTrigger>
-            <TabsTrigger value="notes" className="gap-2">
-              <FileText className="h-4 w-4" /> 노트 정리
-            </TabsTrigger>
-            <TabsTrigger value="plans" className="gap-2">
-              <CalendarCheck className="h-4 w-4" /> 학습 계획
-            </TabsTrigger>
-            <TabsTrigger value="files" className="gap-2">
-              <Paperclip className="h-4 w-4" /> 자료
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="events"><CourseEvents key={course.id} courseId={course.id} /></TabsContent>
-          <TabsContent value="progress"><TopicLearningPanel key={course.id} courseId={course.id} /></TabsContent>
-          <TabsContent value="notes">
-            {linkedNotesError && <div role="alert" className="mb-4 flex flex-wrap items-center gap-3 text-sm text-destructive">
-              <p>{linkedNotesError}</p>
-              <Button variant="outline" size="sm" onClick={() => window.dispatchEvent(new Event(MY_NOTES_CHANGED_EVENT))}>다시 불러오기</Button>
-            </div>}
-            <div className="grid items-start gap-6 lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)]">
-              <Card className="self-start border-0 shadow-sm lg:sticky lg:top-20">
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Plus className="h-4 w-4" /> 강의 노트 추가
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="space-y-2">
-                    <Label>제목</Label>
-                    <Input
-                      placeholder="예: 5주차 핵심 개념"
-                      value={noteTitle}
-                      onChange={(event) => setNoteTitle(event.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>내용</Label>
-                    <Textarea
-                      rows={8}
-                      placeholder="필기 내용을 정리하세요"
-                      value={noteContent}
-                      onChange={(event) => setNoteContent(event.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="course-note-file">강의 자료 파일 (선택)</Label>
-                    <FileDropzone
-                      key={noteFileInputKey}
-                      id="course-note-file"
-                      accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt"
-                      disabled={noteSaving}
-                      onFiles={(files) => setNoteFile(files[0] ?? null)}
-                    />
-                    {noteFile && (
-                      <p className="text-xs text-muted-foreground">
-                        {noteFile.name} · {formatBytes(noteFile.size)}
-                      </p>
-                    )}
-                  </div>
-                  {noteSaveError && <p role="alert" className="text-sm text-destructive">{noteSaveError}</p>}
-                  <Button onClick={addCourseNote} className="w-full" disabled={noteSaving}>
-                    {noteSaving ? "저장 중..." : "노트 저장"}
-                  </Button>
-                  <Button variant="outline" className="w-full" nativeButton={false} render={<Link href="/notes" />}>
-                    Drive 노트 가져오기 · 나의 노트
-                  </Button>
-                </CardContent>
-              </Card>
-
-              <div className="min-w-0 space-y-3">
-                {linkedMyNotes.length > 0 && (
-                  <div className="space-y-3">
-                    <p className="text-xs font-semibold text-muted-foreground">
-                      이 수업의 강의 노트
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <label htmlFor="course-note-sort" className="text-sm text-muted-foreground">정렬</label>
-                      <select id="course-note-sort" value={noteSort} onChange={(event) => setNoteSort(event.target.value as CourseNoteSort)} className="h-9 rounded-md border bg-background px-2 text-sm">
-                        <option value="name">이름</option><option value="modified">최종 수정일</option><option value="type">파일 형식</option>
-                      </select>
-                      <select aria-label="정렬 순서" value={noteSortDirection} onChange={(event) => setNoteSortDirection(event.target.value as CourseNoteSortDirection)} className="h-9 rounded-md border bg-background px-2 text-sm">
-                        <option value="asc">오름차순</option><option value="desc">내림차순</option>
-                      </select>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                        <button
-                          type="button"
-                          className="hover:text-primary"
-                          onClick={() => setLinkedNoteFolderPath([])}
-                        >
-                          노트
-                        </button>
-                        {activeLinkedNoteFolder.pathNames.map((name, index) => (
-                          <span key={`${name}-${index}`} className="flex items-center gap-1">
-                            <span>/</span>
-                            <button
-                              type="button"
-                              className="hover:text-primary"
-                              onClick={() =>
-                                setLinkedNoteFolderPath(
-                                  activeLinkedNoteFolder.pathIds.slice(0, index + 1),
-                                )
-                              }
-                            >
-                              {name}
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                      {linkedNoteFolderPath.length > 0 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 gap-1"
-                          onClick={() =>
-                            setLinkedNoteFolderPath((path) => path.slice(0, -1))
-                          }
-                        >
-                          <ChevronLeft className="h-4 w-4" />
-                          뒤로
-                        </Button>
-                      )}
-                    </div>
-                    {activeLinkedNoteFolder.children.length > 0 && (
-                      <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
-                        {activeLinkedNoteFolder.children.map((folder) => (
-                          <button
-                            key={folder.id}
-                            type="button"
-                            className="flex items-center gap-3 rounded-lg border bg-background p-3 text-left transition hover:border-primary/50 hover:bg-primary/5"
-                            onClick={() => setLinkedNoteFolderPath(folder.pathIds)}
-                          >
-                            <Folder className="h-5 w-5 shrink-0 text-primary" />
-                            <span className="min-w-0">
-                              <span className="block truncate text-sm font-semibold">
-                                {folder.name}
-                              </span>
-                              <span className="block text-xs text-muted-foreground">
-                                {countFolderNotes(folder)}개 노트
-                              </span>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    {sortedLinkedNotes.map((note) => (
-                      <Card key={note.id} className="border-0 shadow-sm">
-                        <CardContent className="p-4">
-                          <div className="flex items-start gap-3">
-                            <Upload className="h-4 w-4 text-primary mt-1 shrink-0" />
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <h3 className="font-semibold">{note.title}</h3>
-                                <Badge variant="secondary">v{note.version}</Badge>
-                              </div>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                {note.fileName ?? note.source} ·{" "}
-                                {new Date(note.driveModifiedTime ?? note.updatedAt).toLocaleString("ko-KR")}
-                              </p>
-                              <p className="text-sm text-muted-foreground mt-3 whitespace-pre-wrap">
-                                {note.content || "내용이 비어 있습니다."}
-                              </p>
-                              <div className="mt-3">
-                                <NoteViewerDialog note={note} />
-                              </div>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                    </div>
-                  </div>
-                )}
-
-                {notes.length > 0 ? (
-                  notes.map((note) => (
-                    <Card key={note.id} className="border-0 shadow-sm">
-                      <CardContent className="p-4">
-                        <div className="flex items-start gap-3">
-                          <FileText className="h-4 w-4 text-primary mt-1 shrink-0" />
-                          <div className="min-w-0">
-                            <h3 className="font-semibold">{note.title}</h3>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              {new Date(note.createdAt).toLocaleDateString("ko-KR")}
-                            </p>
-                            <p className="text-sm text-muted-foreground mt-3 whitespace-pre-wrap">
-                              {note.content || "내용이 비어 있습니다."}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))
-                ) : linkedMyNotes.length === 0 ? (
-                  <Card className="border-0 shadow-sm">
-                    <CardContent className="py-12 text-center text-muted-foreground">
-                      <FileText className="h-8 w-8 mx-auto mb-3 opacity-30" />
-                      <p className="text-sm">아직 정리한 노트가 없어요.</p>
-                    </CardContent>
-                  </Card>
-                ) : null}
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="plans">
-            <div className="grid lg:grid-cols-3 gap-6">
-              <Card className="border-0 shadow-sm">
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Plus className="h-4 w-4" /> 계획 추가
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="space-y-2">
-                    <Label>계획 제목</Label>
-                    <Input
-                      placeholder="예: 중간고사 범위 복습"
-                      value={planTitle}
-                      onChange={(event) => setPlanTitle(event.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>마감일</Label>
-                    <Input
-                      type="date"
-                      value={planDueDate}
-                      onChange={(event) => setPlanDueDate(event.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>설명</Label>
-                    <Textarea
-                      rows={5}
-                      placeholder="해야 할 공부 내용을 적어주세요"
-                      value={planDescription}
-                      onChange={(event) => setPlanDescription(event.target.value)}
-                    />
-                  </div>
-                  <Button onClick={addPlan} className="w-full">
-                    계획 저장
-                  </Button>
-                  {planFeedback && (
-                    <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">
-                      <CalendarCheck className="h-3.5 w-3.5" />
-                      {planFeedback}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <div className="lg:col-span-2 space-y-3">
-                {plans.length > 0 ? (
-                  plans.map((plan) => (
-                    <Card key={plan.id} className="border-0 shadow-sm">
-                      <CardContent className="p-4">
-                        <div className="flex items-start gap-3">
-                          <CalendarCheck className="h-4 w-4 text-primary mt-1 shrink-0" />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h3 className="font-semibold">{plan.title}</h3>
-                              {plan.dueDate && (
-                                <Badge variant="outline">마감 {plan.dueDate}</Badge>
-                              )}
-                            </div>
-                            <p className="text-sm text-muted-foreground mt-2">
-                              {plan.description || "설명이 비어 있습니다."}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))
-                ) : (
-                  <Card className="border-0 shadow-sm">
-                    <CardContent className="py-12 text-center text-muted-foreground">
-                      <CalendarCheck className="h-8 w-8 mx-auto mb-3 opacity-30" />
-                      <p className="text-sm">아직 등록한 학습 계획이 없어요.</p>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="files">
-            <div className="grid lg:grid-cols-3 gap-6">
-              <Card className="border-0 shadow-sm">
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Upload className="h-4 w-4" /> 자료 올리기
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <Label htmlFor="course-files">노트 파일, PDF, 이미지</Label>
-                  <Input id="course-files" type="file" multiple onChange={uploadFiles} />
-                  <p className="text-xs text-muted-foreground">
-                    현재 단계에서는 파일명과 용량 정보만 브라우저에 저장합니다.
-                    실제 파일 업로드는 DB/스토리지 연동 때 붙이면 됩니다.
-                  </p>
-                </CardContent>
-              </Card>
-
-              <div className="lg:col-span-2 space-y-3">
-                {files.length > 0 ? (
-                  files.map((file) => (
-                    <Card key={file.id} className="border-0 shadow-sm">
-                      <CardContent className="p-4 flex items-center gap-3">
-                        <Paperclip className="h-4 w-4 text-primary shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate">{file.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {file.type} · {formatBytes(file.size)} ·{" "}
-                            {new Date(file.createdAt).toLocaleDateString("ko-KR")}
-                          </p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))
-                ) : (
-                  <Card className="border-0 shadow-sm">
-                    <CardContent className="py-12 text-center text-muted-foreground">
-                      <Users className="h-8 w-8 mx-auto mb-3 opacity-30" />
-                      <p className="text-sm">아직 올린 자료가 없어요.</p>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            </div>
-          </TabsContent>
-        </Tabs>
+        <CourseOverview key={course.id} courseId={course.id} />
       </div>
     </div>
   );

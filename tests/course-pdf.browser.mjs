@@ -20,11 +20,12 @@ try {
       sessionStorage.setItem('unilink:private:demo:unilink:my-notes', JSON.stringify([{ id: 'pdf-test-note', title: 'Course PDF fixture', linkedType: 'course', linkedId: 'pdf-test-course', courseName: 'PDF test course', source: '직접 작성', syncStatus: 'manual', content: '', fileName: 'lecture.pdf', fileDataUrl, version: 1, tags: [], updatedAt: '2026-11-14T00:00:00Z', createdAt: '2026-11-14T00:00:00Z' }]));
     }, { fileDataUrl });
     await page.goto((process.env.AJOU_TEST_URL || 'http://127.0.0.1:3041') + '/course?courseId=pdf-test-course&demo=1');
-    await page.getByRole('button', { name: /직접 추가한 노트.*1개 노트/ }).click();
+    // 과목 화면: 11월 자료는 기말고사 탭의 강의자료 칸에 있다
+    await page.getByRole('tab', { name: /기말고사/ }).click();
     await page.getByLabel('정렬', { exact: true }).selectOption('name');
     await page.getByLabel('정렬 순서').selectOption('asc');
     assert.equal(await page.getByLabel('정렬 순서').inputValue(), 'asc');
-    await page.getByRole('button', { name: '노트 열기', exact: true }).click();
+    await page.getByRole('button', { name: '열기', exact: true }).click();
     await page.getByText('1 / 2', { exact: true }).waitFor();
     await page.getByRole('button', { name: '다음 페이지', exact: true }).click();
     await page.getByText('2 / 2', { exact: true }).waitFor();
@@ -48,7 +49,7 @@ try {
     // Do not reseed on reload: validate that a missing source is visible, not blank.
     await page.getByRole('dialog').press('Escape');
     await page.evaluate(() => window.dispatchEvent(new Event('unilink:myNotesChanged')));
-    await page.getByRole('button', { name: '노트 열기', exact: true }).click();
+    await page.getByRole('button', { name: '열기', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: '원본 파일이 연결되어 있지 않습니다' }).waitFor();
     await page.getByRole('button', { name: '다시 불러오기', exact: true }).waitFor();
     assert.deepEqual(errors, []);
