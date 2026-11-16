@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { COURSE_TIME_OPTIONS, TimeField } from "@/components/timetable/TimeField";
-import { nextSlotTimes, slotsOverlap, toMinutes } from "@/lib/time-options";
+import { alignFirstSlots, firstSlotIds, nextSlotTimes, slotsOverlap, toMinutes, updateSlotTimes } from "@/lib/time-options";
 import { courseSchedules, schedulesOverlap } from "@/lib/ajou-catalog";
 import { SCHEDULE_COLORS } from "@/lib/schedule-colors";
 import type { WorkSchedule } from "@/lib/timetable-storage";
@@ -40,6 +40,8 @@ function ManualCourseForm({
   const [category, setCategory] = useState<string>("전선");
   const [credits, setCredits] = useState("3");
   const [slots, setSlots] = useState<Slot[]>([]);
+  // 켜면 한 요일의 시간을 바꿀 때 모든 요일의 (첫) 수업 시간이 같이 바뀐다
+  const [sameTime, setSameTime] = useState(false);
   const [error, setError] = useState("");
 
   const ordered = [...slots].sort((a, b) => DAYS.indexOf(a.day) - DAYS.indexOf(b.day) || toMinutes(a.startTime) - toMinutes(b.startTime));
@@ -48,15 +50,27 @@ function ManualCourseForm({
   function toggleDay(day: DayOfWeek) {
     setSlots((prev) => (prev.some((slot) => slot.day === day)
       ? prev.filter((slot) => slot.day !== day)
-      : [...prev, { id: ++slotSeq, day, startTime: "09:00", endTime: "10:15" }]));
+      : [...prev, { id: ++slotSeq, day, ...newDayTimes(prev) }]));
+  }
+
+  /** 새 요일의 시간: '시간 동일'이면 이미 정한 시간, 아니면 기본 09:00~10:15 */
+  function newDayTimes(prev: Slot[]) {
+    const first = sameTime ? prev.find((slot) => firstSlotIds(prev).has(slot.id)) : undefined;
+    return first ? { startTime: first.startTime, endTime: first.endTime } : { startTime: "09:00", endTime: "10:15" };
+  }
+
+  function toggleSameTime() {
+    const next = !sameTime;
+    setSameTime(next);
+    if (next) setSlots((prev) => alignFirstSlots(prev, DAYS));
   }
 
   function addSlot(day: DayOfWeek) {
     setSlots((prev) => [...prev, { id: ++slotSeq, day, ...nextSlotTimes(prev.filter((slot) => slot.day === day)) }]);
   }
 
-  function updateSlot(id: number, patch: Partial<Slot>) {
-    setSlots((prev) => prev.map((slot) => (slot.id === id ? { ...slot, ...patch } : slot)));
+  function updateSlot(id: number, patch: Partial<Pick<Slot, "startTime" | "endTime">>) {
+    setSlots((prev) => updateSlotTimes(prev, id, patch, sameTime));
   }
 
   function submit() {
@@ -95,7 +109,18 @@ function ManualCourseForm({
         <Input autoFocus aria-label="과목명" value={name} onChange={(event) => setName(event.target.value)} />
       </div>
       <div className="space-y-1.5">
-        <Label>요일·시간</Label>
+        <div className="flex items-center justify-between">
+          <Label>요일·시간</Label>
+          <button
+            type="button"
+            aria-pressed={sameTime}
+            onClick={toggleSameTime}
+            title="한 요일의 시간을 바꾸면 모든 요일이 같은 시간으로 맞춰져요"
+            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${sameTime ? "border-slate-800 bg-slate-800 text-white" : "text-muted-foreground hover:bg-muted"}`}
+          >
+            시간 동일
+          </button>
+        </div>
         <div className="flex gap-1.5">
           {DAYS.map((day) => (
             <button

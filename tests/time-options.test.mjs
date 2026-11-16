@@ -31,3 +31,22 @@ test("two times of the same course may not overlap on the same day", () => {
   assert.equal(slotsOverlap([{ day: "수", startTime: "10:00", endTime: "11:15" }, { day: "금", startTime: "10:00", endTime: "11:15" }]), false);
   assert.equal(slotsOverlap([{ day: "금", startTime: "10:00", endTime: "11:00" }, { day: "금", startTime: "11:00", endTime: "12:00" }]), false, "back to back is fine");
 });
+
+test("'시간 동일': changing one day's time changes every day's first class; second classes keep their time", async () => {
+  const { updateSlotTimes, alignFirstSlots, firstSlotIds } = await import("../src/lib/time-options.ts");
+  const slots = [
+    { id: 1, day: "수", startTime: "10:00", endTime: "11:15" },
+    { id: 2, day: "금", startTime: "10:00", endTime: "11:15" },
+    { id: 3, day: "금", startTime: "16:00", endTime: "17:15" },
+    { id: 4, day: "월", startTime: "09:00", endTime: "10:15" },
+  ];
+  assert.deepEqual([...firstSlotIds(slots)].sort(), [1, 2, 4]);
+  const synced = updateSlotTimes(slots, 1, { startTime: "13:00" }, true);
+  assert.deepEqual(synced.map((s) => s.startTime), ["13:00", "13:00", "16:00", "13:00"]);
+  const own = updateSlotTimes(slots, 3, { startTime: "18:00" }, true);
+  assert.deepEqual(own.map((s) => s.startTime), ["10:00", "10:00", "18:00", "09:00"], "a second class changes alone");
+  const off = updateSlotTimes(slots, 1, { startTime: "13:00" }, false);
+  assert.deepEqual(off.map((s) => s.startTime), ["13:00", "10:00", "16:00", "09:00"]);
+  const aligned = alignFirstSlots(slots, ["월", "화", "수", "목", "금", "토", "일"]);
+  assert.deepEqual(aligned.map((s) => `${s.startTime}-${s.endTime}`), ["09:00-10:15", "09:00-10:15", "16:00-17:15", "09:00-10:15"], "turning it on copies the earliest weekday");
+});

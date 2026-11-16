@@ -41,3 +41,28 @@ export function nextSlotTimes(sameDay: { startTime: string; endTime: string }[])
 export function slotsOverlap(slots: { day: DayOfWeek; startTime: string; endTime: string }[]) {
   return slots.some((a, i) => slots.some((b, j) => i < j && a.day === b.day && toMinutes(a.startTime) < toMinutes(b.endTime) && toMinutes(b.startTime) < toMinutes(a.endTime)));
 }
+
+interface TimedSlot { id: number; day: DayOfWeek; startTime: string; endTime: string }
+
+/** 요일마다 첫 수업 칸(가장 이른 시간). '시간 동일'은 이 칸들끼리 맞춘다(같은 요일 두 번째 수업은 그대로). */
+export function firstSlotIds(slots: TimedSlot[]) {
+  const first = new Map<DayOfWeek, TimedSlot>();
+  for (const slot of slots) {
+    const current = first.get(slot.day);
+    if (!current || toMinutes(slot.startTime) < toMinutes(current.startTime) || (slot.startTime === current.startTime && slot.id < current.id)) first.set(slot.day, slot);
+  }
+  return new Set([...first.values()].map((slot) => slot.id));
+}
+
+/** 한 칸의 시간을 바꾼다. sameTime이면 요일별 첫 칸 모두에 같은 시간을 넣는다. */
+export function updateSlotTimes<T extends TimedSlot>(slots: T[], id: number, patch: Partial<Pick<T, "startTime" | "endTime">>, sameTime: boolean): T[] {
+  const targets = sameTime && firstSlotIds(slots).has(id) ? firstSlotIds(slots) : new Set([id]);
+  return slots.map((slot) => (targets.has(slot.id) ? { ...slot, ...patch } : slot));
+}
+
+/** '시간 동일'을 켤 때: 요일별 첫 칸을 가장 앞 요일의 시간으로 맞춘다 */
+export function alignFirstSlots<T extends TimedSlot>(slots: T[], dayOrder: DayOfWeek[]): T[] {
+  const firsts = firstSlotIds(slots);
+  const source = [...slots].filter((slot) => firsts.has(slot.id)).sort((a, b) => dayOrder.indexOf(a.day) - dayOrder.indexOf(b.day))[0];
+  return source ? slots.map((slot) => (firsts.has(slot.id) ? { ...slot, startTime: source.startTime, endTime: source.endTime } : slot)) : slots;
+}
