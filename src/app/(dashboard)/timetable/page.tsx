@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { TimetableGrid } from "@/components/timetable/TimetableGrid";
+import { useSharedCalendar } from "@/components/timetable/useSharedCalendar";
+import type { SharedCalendarEvent } from "@/lib/shared-calendar-view";
 import { AjouCoursePicker } from "@/components/timetable/AjouCoursePicker";
 import { ManualCourseDialog } from "@/components/timetable/ManualCourseDialog";
 import {
@@ -273,7 +275,7 @@ export default function TimetablePage() {
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [selectedOccurrence, setSelectedOccurrence] =
     useState<CourseOccurrence | null>(null);
-  const [selectedEvent, setSelectedEvent] = useState<MonthlyEvent | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<SharedCalendarEvent | null>(null);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()));
   const [viewTab, setViewTab] = useState<"weekly" | "monthly">("weekly");
@@ -282,6 +284,9 @@ export default function TimetablePage() {
     const today = new Date();
     return today.getFullYear() === 2026 ? today.getMonth() + 1 : 1;
   });
+  const sharedRangeStart = viewTab === "monthly" ? `2026-${String(calendarMonth).padStart(2, "0")}-01` : formatDateKey(weekStart);
+  const sharedRangeEnd = viewTab === "monthly" ? formatDateKey(new Date(2026, calendarMonth, 0)) : formatDateKey(new Date(weekStart.getTime() + 6 * 86400000));
+  const sharedCalendar = useSharedCalendar(sharedRangeStart, sharedRangeEnd);
   const [sessionFeedback, setSessionFeedback] = useState("");
   const [actionFeedback, setActionFeedback] = useState("");
   const [ajouCourses, setAjouCourses] = useState<Course[]>([]);
@@ -723,7 +728,7 @@ export default function TimetablePage() {
     () => getPersonalStudyDeadlineEvents(personalStudies, personalStudyPlans),
     [personalStudies, personalStudyPlans],
   );
-  const calendarEvents = [...monthlyEvents, ...personalStudyDeadlineEvents];
+  const calendarEvents = [...monthlyEvents, ...personalStudyDeadlineEvents, ...sharedCalendar.events];
 
   function openNewEventForDate(dateKey: string) {
     openScheduleDialog({ date: dateKey });
@@ -738,6 +743,7 @@ export default function TimetablePage() {
 
   return (
     <div className="flex flex-col min-h-screen">
+      {sharedCalendar.error && <p role="alert" className="px-6 py-2 text-sm text-red-700">{sharedCalendar.error}</p>}
       <Header title="시간표" />
       <div className="flex-1 p-6 max-w-[1600px] mx-auto w-full">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
@@ -1604,7 +1610,10 @@ export default function TimetablePage() {
                       {selectedEvent.memo}
                     </p>
                   )}
-                  {selectedEvent.personalStudyId ? (
+                  {selectedEvent.sharedEventId ? (
+                    selectedEvent.sharedHref ? <Link className="block text-sm text-primary" href={selectedEvent.sharedHref}>수업의 과제·시험·일정 열기</Link>
+                      : <p className="text-sm text-muted-foreground">DB에 저장된 개인 일정</p>
+                  ) : selectedEvent.personalStudyId ? (
                     <Link
                       href={`/personal-study?studyId=${encodeURIComponent(selectedEvent.personalStudyId)}`}
                       className="block"

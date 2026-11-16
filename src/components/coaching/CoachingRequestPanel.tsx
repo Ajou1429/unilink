@@ -18,6 +18,7 @@ import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase-c
 import { describeFunctionError } from "@/lib/supabase/function-error";
 import { flushP0Changes } from "@/lib/p0-sync";
 import { getStorageUser } from "@/lib/private-storage";
+import type { CoachingSeed } from "@/lib/service-agent";
 import styles from "@/app/(dashboard)/ai-coaching/workspace.module.css";
 
 type Goal = { id: string; title: string };
@@ -132,14 +133,18 @@ function formatUsd(value: number): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 4, maximumFractionDigits: 6 }).format(value);
 }
 
-export function CoachingRequestPanel() {
+export function CoachingRequestPanel({ initialRequest, assertActive }: {
+  initialRequest?: CoachingSeed & { requestNote: string };
+  assertActive?: () => void;
+} = {}) {
   const [open, setOpen] = useState(false);
+  const [launchError, setLaunchError] = useState("");
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [intent, setIntent] = useState<(typeof intents)[number][0]>("weekly_plan");
-  const [dailyMinutes, setDailyMinutes] = useState(120);
+  const [selected, setSelected] = useState<string[]>(initialRequest?.goal_ids ?? []);
+  const [intent, setIntent] = useState<(typeof intents)[number][0]>(initialRequest?.intent ?? "weekly_plan");
+  const [dailyMinutes, setDailyMinutes] = useState(initialRequest ? initialRequest.daily_minutes ?? 0 : 120);
   const [preferredHours, setPreferredHours] = useState<Record<string, number[]>>({});
-  const [requestNote, setRequestNote] = useState("");
+  const [requestNote, setRequestNote] = useState(initialRequest?.requestNote ?? "");
   const [reviewOtherGoals, setReviewOtherGoals] = useState(false);
   const [useRelatedLearning, setUseRelatedLearning] = useState(false);
   const [preparationDays, setPreparationDays] = useState(14);
@@ -155,7 +160,14 @@ export function CoachingRequestPanel() {
   const [knowledgeConsent, setKnowledgeConsent] = useState(false);
   const [researchConsent, setResearchConsent] = useState(false);
   const [knowledgeStatuses, setKnowledgeStatuses] = useState<Record<string, KnowledgeStatus>>({});
-  const dates = useMemo(() => planDates(intent), [intent]);
+  const dates = useMemo(() => {
+    if (initialRequest?.intent === intent && initialRequest.period_start && initialRequest.period_end) {
+      const start = Date.parse(`${initialRequest.period_start}T00:00:00Z`);
+      const count = (Date.parse(`${initialRequest.period_end}T00:00:00Z`) - start) / 86400000 + 1;
+      if (count >= 1 && count <= 14) return Array.from({ length: count }, (_, index) => new Date(start + index * 86400000).toISOString().slice(0, 10));
+    }
+    return planDates(intent);
+  }, [intent, initialRequest]);
   const learningGoalIds = intent === "daily_plan" ? [...new Set(dailySources.filter((s) => chosenSources.includes(`${s.kind}:${s.id}`)).map((s) => s.goal_id))] : selected;
   useEffect(() => {
     if (!open) return;
@@ -163,10 +175,12 @@ export function CoachingRequestPanel() {
     if (!db) return;
     let active = true;
     async function load() {
+      assertActive?.();
       const user = (await db!.auth.getUser()).data.user;
       if (!active) return;
       if (!user || getStorageUser() !== user.id) { setStatus("로그인 후 코칭 제안을 받을 수 있습니다."); return; }
       await flushP0Changes();
+      assertActive?.();
       const goalResult = await db!.from("learning_goals").select("id,title").eq("user_id", user.id).eq("status", "active").order("created_at", { ascending: false }).limit(100);
       if (!active) return;
       if (goalResult.error) { setStatus("DB 목표를 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요."); return; }
@@ -194,6 +208,8 @@ export function CoachingRequestPanel() {
     }
     void load().catch(() => { if (active) setStatus("과제와 학습 계획을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."); });
     return () => { active = false; };
+  // The initial request belongs to this mounted, account-bound workflow card.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   function togglePreferredHour(date: string, hour: number) {
@@ -224,13 +240,16 @@ export function CoachingRequestPanel() {
     setBusy(true);
     setStatus("일정을 확인하고 AI 계획을 만드는 중입니다…");
     try {
+      assertActive?.();
       const user = (await db.auth.getUser()).data.user;
       if (!user || getStorageUser() !== user.id) throw new Error("로그인 상태가 변경됐습니다. 다시 로그인해 주세요.");
       await flushP0Changes();
+      assertActive?.();
       await prepareCourseKnowledge(goalIds, requestDates[0], user.id, knowledgeConsent, researchConsent,
         (row) => { setKnowledgeStatuses((current) => ({ ...current, [row.goal_id]: row }));
           setStatus(`${row.title}: 자료 구조 ${row.pdf_ready}/${row.pdf_count}, 남은 분석 ${row.pending_steps}단계`); });
       setStatus("저장된 과목 지식과 학습 기록으로 계획을 만드는 중입니다…");
+      assertActive?.();
       const { data, error } = await db.functions.invoke<Result>("coaching-propose", { body: {
         request_key: crypto.randomUUID(),
         goal_ids: goalIds, intent, period_start: requestDates[0], period_end: requestDates.at(-1),
@@ -249,6 +268,7 @@ export function CoachingRequestPanel() {
       if (error) throw new Error(await describeFunctionError(error, "코칭 제안을 생성하지 못했습니다."));
       if (!data || data.schema_version !== 2 || !data.proposal || data.persisted !== false) throw new Error("코칭 응답 형식이 예상과 다릅니다.");
       if (getStorageUser() !== user.id) throw new Error("계정이 변경됐습니다. 다시 요청해 주세요.");
+      assertActive?.();
       setResult(data);
       setRequestNote("");
       const advancedRequested = useRelatedLearning || (intent !== "daily_plan" && reviewOtherGoals) || (intent === "exam_prep" && preparationDays === 21);
@@ -265,6 +285,7 @@ export function CoachingRequestPanel() {
     if (!db || busy || learningPending > 0) return;
     setBusy(true); setResult(null);
     try {
+      assertActive?.();
       const user = (await db.auth.getUser()).data.user;
       if (!user || getStorageUser() !== user.id) throw new Error("로그인 후 다시 시도해 주세요.");
       await flushP0Changes();
@@ -282,9 +303,11 @@ export function CoachingRequestPanel() {
     setApproving(true);
     setStatus("AI 계획을 저장하는 중입니다…");
     try {
+      assertActive?.();
       const user = (await db.auth.getUser()).data.user;
       if (!user || getStorageUser() !== user.id) throw new Error("로그인 상태가 변경됐습니다. 다시 로그인해 주세요.");
       await flushP0Changes();
+      assertActive?.();
       if (getStorageUser() !== user.id) throw new Error("계정이 변경됐습니다. 다시 요청해 주세요.");
       const { data, error } = await db.rpc("approve_coaching_proposal", { p_run_id: result.proposal_run_id });
       if (error) throw error;
@@ -298,9 +321,12 @@ export function CoachingRequestPanel() {
   }
 
   return <>
-    <button type="button" className={styles.recommendButton} onClick={() => setOpen(true)}>
+    <button type="button" className={styles.recommendButton} onClick={() => {
+      try { assertActive?.(); setLaunchError(""); setOpen(true); } catch (error) { setLaunchError(error instanceof Error ? error.message : "새로 요청해 주세요."); }
+    }}>
       <Sparkles size={17} /> 계획 추천
     </button>
+    {launchError && <p role="alert" className="text-sm text-red-700">{launchError}</p>}
     <Dialog open={open} onOpenChange={next=>{setOpen(next);if(!next)setRequestNote("");}}>
       <DialogContent className={styles.coachingDialog}>
         <DialogHeader className={styles.dialogHeader}>
@@ -311,6 +337,7 @@ export function CoachingRequestPanel() {
           <section className={styles.request} aria-label="계획 추천 설정">
             <div className={styles.requestTitle}><h2>추천 조건 설정</h2><span className={styles.pill}>1단계</span></div>
             <div className={styles.coachingForm}>
+              {initialRequest && <p role="status" className="text-sm">{dates[0]} ~ {dates.at(-1)} · 이번 요청의 목표·기간·가능 시간을 확인해 주세요. 아직 계획은 생성되지 않았습니다.</p>}
               {intent !== "daily_plan" && <fieldset className={styles.goalChoices}><legend>학습 목표 (최대 5개)</legend>
                 {goals.map((goal) => <label key={goal.id}><input type="checkbox" checked={selected.includes(goal.id)}
                   disabled={!selected.includes(goal.id) && selected.length >= 5}

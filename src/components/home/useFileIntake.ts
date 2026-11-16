@@ -28,7 +28,7 @@ export function useFileIntake() {
   const [driveConnected, setDriveConnected] = useState(false);
   const [driveUpload, setDriveUploadState] = useState(false);
   const busy = useRef(false);
-  const queue = useRef<{ file: File; onRecord?: (id: string) => void }[]>([]);
+  const queue = useRef<{ file: File; onRecord?: (id: string) => void; resolve: (record: IntakeRecord) => void; reject: (error: Error) => void; assertActive?: () => void }[]>([]);
   const driveChecked = useRef(false);
   const lifecycle = useRef({ version: 0 });
 
@@ -47,6 +47,7 @@ export function useFileIntake() {
 
   useEffect(() => {
     const lifecycleState = lifecycle.current;
+    const pendingQueue = queue.current;
     lifecycleState.version++;
     function sync() {
       setRecords(getIntakeLog());
@@ -62,7 +63,8 @@ export function useFileIntake() {
     aiClassificationAvailable().then(setSignedIn).catch(() => setSignedIn(false));
     getDriveConnectionStatus().then((status) => setDriveConnected(status.connected)).catch(() => setDriveConnected(false));
     return () => {
-      lifecycleState.version++; queue.current = [];
+      lifecycleState.version++;
+      for (const item of pendingQueue.splice(0)) item.reject(new Error("파일 처리가 중단되었습니다."));
       window.clearTimeout(timeout);
       window.removeEventListener(FILE_INTAKE_CHANGED_EVENT, sync);
       window.removeEventListener(COURSES_CHANGED_EVENT, sync);
@@ -95,24 +97,31 @@ export function useFileIntake() {
     busy.current = true;
     try {
       while (queue.current.length) {
-        const { file, onRecord } = queue.current.shift()!;
-        await processUpload(file, context(), (record) => {
-          onRecord?.(record.id);
-          upsert(record);
-        });
+        const item = queue.current.shift()!;
+        try {
+          const ctx = context();
+          const assertActive = () => { ctx.assertActive?.(); item.assertActive?.(); };
+          assertActive();
+          const record = await processUpload(item.file, { ...ctx, assertActive }, (record) => {
+            assertActive(); item.onRecord?.(record.id); upsert(record);
+          });
+          assertActive(); item.resolve(record);
+        } catch (error) { item.reject(error instanceof Error ? error : new Error("파일 처리에 실패했습니다.")); }
       }
     } catch {
-      queue.current = [];
+      for (const item of queue.current.splice(0)) item.reject(new Error("파일 처리가 중단되었습니다."));
     } finally {
       busy.current = false;
     }
   }, [context, upsert]);
 
   /** 파일을 분류 대기열에 넣는다. onRecord로 만들어지는 결과 id를 받을 수 있다. */
-  const add = useCallback((files: File[], onRecord?: (id: string) => void) => {
-    if (!files.length) return;
-    queue.current.push(...files.map((file) => ({ file, onRecord })));
+  const add = useCallback((files: File[], onRecord?: (id: string) => void, assertActive?: () => void) => {
+    const result = Promise.all(files.map(file => new Promise<IntakeRecord>((resolve, reject) => {
+      queue.current.push({ file, onRecord, resolve, reject, assertActive });
+    })));
     void drain();
+    return result;
   }, [drain]);
 
   const change = useCallback(async (record: IntakeRecord, patch: { courseId?: string | null; docType?: DocType }) => {

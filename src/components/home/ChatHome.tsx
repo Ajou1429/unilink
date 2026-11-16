@@ -16,6 +16,9 @@ import { ChatRecordCard, type RecordEntry } from "./ChatRecordCard";
 import { IntakeResultRow } from "./IntakeResultRow";
 import { useFileIntake } from "./useFileIntake";
 import { createChatQueue } from "@/lib/chat-record/queue";
+import { getAgentConsent, requestServiceAgent, serviceAgentEnabled, setAgentConsent, type AgentPlan } from "@/lib/service-agent";
+import type { AgentRequest } from "../../../supabase/functions/_shared/serviceAgent.ts";
+import { ServiceWorkflowCard } from "./ServiceWorkflowCard";
 
 type ThreadItem =
   | { id: string; kind: "user"; text: string; fileNames: string[] }
@@ -23,7 +26,8 @@ type ThreadItem =
   | { id: string; kind: "notice"; text: string }
   | { id: string; kind: "assistant"; text: string; pending?: boolean }
   | { id: string; kind: "records"; entries: RecordEntry[] }
-  | { id: string; kind: "consent"; text: string };
+  | { id: string; kind: "workflow"; plan: AgentPlan; owner: string; text: string; prerequisiteKeys: string[]; assertActive: () => void }
+  | { id: string; kind: "consent"; text: string; attachments?: AgentRequest["attachments"]; resume?: (check: () => void) => Promise<void> };
 
 const waitingEntries = (thread: ThreadItem[]) =>
   thread.flatMap((item) => (item.kind === "records" ? item.entries.filter((entry) => entry.status === "waiting" && entry.missing) : []));
@@ -63,15 +67,9 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
 
   function send({ text, files }: ComposerSubmit) {
     const items: ThreadItem[] = [{ id: nextId(), kind: "user", text, fileNames: files.map((file) => file.name) }];
+    const group: ThreadItem | null = files.length ? { id: nextId(), kind: "files", recordIds: [] } : null;
     if (files.length) {
-      const group: ThreadItem = { id: nextId(), kind: "files", recordIds: [] };
-      items.push(group);
-      // 분류 결과가 만들어지는 대로 이 묶음에 붙인다
-      intake.add(files, (recordId) => setThread((prev) => prev.map((item) =>
-        item.id === group.id && item.kind === "files" && !item.recordIds.includes(recordId)
-          ? { ...item, recordIds: [...item.recordIds, recordId] }
-          : item,
-      )));
+      items.push(serviceAgentEnabled && text ? { id: group!.id, kind: "notice", text: "첨부 자료 처리 요청 대기 중" } : group!);
     }
     // 첫 메시지를 보내면 일정 박스가 내려가며 대화창이 커진다
     if (thread.length === 0) setWidgetsOpen(false);
@@ -85,10 +83,45 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
       history.push({ role: "assistant", text: pendingNote(entry.action, entry.missing!, course?.name) });
     }
     setThread((prev) => [...prev, ...items]);
-    if (text) {
-      const observedAt = new Date().toISOString();
-      void requests.current.enqueue(check => record(text, history, check, observedAt)).catch(() => {});
-    }
+    const observedAt = new Date().toISOString();
+    const work = async (check: () => void) => {
+      try {
+        if (text && serviceAgentEnabled && !getAgentConsent()) {
+          setThread(prev => [...prev, { id: nextId(), kind: "consent", text, resume: work }]);
+          return;
+        }
+        let attachments: AgentRequest["attachments"] = [];
+        if (files.length && text && serviceAgentEnabled) {
+          const preflight = await requestServiceAgent({ request_id: crypto.randomUUID(), message: text,
+            history: history.slice(-6).map(turn => ({ ...turn, text: turn.text.slice(0, 1000) })),
+            today: dateKey(new Date(observedAt)), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            attachments: files.map(file => ({ name: file.name, status: "pending", course_name: null })) });
+          check();
+          if (!preflight.process_attachments) {
+            if (group) patchItem(group.id, () => ({ id: group.id, kind: "notice", text: "첨부 자료는 등록하지 않았습니다." }));
+            await record(text, history, check, observedAt, [], preflight);
+            return;
+          }
+        }
+        if (files.length) {
+          patchItem(group!.id, () => ({ id: group!.id, kind: "files", recordIds: [] }));
+          const processed = await intake.add(files, recordId => setThread(prev => prev.map(item =>
+            item.id === group!.id && item.kind === "files" && !item.recordIds.includes(recordId)
+              ? { ...item, recordIds: [...item.recordIds, recordId] } : item)), check);
+          check();
+          attachments = processed.map(row => ({ name: row.fileName, status: row.status === "done" ? "done" : "error", course_name: row.courseName ?? null }));
+          if (processed.some(row => row.status !== "done")) throw new Error("일부 자료 처리가 끝나지 않아 후속 요청을 실행하지 않았습니다. 자료 결과를 확인한 뒤 다시 요청해 주세요.");
+          if (text && processed.some(row => !row.courseId)) throw new Error("자료는 받았지만 과목 분류가 끝나지 않았습니다. 파일 카드에서 과목을 확인한 뒤 코칭을 다시 요청해 주세요.");
+        }
+        // A file-only turn never resurrects old chat text or triggers coaching.
+        if (text) await record(text, history, check, observedAt, attachments);
+      } catch (error) {
+        try { check(); } catch { return; }
+        if (group) patchItem(group.id, item => item.kind === "files" && item.recordIds.length ? item : ({ id: group.id, kind: "notice", text: "첨부 자료 처리가 완료되지 않았습니다." }));
+        setThread(prev => [...prev, { id: nextId(), kind: "notice", text: error instanceof Error ? error.message : "요청을 처리하지 못했습니다." }]);
+      }
+    };
+    void requests.current.enqueue(work).catch(() => {});
   }
 
   // ── 대화로 진도·이해도 기록 ──
@@ -117,10 +150,10 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
     }
   }
 
-  async function record(text: string, history: { role: "user" | "assistant"; text: string }[], assertCurrent: () => void, observedAt: string) {
+  async function record(text: string, history: { role: "user" | "assistant"; text: string }[], assertCurrent: () => void, observedAt: string, attachments: AgentRequest["attachments"] = [], preparedPlan?: AgentPlan) {
     assertCurrent();
-    if (getChatConsent() !== "granted") {
-      setThread((prev) => [...prev, { id: nextId(), kind: "consent", text }]);
+    if (serviceAgentEnabled ? !getAgentConsent() : getChatConsent() !== "granted") {
+      setThread((prev) => [...prev, { id: nextId(), kind: "consent", text, attachments }]);
       return;
     }
     const replyId = nextId();
@@ -130,15 +163,35 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
       const ctx = await loadChatContext();
       assertCurrent();
       setContext(ctx);
-      if (!ctx.signedIn) { say("로그인하면 대화 내용으로 진도·이해도가 기록돼요."); return; }
-      const result = await interpretMessage(ctx, text, history.slice(-8), dateKey(new Date()));
+      if (!ctx.signedIn) { say("로그인 후 AI 비서와 학습 코칭을 이용할 수 있습니다."); return; }
+      let plan: AgentPlan | null = null;
+      const appendWorkflow = (prerequisiteKeys: string[]) => {
+        if (!plan || (!plan.calendar.length && !plan.coaching)) return;
+        const workflow: ThreadItem = { id: nextId(), kind: "workflow", plan, owner: ctx.userId!, text, prerequisiteKeys,
+          assertActive: () => {
+            assertCurrent();
+            const current = threadRef.current.flatMap(row => row.kind === "records" ? row.entries : []);
+            if (!prerequisiteKeys.every(key => current.some(entry => entry.key === key && entry.status === "saved"))) throw new Error("선행 기록이 변경됐습니다. 저장 상태를 먼저 확인해 주세요.");
+          } };
+        setThread(prev => [...prev, workflow]);
+      };
+      if (serviceAgentEnabled) {
+        say("요청을 확인하고 필요한 정보를 조회하는 중입니다…");
+        plan = preparedPlan ?? await requestServiceAgent({ request_id: crypto.randomUUID(), message: text,
+          history: history.slice(-6).map(turn => ({ ...turn, text: turn.text.slice(0, 1000) })),
+          today: dateKey(new Date(observedAt)), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, attachments });
+        assertCurrent();
+        say(plan.clarification || plan.reply || (plan.route === "coaching" ? "계획 추천 조건을 확인해 주세요." : "요청을 확인했습니다."));
+        if (!plan.record_learning) { appendWorkflow([]); return; }
+      }
+      const result = await interpretMessage(ctx, text, history.slice(-8), dateKey(new Date(observedAt)));
       assertCurrent();
       if (!result.actions.length) {
         say(result.dropped > 0 ? "말씀하신 과목이나 문항 번호를 찾지 못해 기록하지 않았어요. 시간표·문제은행에 있는 이름과 번호로 말씀해 주세요."
           : result.reply || "기록할 진도나 이해도를 찾지 못했어요. 과목과 함께 말씀해 주세요.");
         return;
       }
-      say(result.reply || "기록할게요.");
+      say(plan?.reply || result.reply || "기록할게요.");
       const waiting = waitingEntries(threadRef.current);
       const recordsId = nextId();
       const replaced = new Set<string>();
@@ -150,7 +203,7 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
         // 과목은 사용자가 직접 말한 경우에만 쓴다. AI가 짐작한 과목이면 되묻는다.
         const course = ctx.courses.find((item) => item.id === raw.course_id);
         const action = course && !courseMentioned(course, source.split("\n")) ? { ...raw, course_id: null } : raw;
-        return { key: `${recordsId}-${index}`, source, action, status: "saving", missing: null,
+        return { key: answered?.key ?? `${recordsId}-${index}`, source, action, status: "saving", missing: null,
           requestId: answered?.requestId ?? crypto.randomUUID(), observedAt: answered?.observedAt ?? observedAt };
       });
       setThread((prev) => [
@@ -161,19 +214,23 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
       for (const entry of entries) {
         await runEntry(recordsId, ctx, entry.key, entry.action, assertCurrent, { requestId: entry.requestId!, observedAt: entry.observedAt! });
       }
+      if (!result.dropped) appendWorkflow(entries.map(entry => entry.key));
+      else setThread(prev => [...prev, { id: nextId(), kind: "notice", text: "일부 기록의 과목·문항을 확인하지 못했습니다. 후속 일정·코칭은 실행하지 않았습니다." }]);
     } catch (error) {
       try { assertCurrent(); } catch { return; }
       say(error instanceof Error ? error.message : "대화를 기록하지 못했어요.");
     }
   }
 
-  function answerConsent(itemId: string, text: string, value: "granted" | "declined") {
+  function answerConsent(itemId: string, text: string, value: "granted" | "declined", attachments: AgentRequest["attachments"] = [], resume?: (check: () => void) => Promise<void>) {
+    if (serviceAgentEnabled) setAgentConsent(value === "granted");
     setChatConsent(value);
     setThread((prev) => prev.filter((item) => item.id !== itemId));
     if (value === "granted") {
+      if (resume) { void requests.current.enqueue(resume).catch(() => {}); return; }
       const history = threadRef.current.flatMap((item) => item.kind === "assistant" && item.text ? [{ role: "assistant" as const, text: item.text }] : []).slice(-3);
       const observedAt = new Date().toISOString();
-      void requests.current.enqueue(check => record(text, history, check, observedAt)).catch(() => {});
+      void requests.current.enqueue(check => record(text, history, check, observedAt, attachments)).catch(() => {});
     }
   }
 
@@ -266,6 +323,11 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
         if (item.kind === "notice") {
           return <p key={item.id} className="text-sm text-muted-foreground">{item.text}</p>;
         }
+        if (item.kind === "workflow") {
+          const entries = thread.flatMap(row => row.kind === "records" ? row.entries : []);
+          return <ServiceWorkflowCard key={item.id} plan={item.plan} owner={item.owner} text={item.text}
+            recordsReady={item.prerequisiteKeys.every(key => entries.some(entry => entry.key === key && entry.status === "saved"))} assertActive={item.assertActive} />;
+        }
         if (item.kind === "assistant") {
           return item.pending
             ? <Loader2 key={item.id} className="h-4 w-4 animate-spin text-muted-foreground" aria-label="답변 준비 중" />
@@ -274,10 +336,10 @@ export function ChatHome({ greeting, widgets }: { greeting: string; widgets?: Re
         if (item.kind === "consent") {
           return (
             <div key={item.id} className="space-y-2 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-              <p>대화 내용을 AI(OpenAI)로 보내 과목·진도·이해도를 찾아 저장해요. 대화 원문은 서버에 남기지 않아요.</p>
+              <p>{serviceAgentEnabled ? "요청과 필요한 개인 학습·일정 정보를 OpenAI에 보내 비서 작업과 코칭을 연결합니다. 명확한 학습 관측은 기록하고, 일정과 계획은 확인 후 반영합니다. 일회성 요청 원문은 개인화 DB에 저장하지 않습니다." : "대화 내용을 AI(OpenAI)로 보내 과목·진도·이해도를 찾아 저장해요. 대화 원문은 서버에 남기지 않아요."}</p>
               <div className="flex gap-2">
-                <button type="button" onClick={() => answerConsent(item.id, item.text, "granted")} className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">동의하고 기록</button>
-                <button type="button" onClick={() => answerConsent(item.id, item.text, "declined")} className="rounded-md border bg-white px-3 py-1 text-xs">기록하지 않기</button>
+                <button type="button" onClick={() => answerConsent(item.id, item.text, "granted", item.attachments, item.resume)} className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">{serviceAgentEnabled ? "동의하고 계속" : "동의하고 기록"}</button>
+                <button type="button" onClick={() => answerConsent(item.id, item.text, "declined")} className="rounded-md border bg-white px-3 py-1 text-xs">{serviceAgentEnabled ? "취소" : "기록하지 않기"}</button>
               </div>
             </div>
           );
