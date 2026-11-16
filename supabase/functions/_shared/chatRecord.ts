@@ -2,6 +2,10 @@
 // 사용자의 말에서 주제별 학습 상태·이해도, 수업 회차 진도·난이도·빠르기, 문제은행 문항 이해도를 뽑는다.
 import { BANK_STAGE_LABELS, SELF_RATING_LABELS } from "./learningScales.ts";
 
+import { DOC_TYPES } from "./fileClassify.ts";
+
+type DocType = typeof DOC_TYPES[number];
+
 export const ACTION_KINDS = ["topic", "session", "problem"] as const;
 export const STATUSES = ["not_started", "in_progress", "needs_review", "understood"] as const;
 export const LEVELS = ["상", "중", "하"] as const;
@@ -16,8 +20,14 @@ export type Level = typeof LEVELS[number];
 
 export interface ChatCourse { id: string; name: string; code: string | null; days: string }
 export interface ChatProblemFile { file: string; label: string; problems: string[] }
+/** 채팅에 올려 분류만 끝나고 저장을 기다리는 파일 */
+export interface PendingFile { ref: string; file_name: string; doc_type: DocType; course_id: string | null; new_course_name: string | null }
+
 export interface ChatRequest {
+  /** message: 학생의 메시지 / files_ready: 파일 분류가 끝나 학생에게 결과를 알리고 확인을 구할 때(메시지 없음) */
+  event: "message" | "files_ready";
   message: string;
+  pending_files: PendingFile[];
   history: { role: "user" | "assistant"; text: string }[];
   today: string;
   courses: ChatCourse[];
@@ -45,7 +55,10 @@ export interface ChatAction {
 }
 
 /** dropped: 모델이 냈지만 검사에서 버린 기록 수 (모르는 문항 등). 답이 "기록할게요"인데 아무것도 없을 때 안내에 쓴다. */
-export interface ChatResult { reply: string; actions: ChatAction[]; dropped: number }
+/** 저장 대기 파일에 대한 처리: save(이대로 저장) / set(종류·과목만 고침) / discard(저장하지 않음) */
+export interface FileAction { ref: string; op: "save" | "set" | "discard"; doc_type: DocType | null; course_id: string | null }
+
+export interface ChatResult { reply: string; actions: ChatAction[]; dropped: number; file_actions: FileAction[] }
 
 export class InputError extends Error {}
 
@@ -60,8 +73,9 @@ function validDate(value: unknown): string | null {
 
 export function parseChatRequest(body: Record<string, unknown>): ChatRequest {
   if (body.consent !== true) throw new InputError("대화 내용을 AI로 해석하는 데 동의해 주세요.");
+  const event = body.event === "files_ready" ? "files_ready" : "message";
   const message = str(body.message, MAX_MESSAGE).trim();
-  if (!message) throw new InputError("보낼 내용이 없습니다.");
+  if (!message && event === "message") throw new InputError("보낼 내용이 없습니다.");
   const today = validDate(body.today);
   if (!today) throw new InputError("오늘 날짜를 확인해 주세요.");
   const history = (Array.isArray(body.history) ? body.history : []).slice(-MAX_HISTORY).flatMap((item) => {
@@ -94,7 +108,16 @@ export function parseChatRequest(body: Record<string, unknown>): ChatRequest {
     });
     return [{ course_id: id, files }];
   });
-  return { message, history, today, courses, topics, problems };
+  const pending_files = (Array.isArray(body.pending_files) ? body.pending_files : []).slice(0, 20).flatMap((item): PendingFile[] => {
+    const f = (item ?? {}) as Record<string, unknown>;
+    const ref = str(f.ref, 20);
+    if (!/^f\d{1,2}$/.test(ref)) return [];
+    const docType = DOC_TYPES.includes(f.doc_type as DocType) ? f.doc_type as DocType : "other";
+    const courseId = typeof f.course_id === "string" && known.has(f.course_id) ? f.course_id : null;
+    return [{ ref, file_name: str(f.file_name, 200), doc_type: docType, course_id: courseId, new_course_name: str(f.new_course_name, 100) || null }];
+  });
+  if (event === "files_ready" && !pending_files.length) throw new InputError("확인할 파일이 없습니다.");
+  return { event, message, pending_files, history, today, courses, topics, problems };
 }
 
 const nullable = (type: string) => ({ type: [type, "null"] });
@@ -102,9 +125,21 @@ const nullableEnum = (values: readonly string[]) => ({ type: ["string", "null"],
 
 export const chatSchema = {
   type: "object", additionalProperties: false,
-  required: ["reply", "actions"],
+  required: ["reply", "actions", "file_actions"],
   properties: {
     reply: { type: "string" },
+    file_actions: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false, required: ["ref", "op", "doc_type", "course_id"],
+        properties: {
+          ref: { type: "string" },
+          op: { type: "string", enum: ["save", "set", "discard"] },
+          doc_type: nullableEnum(DOC_TYPES),
+          course_id: nullable("string"),
+        },
+      },
+    },
     actions: {
       type: "array",
       items: {
@@ -144,6 +179,10 @@ export const CHAT_INSTRUCTIONS = [
   "Assistant turns starting with '확인 중:' are questions the app is still waiting on (with the pending record). If the current message answers one (e.g. a course name or '어제'), output that pending record completed with the answer. Never output a session date later than today.",
   "A message can produce several actions (e.g. one difficult topic plus the class pace). quote: the student's own words that support the action (max 200 chars).",
   "reply: one or two short, warm Korean sentences acknowledging what you will record (e.g. '극한 부분이 어려웠군요. 복습이 필요하다고 기록할게요.'). If the course or date is missing, ask for it briefly instead (e.g. '어느 과목 수업이었어요?'). Do not explain concepts or solve problems; if asked, say that this chat currently only records learning status.",
+  "Uploaded files: when 'Files waiting for the student's confirmation' are listed, they were classified (type and course) but NOT saved yet. Nothing is saved until the student agrees.",
+  "- event files_ready (no student message): in your own words, briefly tell the student how each file was classified (type and course; a syllabus may create a new course) and ask whether to save it like that or what to change. Output no file_actions and no actions.",
+  "- event message: decide from the student's message and the conversation what they want for the waiting files. If they clearly agree, output op save for the files they agreed to (all waiting files when they agree in general). If they correct a file (type or course), output op set with the corrected doc_type/course_id (null for an unchanged field), and also op save for that file only if they also asked to save. If they do not want a file, output op discard. If the intent is unclear, ask in the reply and output no file_actions. Refer to files by ref; course_id must be one of the listed course ids.",
+  "- The reply must state what will happen to the files (saved, changed, or left out), in natural Korean you write yourself.",
 ].join("\n");
 
 export function chatModelInput(request: ChatRequest) {
@@ -159,7 +198,8 @@ export function chatModelInput(request: ChatRequest) {
     `Existing topics per course:\n${topics || "(none)"}`,
     `Problem bank files per course:\n${problems || "(none)"}`,
     `Recent conversation:\n${history || "(none)"}`,
-    `--- current student message ---\n${request.message}`,
+    `Files waiting for the student's confirmation (ref, file, type, course):\n${request.pending_files.map((f) => `${f.ref}\t${f.file_name}\t${f.doc_type}\t${f.course_id ?? (f.new_course_name ? `new course: ${f.new_course_name}` : "none")}`).join("\n") || "(none)"}`,
+    request.event === "files_ready" ? "--- event: files_ready (file classification just finished; there is no student message) ---" : `--- current student message ---\n${request.message}`,
   ].join("\n\n");
   return [{ role: "user", content: [{ type: "input_text", text }] }];
 }
@@ -210,5 +250,17 @@ export function parseChatOutput(raw: unknown, request: ChatRequest): ChatResult 
     return [{ ...base, problem_file: file?.file ?? null, problem_labels: labels, problem_level: level }];
   });
   const total = Array.isArray(value.actions) ? Math.min(value.actions.length, MAX_ACTIONS) : 0;
-  return { reply, actions, dropped: total - actions.length };
+  const refs = new Set(request.pending_files.map((f) => f.ref));
+  const courseIds2 = new Set(request.courses.map((course) => course.id));
+  const file_actions = request.event === "files_ready" ? [] : (Array.isArray(value.file_actions) ? value.file_actions : []).slice(0, 40).flatMap((item): FileAction[] => {
+    const f = (item ?? {}) as Record<string, unknown>;
+    const ref = typeof f.ref === "string" && refs.has(f.ref) ? f.ref : null;
+    const op = f.op === "save" || f.op === "set" || f.op === "discard" ? f.op : null;
+    if (!ref || !op) return [];
+    const docType = DOC_TYPES.includes(f.doc_type as DocType) ? f.doc_type as DocType : null;
+    const courseId = typeof f.course_id === "string" && courseIds2.has(f.course_id) ? f.course_id : null;
+    if (op === "set" && !docType && !courseId) return [];
+    return [{ ref, op, doc_type: docType, course_id: courseId }];
+  });
+  return { reply, actions: request.event === "files_ready" ? [] : actions, dropped: total - actions.length, file_actions };
 }

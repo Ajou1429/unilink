@@ -15,10 +15,13 @@ export interface IntakeRecord {
   id: string;
   fileName: string;
   source: "upload" | "drive";
-  status: "processing" | "done" | "error";
+  /** review: 분류만 끝나고 사용자가 저장을 확인하기 전 */
+  status: "processing" | "review" | "done" | "error";
   docType?: DocType;
   courseId?: string | null;
   courseName?: string;
+  /** 강의계획서로 새로 만들 과목 이름 (저장 전 확인용) */
+  newCourseName?: string;
   term?: string;
   noteId?: string;
   problemSubjectId?: string;

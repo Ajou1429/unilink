@@ -172,3 +172,31 @@ test("simulation fixes: typed answers replace the matching pending record and te
   assert.equal(sameRecord({ ...empty, kind: "session" }, { ...empty, kind: "session" }), false, "empty sessions do not match");
   assert.equal(pendingNote(pending, "date", "알고리즘"), "확인 중: 언제 수업인가요? — 알고리즘 수업 진도 동적 계획법");
 });
+
+test("files waiting for confirmation: GPT's file actions are re-checked; nothing is saved on the announcement", () => {
+  const files = { ...body, pending_files: [
+    { ref: "f1", file_name: "자료구조 강의계획서.pdf", doc_type: "syllabus", course_id: null, new_course_name: "자료구조및알고리즘이해" },
+    { ref: "f2", file_name: "3장.pdf", doc_type: "lecture", course_id: "math", new_course_name: null },
+    { ref: "bad", file_name: "x.pdf", doc_type: "weird", course_id: "ghost" },
+  ] };
+  const request = parseChatRequest(files);
+  assert.deepEqual(request.pending_files.map((f) => f.ref), ["f1", "f2"]);
+  assert.match(chatModelInput(request)[0].content[0].text, /f1\t자료구조 강의계획서\.pdf\tsyllabus\tnew course: 자료구조및알고리즘이해/);
+  const result = parseChatOutput({ reply: "두 번째는 운영체제로 바꾸고 저장할게요.", actions: [], file_actions: [
+    { ref: "f2", op: "set", doc_type: null, course_id: "os" },
+    { ref: "f2", op: "save", doc_type: null, course_id: null },
+    { ref: "f9", op: "save", doc_type: null, course_id: null },
+    { ref: "f1", op: "set", doc_type: "nonsense", course_id: "ghost" },
+    { ref: "f1", op: "delete_everything", doc_type: null, course_id: null },
+  ] }, request);
+  assert.deepEqual(result.file_actions, [
+    { ref: "f2", op: "set", doc_type: null, course_id: "os" },
+    { ref: "f2", op: "save", doc_type: null, course_id: null },
+  ], "unknown refs, courses, types and ops are dropped");
+
+  const ready = parseChatRequest({ ...files, event: "files_ready", message: "" });
+  assert.match(chatModelInput(ready)[0].content[0].text, /event: files_ready/);
+  const announce = parseChatOutput({ reply: "...", actions: [], file_actions: [{ ref: "f1", op: "save", doc_type: null, course_id: null }] }, ready);
+  assert.deepEqual(announce.file_actions, [], "the announcement never saves");
+  assert.throws(() => parseChatRequest({ ...body, event: "files_ready", message: "", pending_files: [] }), /파일/);
+});

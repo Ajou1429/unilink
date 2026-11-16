@@ -25,20 +25,18 @@ try {
     await page.getByLabel('정렬', { exact: true }).selectOption('name');
     await page.getByLabel('정렬 순서').selectOption('asc');
     assert.equal(await page.getByLabel('정렬 순서').inputValue(), 'asc');
-    await page.getByRole('button', { name: '열기', exact: true }).click();
-    await page.getByText('1 / 2', { exact: true }).waitFor();
-    await page.getByRole('button', { name: '다음 페이지', exact: true }).click();
-    await page.getByText('2 / 2', { exact: true }).waitFor();
-    const canvas = page.locator('canvas').first();
-    await canvas.waitFor();
-    await page.waitForFunction(() => {
-      const canvas = document.querySelector('canvas');
-      if (!canvas?.width) return false;
-      const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
-      let dark = 0;
-      for (let i = 0; i < pixels.length; i += 4) if (pixels[i + 3] && pixels[i] < 100 && pixels[i + 1] < 100 && pixels[i + 2] < 100) dark++;
-      return dark > 100;
+    // 강의자료 이름을 누르면 원본 PDF가 브라우저 새 탭에서 바로 열린다(팝업 보기 창 없음)
+    const [tab] = await Promise.all([
+      context.waitForEvent('page'),
+      page.getByRole('button', { name: 'Course PDF fixture', exact: true }).click(),
+    ]);
+    await tab.waitForURL(/^blob:/);
+    const opened = await tab.evaluate(async () => {
+      const blob = await (await fetch(location.href)).blob();
+      return { type: blob.type, head: new TextDecoder().decode(await blob.slice(0, 5).arrayBuffer()) };
     });
+    assert.deepEqual(opened, { type: 'application/pdf', head: '%PDF-' });
+    await tab.close();
     await page.screenshot({ path: `${output}/${name}.png`, animations: 'disabled' });
     await page.evaluate(() => {
       const key = 'unilink:private:demo:unilink:my-notes';
@@ -46,14 +44,12 @@ try {
       delete notes[0].fileDataUrl;
       sessionStorage.setItem(key, JSON.stringify(notes));
     });
-    // Do not reseed on reload: validate that a missing source is visible, not blank.
-    await page.getByRole('dialog').press('Escape');
+    // Do not reseed on reload: without an original file the title is plain text, not a dead link.
     await page.evaluate(() => window.dispatchEvent(new Event('unilink:myNotesChanged')));
-    await page.getByRole('button', { name: '열기', exact: true }).click();
-    await page.getByRole('alert').filter({ hasText: '원본 파일이 연결되어 있지 않습니다' }).waitFor();
-    await page.getByRole('button', { name: '다시 불러오기', exact: true }).waitFor();
+    await page.getByText('Course PDF fixture', { exact: true }).waitFor();
+    await page.waitForFunction(() => ![...document.querySelectorAll('button')].some((b) => b.textContent === 'Course PDF fixture'));
     assert.deepEqual(errors, []);
     await context.close();
   }
-  console.log('PASS: course PDF opens and renders two pages on desktop/mobile');
+  console.log('PASS: course PDF opens as the original file in a new tab on desktop/mobile');
 } finally { await browser.close(); }
