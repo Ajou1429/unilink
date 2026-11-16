@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { snapToOptions } from "@/lib/time-options";
+
+export { COURSE_TIME_OPTIONS, makeTimeOptions, snapToOptions } from "@/lib/time-options";
 
 export const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
   const hour = Math.floor(index / 2);
@@ -61,9 +64,9 @@ const VISIBLE_ROWS = 6;
 const WHEEL_STEP = 60;
 
 /** 시간 목록. 브라우저 기본 select는 휠 한 칸에 여러 줄이 넘어가서, 휠 한 칸 = 한 줄로 직접 스크롤한다. */
-function TimeList({ value, onPick, onClose }: { value: string; onPick: (time: string) => void; onClose: () => void }) {
+function TimeList({ value, options, onPick, onClose }: { value: string; options: string[]; onPick: (time: string) => void; onClose: () => void }) {
   const listRef = useRef<HTMLDivElement>(null);
-  const selectedIndex = Math.max(0, TIME_OPTIONS.indexOf(value));
+  const selectedIndex = Math.max(0, options.indexOf(value));
   const [active, setActive] = useState(selectedIndex);
 
   useEffect(() => {
@@ -93,7 +96,7 @@ function TimeList({ value, onPick, onClose }: { value: string; onPick: (time: st
   }, [selectedIndex]);
 
   function move(next: number) {
-    const index = Math.min(TIME_OPTIONS.length - 1, Math.max(0, next));
+    const index = Math.min(options.length - 1, Math.max(0, next));
     setActive(index);
     const list = listRef.current;
     if (!list) return;
@@ -111,13 +114,13 @@ function TimeList({ value, onPick, onClose }: { value: string; onPick: (time: st
       onKeyDown={(event) => {
         if (event.key === "ArrowDown") { event.preventDefault(); move(active + 1); }
         else if (event.key === "ArrowUp") { event.preventDefault(); move(active - 1); }
-        else if (event.key === "Enter") { event.preventDefault(); onPick(TIME_OPTIONS[active]); }
+        else if (event.key === "Enter") { event.preventDefault(); onPick(options[active]); }
         else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
       }}
       className="absolute right-0 top-full z-50 mt-1 w-28 overflow-y-auto overscroll-contain rounded-md border bg-popover py-1 shadow-md outline-none"
       style={{ maxHeight: ROW_HEIGHT * VISIBLE_ROWS + 8 }}
     >
-      {TIME_OPTIONS.map((time, index) => (
+      {options.map((time, index) => (
         <button
           key={time}
           type="button"
@@ -141,9 +144,12 @@ function TimeList({ value, onPick, onClose }: { value: string; onPick: (time: st
 export function TimeField({
   value,
   onChange,
+  options = TIME_OPTIONS,
 }: {
   value: string;
   onChange: (value: string) => void;
+  /** 고를 수 있는 시간. 기본은 하루 전체 30분 단위 */
+  options?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -165,7 +171,10 @@ export function TimeField({
         inputMode="numeric"
         className="min-w-0 flex-1 rounded-r-none"
         onChange={(event) => onChange(event.target.value)}
-        onBlur={() => onChange(normalizeTimeInput(value, "09:00"))}
+        onBlur={() => {
+          const normalized = normalizeTimeInput(value, options[0] ?? "09:00");
+          onChange(options === TIME_OPTIONS ? normalized : snapToOptions(normalized, options));
+        }}
       />
       <button
         type="button"
@@ -180,6 +189,7 @@ export function TimeField({
       {open && (
         <TimeList
           value={value}
+          options={options}
           onClose={() => setOpen(false)}
           onPick={(time) => {
             onChange(time);

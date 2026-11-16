@@ -1,5 +1,6 @@
 import { buildMetadataSummary, type listPdfFilesInFolderTree } from "./google.ts";
 import type { getAdminClient } from "./supabaseAdmin.ts";
+import { isDismissedDriveFile } from "./driveDismissed.ts";
 
 type DriveFile = Awaited<ReturnType<typeof listPdfFilesInFolderTree>>[number];
 
@@ -32,6 +33,8 @@ export async function saveDriveNote(admin: ReturnType<typeof getAdminClient>, us
       content: existing?.file_path ? existing.content : buildMetadataSummary(file, !existing), version: (existing?.version ?? 0) + 1,
     };
     if (!existing) {
+      // 사용자가 UniLink에서 지운 Drive 파일은 다시 가져오지 않는다(Drive 원본은 그대로)
+      if (await isDismissedDriveFile(admin, userId, file.id)) return false;
       const { error } = await admin.from("notes").insert({ ...values, user_id: userId,
         drive_file_id: file.id, course_name: "미분류", linked_type: "unassigned", tags: ["GoodNotes"] });
       if (error?.code === "23505") continue;

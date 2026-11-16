@@ -200,7 +200,7 @@ function SidebarBody({ onNavigate }: { onNavigate: () => void }) {
           onClick={() => { window.dispatchEvent(new Event(NEW_CHAT_EVENT)); onNavigate(); }}
           className="flex items-center gap-2.5 rounded-lg bg-accent/80 px-3 py-2 text-sm font-medium hover:bg-accent"
         >
-          <Plus className="h-4 w-4" /> 새 채팅
+          <Plus className="h-4 w-4" /> 채팅하기
         </Link>
         <div className="mt-2 space-y-0.5">
           {navItems.map(({ href, icon: Icon, label }) => (
