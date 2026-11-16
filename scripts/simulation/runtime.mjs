@@ -154,7 +154,7 @@ function memoryStorage() {
 }
 
 export function moduleLoader(globals = {}, intercept = () => undefined) {
-  const context = vm.createContext({ console, Date, Map, Set, Event, CustomEvent, crypto, TextEncoder, TextDecoder,
+  const context = vm.createContext({ console, Date, Map, Set, Event, CustomEvent, crypto, structuredClone, setTimeout, clearTimeout, process:{env:{}}, TextEncoder, TextDecoder,
     URL, URLSearchParams, Request, Response, Headers, File, Blob, FormData, AbortSignal, Uint8Array, atob, btoa, ...globals });
   const cache = new Map();
   function load(filename) {

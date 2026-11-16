@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
+import { PlanCompletionDetails } from "@/components/coaching/PlanCompletionDetails";
+import { readPlanCompletionCriteria } from "@/lib/study-completion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -220,7 +222,7 @@ export default function StudyPage() {
       const planIds = (planResult.data ?? []).map((plan) => plan.id);
       if (!planIds.length) { setAiPlans([]); setAiPlanError(""); return; }
       const [itemResult, preferenceResult] = await Promise.all([
-        db.from("study_plan_items").select("id,goal_id,title,planned_minutes,scheduled_start,status,reason,created_at")
+        db.from("study_plan_items").select("id,goal_id,title,planned_minutes,scheduled_start,status,reason,created_at,completion_criteria")
           .eq("user_id", user.id).in("plan_id", planIds).neq("status", "cancelled").order("scheduled_start").limit(500),
         db.from("user_preferences").select("timezone").eq("user_id", user.id).maybeSingle(),
       ]);
@@ -239,6 +241,7 @@ export default function StudyPage() {
         courseName: goalNames.get(item.goal_id) ?? "AI 학습 목표", week: THIS_WEEK,
         weekStart: item.scheduled_start ? formatDateKey(getSundayWeekStart(new Date(formatInTimezone(item.scheduled_start, timezone)))) : undefined,
         title: item.title,
+        completionCriteria: readPlanCompletionCriteria(item.completion_criteria),
         description: `${item.scheduled_start ? `${formatInTimezone(item.scheduled_start, timezone, true)} · ` : ""}${item.planned_minutes}분${item.reason ? ` · ${item.reason}` : ""}`,
         dueDate: item.scheduled_start ? formatInTimezone(item.scheduled_start, timezone) : "",
         isCompleted: item.status === "completed", createdAt: item.created_at,
@@ -831,6 +834,7 @@ export default function StudyPage() {
                               {plan.description}
                             </p>
                           )}
+                          <PlanCompletionDetails criteria={plan.completionCriteria} />
                           <div className="mt-3 flex flex-wrap items-center gap-2">
                             <Badge variant="secondary">{plan.courseName}</Badge>
                             {plan.id.startsWith("ai:") && <Badge>AI 계획</Badge>}

@@ -101,9 +101,16 @@ function mirrorToMonthly(plan: StudyPlan) {
 }
 
 /** 학습 계획 하나를 추가한다. 과목을 고르지 않으면 개인 학습으로 묶인다. 월간 보기에도 함께 반영한다. */
-export function addWeeklyStudyPlan(input: { title: string; dueDate: string; courseId?: string; courseName?: string; description?: string }) {
+export function addWeeklyStudyPlan(input: { id?: string; title: string; dueDate: string; courseId?: string; courseName?: string; description?: string }) {
+  if(input.id) {
+    const existing=getWeeklyStudyPlans().find(plan=>plan.id===input.id);
+    if(existing) {
+      if(existing.title!==input.title.trim() || existing.dueDate!==input.dueDate || existing.courseId!==(input.courseId||"self") || existing.description!==(input.description?.trim()??"")) throw new Error("계획이 변경됐습니다. 새로 확인해 주세요.");
+      return existing;
+    }
+  }
   const plan: StudyPlan = {
-    id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `plan-${Date.now()}`,
+    id: input.id ?? (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `plan-${Date.now()}`),
     userId: "me",
     courseId: input.courseId || "self",
     courseName: input.courseId ? input.courseName ?? "" : "개인 학습",

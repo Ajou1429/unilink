@@ -33,6 +33,7 @@ type Usage = { model: string; attempt_count: number; pricing_version: string; to
   total_tokens: number; estimated_cost_usd: number | null;
 } };
 type Result = { schema_version: number; prompt_version?: string; proposal: Proposal; persisted: boolean; proposal_run_id?: string; proposal_persisted?: boolean; usage?: Usage };
+export type ChatCoachingResult = Result;
 
 const intents = [
   ["weekly_plan", "이번 주 계획"], ["daily_plan", "오늘 계획"], ["exam_prep", "시험 대비"],
@@ -82,7 +83,7 @@ function itemStartMinutes(item: Item): number {
   return hour * 60 + minute;
 }
 
-function ProposalTimetable({ items, goals }: { items: Item[]; goals: Goal[] }) {
+export function ProposalTimetable({ items, goals }: { items: Item[]; goals: Goal[] }) {
   const sorted = [...items].sort((a, b) =>
     `${a.planned_date} ${a.start_time}`.localeCompare(`${b.planned_date} ${b.start_time}`),
   );
@@ -134,7 +135,7 @@ function formatUsd(value: number): string {
 }
 
 export function CoachingRequestPanel({ initialRequest, assertActive }: {
-  initialRequest?: CoachingSeed & { requestNote: string };
+  initialRequest?: CoachingSeed & { requestNote: string; startHour?: number; endHour?: number };
   assertActive?: () => void;
 } = {}) {
   const [open, setOpen] = useState(false);
@@ -143,7 +144,11 @@ export function CoachingRequestPanel({ initialRequest, assertActive }: {
   const [selected, setSelected] = useState<string[]>(initialRequest?.goal_ids ?? []);
   const [intent, setIntent] = useState<(typeof intents)[number][0]>(initialRequest?.intent ?? "weekly_plan");
   const [dailyMinutes, setDailyMinutes] = useState(initialRequest ? initialRequest.daily_minutes ?? 0 : 120);
-  const [preferredHours, setPreferredHours] = useState<Record<string, number[]>>({});
+  const [preferredHours, setPreferredHours] = useState<Record<string, number[]>>(() => {
+    const start = initialRequest?.startHour, end = initialRequest?.endHour;
+    if (start === undefined || end === undefined || start < 0 || end > 24 || start >= end) return {};
+    return Object.fromEntries(planDates(initialRequest!.intent).map(date => [date, Array.from({ length: end - start }, (_, i) => start + i)]));
+  });
   const [requestNote, setRequestNote] = useState(initialRequest?.requestNote ?? "");
   const [reviewOtherGoals, setReviewOtherGoals] = useState(false);
   const [useRelatedLearning, setUseRelatedLearning] = useState(false);

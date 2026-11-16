@@ -50,6 +50,13 @@ export interface Timetable {
   courses: Course[];
 }
 
+export interface PlanCompletionCriteria {
+  schema_version: 1;
+  task_scope: string;
+  observable_check: string;
+  evidence_ids: string[];
+}
+
 export interface StudyPlan {
   id: string;
   userId: string;
@@ -64,6 +71,7 @@ export interface StudyPlan {
   createdAt: string;
   /** 다음날로 미룬 횟수 */
   postponedCount?: number;
+  completionCriteria?: PlanCompletionCriteria | null;
 }
 
 export interface LectureNote {

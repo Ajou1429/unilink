@@ -29,6 +29,7 @@ import {
   type PersonalStudy,
 } from "@/lib/personal-study-storage";
 import { AUTH_CHANGED_EVENT, getCurrentUser, logout, type CurrentUser } from "@/lib/auth-storage";
+import { ChatHistoryList } from "@/components/home/ChatHistoryList";
 import { useSidebar } from "./SidebarContext";
 
 /** 홈(대시보드)에서 새 채팅을 시작하라는 신호 */
@@ -202,6 +203,7 @@ function SidebarBody({ onNavigate }: { onNavigate: () => void }) {
         >
           <Plus className="h-4 w-4" /> 채팅하기
         </Link>
+        <ChatHistoryList onNavigate={onNavigate} />
         <div className="mt-2 space-y-0.5">
           {navItems.map(({ href, icon: Icon, label }) => (
             <Link

@@ -33,13 +33,15 @@ export async function requestCourseKnowledge(goalId: string, asOf: string, optio
 
 // Each call advances one persisted step. Closing/refreshing cannot erase completed work.
 export async function prepareCourseKnowledge(goalIds: string[], asOf: string, userId: string, consent: boolean, researchConsent: boolean,
-  onStatus: (status: KnowledgeStatus) => void, retry = false) {
+  onStatus: (status: KnowledgeStatus) => void, retry = false, assertActive: () => void = () => {}) {
   if (!courseKnowledgeEnabled) return;
   for (const goalId of goalIds) {
     const started = Date.now();
     while (Date.now() - started < 20 * 60_000) {
+      assertActive();
       if (getStorageUser() !== userId) throw new Error("계정이 변경됐습니다. 다시 요청해 주세요.");
       const status = await requestCourseKnowledge(goalId, asOf, { consent, research_consent: researchConsent, retry });
+      assertActive();
       if (getStorageUser() !== userId) throw new Error("계정이 변경됐습니다. 다시 요청해 주세요.");
       if (status.status === "working") { await new Promise((resolve) => setTimeout(resolve, 3000)); continue; }
       if (status.status === "disabled") throw new Error("서버의 과목 지식 분석 설정이 필요합니다.");

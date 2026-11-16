@@ -13,6 +13,8 @@ import { getStorageUser } from "@/lib/private-storage";
 import { flushP0Changes } from "@/lib/p0-sync";
 import { addWeeklyStudyPlan, postponeWeeklyStudyPlan } from "@/lib/study-storage";
 import type { Course, StudyPlan } from "@/lib/types";
+import { readPlanCompletionCriteria } from "@/lib/study-completion";
+import { PlanCompletionDetails } from "@/components/coaching/PlanCompletionDetails";
 
 type PlanItem = {
   id: string;
@@ -21,6 +23,7 @@ type PlanItem = {
   scheduled_end: string | null;
   planned_minutes: number;
   metadata: Record<string, unknown> | null;
+  completion_criteria: unknown;
 };
 
 type Row = {
@@ -28,6 +31,7 @@ type Row = {
   title: string;
   label: string;
   postponed: number;
+  criteria?: StudyPlan["completionCriteria"];
   postpone: () => Promise<void> | void;
 };
 
@@ -113,7 +117,7 @@ export function TodayPlans({ date: today, plans, courses }: { date: string; plan
       const start = new Date(`${date}T00:00:00+09:00`);
       const end = new Date(start.getTime() + DAY_MS);
       const result = await db.from("study_plan_items")
-        .select("id,title,scheduled_start,scheduled_end,planned_minutes,metadata,study_plans!inner(source_type,status)")
+        .select("id,title,scheduled_start,scheduled_end,planned_minutes,metadata,completion_criteria,study_plans!inner(source_type,status)")
         .eq("user_id", user.id).eq("study_plans.source_type", "ai")
         .in("study_plans.status", ["approved", "active", "completed"])
         .in("status", ["planned", "in_progress"])
@@ -156,6 +160,7 @@ export function TodayPlans({ date: today, plans, courses }: { date: string; plan
       title: item.title,
       label: `${item.scheduled_start ? time(item.scheduled_start) + " · " : ""}${item.planned_minutes}분`,
       postponed: postponeCountOf(item.metadata),
+      criteria: readPlanCompletionCriteria(item.completion_criteria),
       postpone: () => postponeAiItem(item),
     })),
     ...plans.filter((plan) => !plan.isCompleted && plan.dueDate.slice(0, 10) === date)
@@ -164,6 +169,7 @@ export function TodayPlans({ date: today, plans, courses }: { date: string; plan
         title: plan.title,
         label: plan.courseName,
         postponed: plan.postponedCount ?? 0,
+        criteria: plan.completionCriteria,
         postpone: () => { postponeWeeklyStudyPlan(plan.id, plans); },
       })),
   ];
@@ -195,13 +201,16 @@ export function TodayPlans({ date: today, plans, courses }: { date: string; plan
     </CardHeader>
     <CardContent className="min-h-0 flex-1 overflow-y-auto space-y-3">
       {rows.map((row) => <div key={row.id} className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3">
-        <Link href="/study" className="min-w-0 flex-1 hover:underline">
+        <div className="min-w-0 flex-1">
+        <Link href="/study" className="block hover:underline">
           <p className="break-words text-sm font-medium">{row.title}</p>
           <p className="mt-1 text-xs text-muted-foreground">
             {row.label}
             {row.postponed > 0 && <span className="ml-1.5 font-medium text-amber-600">{row.postponed}회 미룸</span>}
           </p>
         </Link>
+        <PlanCompletionDetails criteria={row.criteria} />
+        </div>
         <Button
           variant="ghost"
           size="sm"

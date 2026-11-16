@@ -48,7 +48,13 @@ export async function handleProblemAnalyze(req: Request): Promise<Response> {
       .flatMap((o: { content: { type: string; text: string }[] }) => o.content ?? [])
       .filter((c: { type: string }) => c.type === "output_text").map((c: { text: string }) => c.text).join("");
     const result = parseAnalyzeOutput(JSON.parse(text));
-    return jsonResponse({ result, usage: { input_tokens: data.usage?.input_tokens ?? 0, output_tokens: data.usage?.output_tokens ?? 0 } });
+    return jsonResponse({ result, usage: {
+      model: data.model ?? model,
+      input_tokens: data.usage?.input_tokens ?? 0,
+      cached_input_tokens: data.usage?.input_tokens_details?.cached_tokens ?? 0,
+      output_tokens: data.usage?.output_tokens ?? 0,
+      reasoning_tokens: data.usage?.output_tokens_details?.reasoning_tokens ?? 0,
+    } });
   } catch (error) {
     console.error("problem-analyze failed", { type: error instanceof Error ? error.name : "unknown" });
     const status = error instanceof RequestError ? error.status : 500;

@@ -108,21 +108,28 @@ export function useFileIntake() {
           assertActive(); item.resolve(record);
         } catch (error) { item.reject(error instanceof Error ? error : new Error("파일 처리에 실패했습니다.")); }
       }
-    } catch {
-      for (const item of queue.current.splice(0)) item.reject(new Error("파일 처리가 중단되었습니다."));
     } finally {
       busy.current = false;
     }
   }, [context, upsert]);
 
   /** 파일을 분류 대기열에 넣는다. onRecord로 만들어지는 결과 id를 받을 수 있다. */
-  const add = useCallback((files: File[], onRecord?: (id: string) => void, assertActive?: () => void) => {
+  const addAndWait = useCallback((files: File[], onRecord?: (id: string) => void, assertActive?: () => void) => {
     const result = Promise.all(files.map(file => new Promise<IntakeRecord>((resolve, reject) => {
       queue.current.push({ file, onRecord, resolve, reject, assertActive });
     })));
     void drain();
     return result;
   }, [drain]);
+
+  const add = useCallback((files: File[], onRecord?: (id: string) => void) => {
+    void addAndWait(files,onRecord).catch(()=>{});
+  },[addAndWait]);
+
+  const cancel = useCallback(()=>{
+    lifecycle.current.version++;
+    queue.current.splice(0).forEach(item=>item.reject(new Error("이전 대화의 파일 처리가 중단되었습니다.")));
+  },[]);
 
   const change = useCallback(async (record: IntakeRecord, patch: { courseId?: string | null; docType?: DocType }) => {
     upsert({ ...record, status: "processing" });
@@ -148,5 +155,5 @@ export function useFileIntake() {
     setDriveUploadState(value);
   }, []);
 
-  return { records, courses, consent, setConsent, signedIn, driveConnected, driveUpload, setDriveUpload, add, change, remove };
+  return { records, courses, consent, setConsent, signedIn, driveConnected, driveUpload, setDriveUpload, add, addAndWait, cancel, change, remove };
 }

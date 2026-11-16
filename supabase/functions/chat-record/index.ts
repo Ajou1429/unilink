@@ -6,6 +6,8 @@ import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.
 import { readLimitedBody, RequestError } from "../_shared/requestLimits.ts";
 import { loadCoachingSettings } from "../_shared/coachingSettings.ts";
 import { CHAT_INSTRUCTIONS, chatModelInput, chatSchema, InputError, parseChatOutput, parseChatRequest } from "../_shared/chatRecord.ts";
+import { ASSISTANT_INSTRUCTIONS, assistantModelInput, assistantSchema, commandAssistantSchema, parseAssistantOutput, parseAssistantRequest, type AssistantRequest } from "../_shared/chatAssistant.ts";
+import { COMMAND_INSTRUCTIONS } from "../_shared/chatCommands.ts";
 
 const MAX_REQUEST_BYTES = 256 * 1024;
 
@@ -18,7 +20,14 @@ export async function handleChatRecord(req: Request): Promise<Response> {
     if (!user) throw new RequestError("로그인이 필요합니다.", 401);
     const raw = new TextDecoder().decode(await readLimitedBody(req, MAX_REQUEST_BYTES, AbortSignal.timeout(15000)));
     let request;
-    try { request = parseChatRequest(JSON.parse(raw)); }
+    let assistant = false;
+    let protocol: 1 | 2 = 1;
+    try {
+      const body = JSON.parse(raw);
+      assistant = body.assistant_protocol === 1 || body.assistant_protocol === 2;
+      protocol = body.assistant_protocol === 2 ? 2 : 1;
+      request = assistant ? parseAssistantRequest(body) : parseChatRequest(body);
+    }
     catch (error) { throw new RequestError(error instanceof InputError ? error.message : "요청 형식을 확인해 주세요."); }
 
     const db = getAdminClient();
@@ -26,17 +35,18 @@ export async function handleChatRecord(req: Request): Promise<Response> {
     const model = Deno.env.get("CHAT_RECORD_MODEL") ?? settings.analysis_model ?? Deno.env.get("COACHING_MODEL");
     if (!model || !Deno.env.get("OPENAI_API_KEY")) throw new RequestError("AI 설정이 필요합니다.", 503);
     const reserved = await db.rpc("reserve_file_classification", { p_user: user.id, p_mode: "chat" });
-    if (reserved.error || reserved.data !== true) throw new RequestError("오늘 대화 기록 한도에 도달했습니다. 내일 다시 시도해 주세요.", 429);
+    if (reserved.error) throw new RequestError("대화 기록 한도를 확인하지 못했습니다. 서버 DB 적용 상태를 확인해 주세요.", 503);
+    if (reserved.data !== true) throw new RequestError("오늘 대화 기록 한도에 도달했습니다. 내일 다시 시도해 주세요.", 429);
 
     const signal = AbortSignal.timeout(45000);
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST", signal,
       headers: { Authorization: `Bearer ${Deno.env.get("OPENAI_API_KEY")}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model, store: false, max_output_tokens: 1200,
-        instructions: CHAT_INSTRUCTIONS,
-        input: chatModelInput(request),
-        text: { format: { type: "json_schema", name: "chat_learning_records", strict: true, schema: chatSchema } },
+        model, store: false, max_output_tokens: assistant ? 3500 : 1200,
+        instructions: assistant ? ASSISTANT_INSTRUCTIONS + (protocol===2?"\n"+COMMAND_INSTRUCTIONS:"") : CHAT_INSTRUCTIONS,
+        input: assistant ? assistantModelInput(request as AssistantRequest) : chatModelInput(request),
+        text: { format: { type: "json_schema", name: "chat_learning_records", strict: true, schema: assistant ? protocol===2?commandAssistantSchema:assistantSchema : chatSchema } },
       }),
     });
     if (!response.ok) throw new RequestError("AI 요청을 처리하지 못했습니다.", 502);
@@ -45,7 +55,7 @@ export async function handleChatRecord(req: Request): Promise<Response> {
     const text = data.output?.filter((o: { type: string }) => o.type === "message")
       .flatMap((o: { content: { type: string; text: string }[] }) => o.content ?? [])
       .filter((c: { type: string }) => c.type === "output_text").map((c: { text: string }) => c.text).join("");
-    const result = parseChatOutput(JSON.parse(text), request);
+    const result = assistant ? parseAssistantOutput(JSON.parse(text), request as AssistantRequest,protocol) : parseChatOutput(JSON.parse(text), request);
     return jsonResponse({ result, usage: { input_tokens: data.usage?.input_tokens ?? 0, output_tokens: data.usage?.output_tokens ?? 0 } });
   } catch (error) {
     console.error("chat-record failed", { type: error instanceof Error ? error.name : "unknown" });

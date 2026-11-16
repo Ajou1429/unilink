@@ -58,7 +58,7 @@
 
 ## 서버·DB
 
-- 마이그레이션 `0038_dismissed_drive_files.sql`: UniLink에서 지운 Drive 파일 목록(`user_id`, `drive_file_id`)을 저장하는 표입니다. 본인 행만 읽고 쓸 수 있습니다.
+- 마이그레이션 `0040_dismissed_drive_files.sql`: UniLink에서 지운 Drive 파일 목록(`user_id`, `drive_file_id`)을 저장하는 표입니다. 본인 행만 읽고 쓸 수 있습니다.
 - `supabase/functions/_shared/driveNotes.ts`
   - 새 Drive 파일을 노트로 넣기 전에 이 목록을 확인합니다(`driveDismissed.ts`).
   - 0038 적용 전에는 표가 없어도 동작합니다(지운 파일 없음으로 봄).

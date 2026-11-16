@@ -111,7 +111,8 @@ export function ChatComposer({
           autoFocus={autoFocus}
           value={text}
           aria-label="메시지 입력"
-          placeholder="오늘 수업이나 어려웠던 부분을 말해 주세요"
+          placeholder="궁금한 공부 내용이나 하고 싶은 일을 말해 주세요. 노트도 첨부할 수 있어요."
+          maxLength={4000}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {

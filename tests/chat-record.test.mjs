@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
+import { moduleLoader, root } from "../scripts/simulation/runtime.mjs";
 import {
   chatModelInput, chatSchema, parseChatOutput, parseChatRequest,
 } from "../supabase/functions/_shared/chatRecord.ts";
@@ -22,6 +24,41 @@ const body = {
     { file: "final::연습.pdf", label: "기말고사 범위 · 연습.pdf", problems: ["5", "6"] },
   ] }],
 };
+
+test("chat endpoint distinguishes missing quota DB from exhaustion and returns interpreted results", async () => {
+  let reservation = { data: null, error: { code: "PGRST202" } };
+  let modelCalls = 0;
+  const admin = { rpc: async (name, args) => {
+    assert.equal(name, "reserve_file_classification");
+    assert.equal(args.p_mode, "chat");
+    return reservation;
+  } };
+  const loader = moduleLoader({
+    Deno: { env: { get: (key) => key === "OPENAI_API_KEY" ? "mock-test-key" : undefined } },
+    console: { ...console, error() {} },
+    fetch: async () => {
+      modelCalls++;
+      return Response.json({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({ reply: "확인했어요.", actions: [] }) }] }], usage: { input_tokens: 10, output_tokens: 5 } });
+    },
+  }, (name) => {
+    if (name.endsWith("supabaseAdmin.ts")) return { getUserFromAuthHeader: async () => ({ id: "test-user" }), getAdminClient: () => admin };
+    if (name.endsWith("coachingSettings.ts")) return { loadCoachingSettings: async () => ({ analysis_model: "mock-model" }) };
+  });
+  const { handleChatRecord } = loader(path.join(root, "supabase/functions/chat-record/index.ts"));
+  const send = () => handleChatRecord(new Request("https://example.test/chat-record", { method: "POST", body: JSON.stringify(body) }));
+  let response = await send();
+  assert.equal(response.status, 503);
+  assert.match((await response.json()).error, /DB 적용 상태/);
+  reservation = { data: false, error: null };
+  response = await send();
+  assert.equal(response.status, 429);
+  assert.equal(modelCalls, 0);
+  reservation = { data: true, error: null };
+  response = await send();
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).result.reply, "확인했어요.");
+  assert.equal(modelCalls, 1);
+});
 
 const empty = {
   kind: "topic", course_id: null, date: null, topic: null, status: null, rating: null, progress_title: null,

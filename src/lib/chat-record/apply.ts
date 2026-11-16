@@ -4,6 +4,7 @@
 // - 문제은행: 문항 이해도(0~5)
 import { getSupabaseBrowserClient } from "../supabase-client";
 import { captureStorageScope, getStorageUser, privateStorage } from "../private-storage";
+import { describeFunctionError } from "../supabase/function-error";
 import { flushP0Changes } from "../p0-sync";
 import { getActiveTermCourses } from "../course-storage";
 import { EXAM_PERIODS, listProblems, listSubjects, splitSourceFile } from "../problem-bank-storage";
@@ -114,17 +115,8 @@ export async function interpretMessage(context: ChatContext, message: string, hi
     },
   });
   assertCurrent();
-  if (error || !data?.result) {
-    let text = "대화를 해석하지 못했습니다.";
-    try {
-      const response = (error as { context?: Response } | null)?.context;
-      const body = response ? await response.json() : null;
-      if (typeof body?.error === "string") text = body.error;
-    } catch {
-      // 기본 문구
-    }
-    throw new Error(text);
-  }
+  if (error) throw new Error(await describeFunctionError(error, "대화 기록 서버 요청을 처리하지 못했습니다."));
+  if (!data?.result) throw new Error("대화 기록 서버의 응답 형식을 확인하지 못했습니다. 다시 시도해 주세요.");
   return data.result;
 }
 

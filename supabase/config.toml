@@ -53,3 +53,12 @@ verify_jwt = true
 
 [functions.course-knowledge]
 verify_jwt = true
+
+[functions.chat-record]
+verify_jwt = true
+
+[functions.problem-analyze]
+verify_jwt = true
+
+[functions.file-classify]
+verify_jwt = true
