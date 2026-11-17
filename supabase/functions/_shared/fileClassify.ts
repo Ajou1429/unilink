@@ -83,6 +83,7 @@ export function instructionsFor(mode: ClassifyMode) {
   if (mode === "classify") {
     return `${common} Classify the document with minimal effort: decide its type and which of the student's courses it belongs to. ` +
       "Types: syllabus (course plan with grading/schedule), lecture (slides or lecture material), notes (student's own handwritten or typed notes), " +
+      "Recognize Korean university syllabus forms even without the literal word syllabus: course identity, instructor, objectives, grading and weekly plan together take precedence over example/problem words inside the form. A lecture containing occasional worked examples is lecture, not problem_set. Never choose a course just because a related concept overlaps; use course identity, otherwise null. " +
       "problem_set (numbered exercises/problems, past exams, problem bank), assignment (homework instructions without a list of numbered problems), other. " +
       "Set course_id only to one of the given course ids when the content clearly matches that course; otherwise null. " +
       "course_name/course_code: the course name/code written in the file if any (keep original language), else null.";

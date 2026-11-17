@@ -105,6 +105,7 @@ export function analyzeInstructions(mode: AnalyzeMode) {
   return [
     ...common,
     "This file is lecture slides/notes. Find only questions or exercises the student is asked to solve (예제, 문제, 연습, Quiz, Exercise, Example questions, Q.). For worked examples include only the question part, not the solution. Ordinary explanations, definitions and theorems are not problems.",
+    "An Example heading is a candidate, not itself a question. Read the following statement, numerical conditions, diagrams and requested quantity. Extract the actual question even when followed by a worked solution; exclude the solution. A continuation page may contain the question without repeating Example. Never invent missing conditions or a question from a heading alone.",
     "label: the printed number if any (else \"\"); parts: printed sub-question markers, else empty.",
     "has_problems: false when the page has no such question.",
   ].join("\n");

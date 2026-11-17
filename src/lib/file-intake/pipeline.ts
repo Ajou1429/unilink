@@ -36,13 +36,11 @@ const makeId = () => `intake-${Date.now()}-${Math.random().toString(16).slice(2,
 const titleOf = (fileName: string) => fileName.replace(/\.[^.]+$/, "").slice(0, 200) || fileName;
 const typeTags = (tags: string[]) => tags.filter((tag) => !DOC_TYPES.some((type) => DOC_TYPE_LABELS[type] === tag));
 
-/** 분류에 쓸 과목 목록: 이번 학기(방학 중엔 직전 학기) 과목을 앞에, 같은 이름은 하나만 */
+/** 자동 분류는 현재 학기 범위만 사용한다. 과거 자료는 사용자 재분류로 지정한다. */
 function matchableCourses(): Course[] {
   const active = getActiveTermCourses().courses;
-  const all = getAllStoredCourses();
   const seen = new Set<string>();
-  const activeIds = new Set(active.map((course) => course.id));
-  return [...active, ...all.filter((course) => !activeIds.has(course.id))].filter((course) => {
+  return active.filter((course) => {
     const key = course.name.replace(/\s+/g, "").toLowerCase();
     if (seen.has(key)) return false;
     seen.add(key);
@@ -134,7 +132,10 @@ async function subjectFor(course: Course, assertCurrent: () => void) {
 async function addToProblemBank(file: File, course: Course, record: IntakeRecord, docType: "problem_set" | "lecture", assertCurrent: () => void) {
   const useAi = getProblemConsent() === "granted" && await problemAiAvailable();
   assertCurrent();
-  if (docType === "lecture" && !useAi) return;
+  if (docType === "lecture" && !useAi) {
+    record.message = "강의자료는 저장했지만 예제 문항은 아직 추출하지 않았어요. 문제은행의 AI 분석 동의와 로그인을 확인한 뒤 분석해 주세요.";
+    return;
+  }
   try {
     const mode = docType === "lecture" ? "lecture" : "problems";
     const result = await analyzeProblemPdf(file, { mode, useAi });
@@ -151,8 +152,7 @@ async function addToProblemBank(file: File, course: Course, record: IntakeRecord
     else if (docType === "problem_set" && !useAi && getProblemConsent() === null) record.message = "문제은행 탭에서 AI 분석에 동의하면 문제 내용과 수식도 정리돼요.";
   } catch (error) {
     assertCurrent();
-    // 강의노트에 문제가 없으면 조용히 넘어간다
-    if (docType === "problem_set") record.message = `${error instanceof Error ? error.message : "문항 번호를 찾지 못했어요."} 문제은행에서 직접 입력해 주세요.`;
+    record.message = `${error instanceof Error ? error.message : "문항을 추출하지 못했어요."} 원본 노트는 보존됩니다. 문제은행에서 다시 분석하거나 직접 입력해 주세요.`;
   }
 }
 

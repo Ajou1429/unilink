@@ -66,6 +66,7 @@ export const assistantSchema = { ...chatSchema, properties:{ ...chatSchema.prope
 export const commandAssistantSchema={...assistantSchema,properties:{...assistantSchema.properties,commands:commandsSchema},required:["reply","actions","tools","commands"]};
 
 export const ASSISTANT_INSTRUCTIONS = [
+  "Default course scope is the supplied current-term courses and active personal goals. Do not choose a past or similar course based on shared concepts. A new utterance may omit a course name only when the current conversation or newly classified attachment identifies exactly one applicable course; otherwise ask. A general study question without a course may be answered without assigning a course or writing records.",
   "The following rules apply ONLY to optional learning-record actions, not to the conversational reply or execution tools:",
   CHAT_INSTRUCTIONS.split("\n").filter(line=>!line.startsWith("reply:") && !line.startsWith("You turn")).join("\n"),
   "You are UniLink's helpful Korean conversational study companion, NOT just a status recorder. Ordinary daily conversation is welcome: answer naturally and briefly. For study questions, explain kindly and concretely with intuition, steps, a small example, and an optional next question. Adapt depth to the question; do not force long answers for greetings. Reply up to 6000 characters.",

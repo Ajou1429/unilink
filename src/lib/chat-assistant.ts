@@ -26,7 +26,7 @@ export async function converse(context: ChatContext, message: string, history: {
   const attached=new Set([...files.map(f=>f.noteId),pendingCommand?.note_id]);
   const notes=[...allNotes.filter(n=>attached.has(n.id)),...allNotes.filter(n=>!attached.has(n.id))].slice(0,40);
   const courseFor=(note:MyNote)=>context.courses.find(c=>c.id===note.linkedId || c.name===note.courseName)?.id??null;
-  const [aiPlans,states,goals]=await Promise.all([
+  const [aiPlans,states,goals,assignments]=await Promise.all([
     db.from("study_plan_items").select("id,goal_id,title,scheduled_start,planned_minutes,status,study_plans!inner(source_type,status)")
       .eq("user_id",context.userId!).eq("study_plans.source_type","ai").in("study_plans.status",["approved","active","completed"])
       .in("status",["planned","in_progress","completed"]).gte("scheduled_start",`${today}T00:00:00+09:00`).order("scheduled_start").limit(8),
@@ -34,12 +34,16 @@ export async function converse(context: ChatContext, message: string, history: {
       .eq("user_id",context.userId!).in("goal_id",[...context.goals.values()]).order("observed_at",{ascending:false}).limit(12)
       : Promise.resolve({data:[],error:null}),
     db.from("learning_goals").select("id,title,goal_type").eq("user_id",context.userId).eq("status","active").limit(30),
+    context.goals.size ? db.from("calendar_events").select("id,goal_id,title,due_at,status,event_type,updated_at")
+      .eq("user_id",context.userId).in("goal_id",[...context.goals.values()]).in("event_type",["assignment","project"])
+      .eq("status","scheduled").order("due_at",{ascending:false}).limit(40) : Promise.resolve({data:[],error:null}),
   ]);
   current();
   const plans=getWeeklyStudyPlans().filter(p=>!p.isCompleted).slice(0,15);
   const overview=JSON.stringify({source:"본인 시간표·일정·수동 계획, 승인된 AI 계획 일부와 최근 자기보고 이해도. 전체 이력이나 PDF 본문은 포함하지 않음. unavailable은 조회 실패이며 기록 없음이 아님",
     approved_ai_plans:aiPlans.error?{unavailable:true}:aiPlans.data,
-    active_goals:goals.error?{unavailable:true}:goals.data,
+    active_goals:goals.error?{unavailable:true}:goals.data?.filter(goal=>goal.goal_type==="personal"||[...context.goals.values()].includes(goal.id)),
+    assignment_events:assignments.error?{unavailable:true}:assignments.data,
     reported_understanding:states.error?{unavailable:true}:states.data?.map(s=>({...s,topic:[...context.topics.values()].flat().find(t=>t.id===s.topic_id)?.title??"주제명 미확인"})),
     courses:context.courses.map(c=>({name:c.name,days:c.days,start:c.startTime,end:c.endTime})),
     upcoming_events:getMonthlyEvents().filter(e=>e.date>=today).slice(0,15).map(e=>({title:e.title,date:e.date,start:e.startTime,end:e.endTime})),

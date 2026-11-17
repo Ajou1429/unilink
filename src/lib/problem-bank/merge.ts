@@ -113,11 +113,14 @@ export function mergeLecture(pages: PageResult[]): AnalyzedProblem[] {
 const LECTURE_HINT = /(문제|예제|연습|퀴즈|quiz|exercise|example|problem|question|\bQ\s*\d|\bQ\.)/i;
 export function lectureCandidatePages(pageTexts: string[], minChars: number, limit: number) {
   const out: number[] = [];
+  const continuations = new Set<number>();
   pageTexts.forEach((text, index) => {
     const chars = text.replace(/\s/g, "").length;
     if (chars < minChars || LECTURE_HINT.test(text)) out.push(index + 1);
+    if (LECTURE_HINT.test(text) && index + 1 < pageTexts.length) continuations.add(index + 2);
   });
-  return out.slice(0, limit);
+  // Keep marked pages ahead of continuation-only pages under the existing cost cap.
+  return [...out, ...[...continuations].filter(page => !out.includes(page))].slice(0, limit).sort((a, b) => a - b);
 }
 
 /** 크롭 영역을 조금 넓히고 페이지 안으로 자른다 */

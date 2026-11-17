@@ -41,8 +41,20 @@ const LECTURE = /lecture|chapter|강의|\bch\.?\s*\d|week\s*\d|\d+\s*주차|slid
 
 /** 텍스트·파일명으로 자료 종류를 추정한다. confident면 AI 없이 확정한다. */
 export function guessDocType(text: string, fileName: string): { type: DocType | null; confident: boolean } {
-  const head = `${fileName}\n${text.slice(0, 3000)}`;
+  text = text.normalize("NFKC");
+  fileName = fileName.normalize("NFKC");
+  const head = `${fileName}\n${text.slice(0, 12000)}`;
   if (SYLLABUS.test(head)) return { type: "syllabus", confident: SYLLABUS_DETAIL.test(text) || SYLLABUS.test(fileName) };
+  const structure = [
+    /교과목\s*(명|코드)|학수\s*번호|course\s*(title|code)/i,
+    /담당\s*교수|교수\s*정보|instructor/i,
+    /평가\s*(방법|비율|기준)|성적\s*(평가|반영)|grading/i,
+    /주차\s*별|주별\s*(계획|내용)|weekly\s*(schedule|plan)/i,
+    /학습\s*목표|수업\s*목표|course\s*objectives/i,
+  ].filter(pattern => pattern.test(head)).length;
+  if (structure >= 3) return { type: "syllabus", confident: true };
+  if (/(lecture|slides?|강의\s*(자료|노트)|chapter)/i.test(fileName) && !/(문제집|문제은행|기출|homework|exercise|\bhw\b)/i.test(fileName)
+    && text.replace(/\s/g, "").length >= 300) return { type: "lecture", confident: true };
   const labels = text.trim() ? extractLabels(text.split(/\n/)) : [];
   if (PROBLEM.test(head) && labels.length >= 3) return { type: "problem_set", confident: true };
   if (ASSIGNMENT.test(fileName) && !labels.length) return { type: "assignment", confident: false };

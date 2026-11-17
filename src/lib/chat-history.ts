@@ -14,7 +14,7 @@ export interface HistoryItem {
   draft?: CommandDraft;
   recordDraft?: RecordDraft;
 }
-export interface ConversationSummary { id: string; title: string; updated_at: string }
+export interface ConversationSummary { id: string; title: string; updated_at: string; pinned?: boolean; custom_title?: string | null }
 export interface Conversation extends ConversationSummary { items: HistoryItem[]; revision: number }
 const validId=(id:string)=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
@@ -32,9 +32,24 @@ function connection() {
 }
 export async function listConversations(limit=3):Promise<{items:ConversationSummary[];more:boolean}> {
   const {userId,check,db}=connection();
-  const {data,error}=await db.from("chat_conversations").select("id,title,updated_at").eq("user_id",userId).order("updated_at",{ascending:false}).order("id",{ascending:false}).limit(limit+1);
+  let {data,error}=await db.from("chat_conversations").select("id,title,updated_at,custom_title,pinned").eq("user_id",userId).order("pinned",{ascending:false}).order("updated_at",{ascending:false}).order("id",{ascending:false}).limit(limit+1);
+  if(error&&["42703","PGRST204"].includes(error.code)) {
+    const legacy=await db.from("chat_conversations").select("id,title,updated_at").eq("user_id",userId).order("updated_at",{ascending:false}).order("id",{ascending:false}).limit(limit+1);
+    data=legacy.data as typeof data;error=legacy.error;
+  }
   check();if(error)throw new Error("대화 목록을 불러오지 못했어요. 다시 시도해 주세요.");
-  return {items:(data??[]).slice(0,limit),more:(data??[]).length>limit};
+  return {items:(data??[]).slice(0,limit).map(row=>({...row,title:row.custom_title??row.title})),more:(data??[]).length>limit};
+}
+export async function manageConversation(id:string,change:{title:string}|{pinned:boolean}|{remove:true}) {
+  if(!validId(id))throw new Error("올바르지 않은 대화예요.");
+  const {userId,check,db}=connection();
+  const title="title" in change?change.title.trim():null;
+  if(title!==null&&(!title||title.length>80))throw new Error("이름은 1자에서 80자까지 입력해 주세요.");
+  const query="remove" in change?db.from("chat_conversations").delete():db.from("chat_conversations").update(title!==null?{custom_title:title}:{pinned:(change as {pinned:boolean}).pinned});
+  const {data,error}=await query.eq("user_id",userId).eq("id",id).select("id");check();
+  if(error)throw new Error("대화 관리에 실패했어요. 연결과 DB 0043 적용 상태를 확인해 주세요.");
+  if(!data?.length)throw new Error("대화가 이미 삭제되었거나 접근할 수 없어요.");
+  window.dispatchEvent(new Event(CHAT_HISTORY_CHANGED));
 }
 export async function loadConversation(id:string):Promise<Conversation> {
   if(!validId(id))throw new Error("올바르지 않은 대화 주소예요.");

@@ -692,7 +692,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
       {historyError&&<p role="alert" className="py-3 text-sm text-destructive">{historyError} 목록에서 다시 선택하거나 새 채팅을 시작해 주세요.</p>}
       {saveError&&<div role="alert" className="py-3 text-sm text-destructive">{saveError}<button type="button" className="ml-2 underline" onClick={()=>void writer.current?.flush()}>저장 재시도</button></div>}
       {!historyLoading&&!historyError&&(chatting ? (
-        <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">{conversation}</div>
+        <div className="min-w-0 lg:min-h-24 lg:flex-1 lg:overflow-y-auto">{conversation}</div>
       ) : (
         <section className="mx-auto flex w-full max-w-2xl flex-col justify-center py-10 lg:min-h-0 lg:flex-1 lg:py-4">
           <h2 className="mb-6 flex items-center justify-center gap-3 text-center text-3xl font-semibold tracking-tight sm:text-[34px]" suppressHydrationWarning>
@@ -727,9 +727,9 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
         <div
           inert={!showWidgets}
           className={cn(
-            "overflow-hidden transition-[flex-basis,opacity] duration-300 ease-out lg:min-h-0 lg:flex-none",
+            "overflow-y-auto transition-[flex-basis,opacity] duration-300 ease-out lg:min-h-0 lg:shrink",
             showWidgets ? "pb-6 opacity-100" : "max-lg:hidden opacity-0 lg:pointer-events-none",
-            !chatting ? "lg:basis-[52%]" : showWidgets ? "lg:basis-[40%]" : "lg:basis-0",
+            !chatting ? "lg:basis-[52%]" : showWidgets ? "lg:max-h-[30%] lg:basis-[30%]" : "lg:basis-0",
           )}
         >
           {widgets}

@@ -18,11 +18,17 @@ test('chat history stores owned conversations, paginates summaries, rejects cros
   const first=await history.listConversations();assert.equal(first.items.length,3);assert.equal(first.more,true);assert.equal('items' in first.items[0],false);
   const all=await history.listConversations(6);assert.equal(all.items.length,5);assert.equal(all.more,false);
   const loaded=await history.loadConversation(id(1));assert.deepEqual(JSON.parse(JSON.stringify(loaded.items)),items);assert.equal(loaded.revision,1);
+  await history.manageConversation(id(1),{title:'내 시험 준비'});
+  await history.manageConversation(id(1),{pinned:true});
+  assert.equal((await history.listConversations()).items[0].title,'내 시험 준비');
+  assert.equal((await history.listConversations()).items[0].pinned,true);
+  assert.deepEqual((await b.from('chat_conversations').update({custom_title:'다른 계정'}).eq('id',id(1)).select('id')).data,[]);
   assert.deepEqual((await b.from('chat_conversations').select('*')).data,[]);
   assert.ok((await save(b,1,1)).error);assert.ok((await save(b,1,0)).error);
   assert.ok((await save(anon,6)).error);assert.ok((await anon.from('chat_conversations').select('*')).error);
   assert.ok((await a.from('chat_conversations').update({items:[]}).eq('id',id(1))).error);
   assert.equal((await save(a,1,1)).data,2);assert.equal((await save(a,1,1)).error.code,'40001');
+  assert.equal((await history.listConversations()).items[0].title,'내 시험 준비','automatic saves preserve explicit titles');
   const results=await Promise.all([save(a,1,2),save(a,1,2)]);assert.equal(results.filter(r=>r.data===3).length,1);assert.equal(results.filter(r=>r.error?.code==='40001').length,1);
   for(const body of [[],{},[{id:'long',kind:'user',text:'x'.repeat(2100000)}]])assert.ok((await save(a,7,0,body)).error);
   assert.ok((await b.from('chat_conversations').delete().eq('id',id(1))).error===null);

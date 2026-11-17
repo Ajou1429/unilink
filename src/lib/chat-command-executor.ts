@@ -88,6 +88,15 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
     return ready(c,uid,[`${c.title} · ${c.term}`,`${c.credits}학점 · ${c.grade}`,"현재 서비스의 성적 기록은 이 브라우저에 저장돼요."],{},"write",id);
   }
   const db=await session(uid,check);
+  if(c.kind==="complete_task") {
+    if(!c.target_id)return question(c,"제출하거나 완료한 과제 제목과 과목을 알려주세요.");
+    const item=resultData(await db.from("calendar_events").select("id,title,goal_id,event_type,status,updated_at").eq("user_id",uid).eq("id",c.target_id).single());check();
+    if(!item||!["assignment","project"].includes(item.event_type)||!item.goal_id||![...ctx.goals.values()].includes(item.goal_id))throw new Error("현재 수업의 과제를 확인하지 못했어요. 과목과 과제를 다시 알려주세요.");
+    if(course&&ctx.goals.get(course.id)!==item.goal_id)throw new Error("과제의 과목과 요청한 과목이 달라요.");
+    if(item.status!=="scheduled")throw new Error("이미 완료되었거나 취소된 과제예요.");
+    c.title=item.title;
+    return ready(c,uid,[item.title,"이 과제를 제출·완료로 표시합니다. 이해도와 실제 공부시간은 변경하지 않습니다."],{expected:item.updated_at},"write",id);
+  }
   if(c.kind==="analyze_pdf"||c.kind==="classify_note") {
     const pdfs=notes.filter(n=>n.fileName?.toLowerCase().endsWith(".pdf"));
     const recent=pdfs.filter(n=>recentNoteIds.includes(n.id));
@@ -294,6 +303,13 @@ export async function executePreparedCommand(p:PreparedCommand,check:()=>void):P
       const currentRows=resultData(await db.from("problem_bank_problems").select("id,level").eq("user_id",p.userId).in("id",changes.map(x=>x.id)))??[];current();
       if(currentRows.length===changes.length&&currentRows.every(x=>x.level===c.level))return {message:`확인한 문항은 이미 요청한 수행 단계 ${c.level}/5로 기록되어 있어요.`};
       resultData(await db.rpc("set_chat_problem_levels",{p_changes:changes}));current();return {message:`확인한 문항 수행 단계를 ${c.level}/5로 저장했어요.`};
+    }
+    if(c.kind==="complete_task") {
+      const saved=resultData(await db.from("calendar_events").update({status:"completed"}).eq("user_id",p.userId).eq("id",c.target_id!).eq("updated_at",p.payload.expected).eq("status","scheduled").in("event_type",["assignment","project"]).select("id"));current();
+      if(!saved?.length)throw new Error("과제가 이미 변경됐어요. 현재 상태를 확인하고 다시 요청해 주세요.");
+      window.dispatchEvent(new Event("unilink:courseEventsChanged"));
+      window.dispatchEvent(new Event("unilink:timetableChanged"));
+      return {message:"과제를 제출·완료로 표시했어요. 이해도 점수는 변경하지 않았어요."};
     }
     if(c.kind==="complete_plan") {
       if(p.payload.localPlan) {

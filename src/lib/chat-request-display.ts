@@ -5,7 +5,7 @@ export interface RequestDisplay { title: string; content: string[]; dates: strin
 const labels: Record<ChatCommand["kind"], string> = {
   add_event:"일정", add_task:"과제 마감", add_goal:"학습 목표", add_course:"수업 등록", add_plan:"학습 계획",
   generate_plan:"계획 추천", analyze_pdf:"자료 분석", classify_note:"노트 분류", set_problem_level:"문제 학습 기록",
-  complete_plan:"계획 완료", postpone_plan:"계획 일정 변경", sync_drive:"Drive 동기화", add_grade:"성적 등록",
+  complete_plan:"계획 완료", complete_task:"과제 완료", postpone_plan:"계획 일정 변경", sync_drive:"Drive 동기화", add_grade:"성적 등록",
 };
 const unique = (lines: string[]) => [...new Set(lines.map(s=>s.normalize("NFC").trim()).filter(Boolean))];
 const noun = (value?: string | null) => conciseChatTitle(value);
