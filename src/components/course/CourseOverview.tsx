@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
 import { ProblemDetail } from "@/components/problem-bank/ProblemDetail";
+import { COURSE_EVENTS_CHANGED_EVENT } from "@/lib/course-events";
 import { MY_NOTES_CHANGED_EVENT } from "@/lib/my-notes-storage";
 import { compareLabels, understandingPercent } from "@/lib/problem-bank-labels";
 import { splitSourceFile, type ProblemBankProblem } from "@/lib/problem-bank-storage";
@@ -112,7 +113,7 @@ function ProblemFile({ name, problems, onDelete }: { name: string; problems: Pro
   );
 }
 
-/** 과목 화면 본문: 중간·기말 탭 + 강의자료 | 문제 | 계획 (보기 전용, 삭제만 가능) */
+/** 강의자료 전체 목록과 시험 범위별 문제·계획. */
 export function CourseOverview({ courseId }: { courseId: string }) {
   const [period, setPeriod] = useState<ExamPeriod>("midterm");
   const [materials, setMaterials] = useState<Material[] | null>(null);
@@ -141,13 +142,13 @@ export function CourseOverview({ courseId }: { courseId: string }) {
   useEffect(() => {
     const timeout = window.setTimeout(() => void load(), 0);
     const reload = () => void load();
-    const events = [COURSE_DATA_CHANGED_EVENT, PERIODS_CHANGED_EVENT, MY_NOTES_CHANGED_EVENT, "unilink:studyPlansChanged"];
+    const events = [COURSE_EVENTS_CHANGED_EVENT, COURSE_DATA_CHANGED_EVENT, PERIODS_CHANGED_EVENT, MY_NOTES_CHANGED_EVENT, "unilink:studyPlansChanged"];
     events.forEach((event) => window.addEventListener(event, reload));
     return () => { window.clearTimeout(timeout); events.forEach((event) => window.removeEventListener(event, reload)); };
   }, [load]);
 
   const inPeriod = useCallback((key: string, date: string) => resolvePeriod(key, date, midterm, overrides) === period, [midterm, overrides, period]);
-  const shownMaterials = useMemo(() => sortMaterials((materials ?? []).filter((m) => inPeriod(m.key, m.date)), sort, direction), [materials, inPeriod, sort, direction]);
+  const shownMaterials = useMemo(() => sortMaterials(materials ?? [], sort, direction), [materials, sort, direction]);
   const shownPlans = useMemo(() => plans.filter((p) => inPeriod(p.key, p.date)), [plans, inPeriod]);
   const files = useMemo(() => {
     const groups = new Map<string, ProblemBankProblem[]>();
@@ -158,13 +159,11 @@ export function CourseOverview({ courseId }: { courseId: string }) {
     return [...groups];
   }, [problems, period]);
   const counts = useMemo(() => ({
-    midterm: (materials ?? []).filter((m) => resolvePeriod(m.key, m.date, midterm, overrides) === "midterm").length
-      + problems.problems.filter((p) => splitSourceFile(p.sourceFile).period === "midterm").length
+    midterm: problems.problems.filter((p) => splitSourceFile(p.sourceFile).period === "midterm").length
       + plans.filter((p) => resolvePeriod(p.key, p.date, midterm, overrides) === "midterm").length,
-    final: (materials ?? []).filter((m) => resolvePeriod(m.key, m.date, midterm, overrides) === "final").length
-      + problems.problems.filter((p) => splitSourceFile(p.sourceFile).period === "final").length
+    final: problems.problems.filter((p) => splitSourceFile(p.sourceFile).period === "final").length
       + plans.filter((p) => resolvePeriod(p.key, p.date, midterm, overrides) === "final").length,
-  }), [materials, problems, plans, midterm, overrides]);
+  }), [problems, plans, midterm, overrides]);
 
   async function askMaterial(material: Material) {
     const linked = await linkedProblemFiles(courseId, material).catch(() => []);
@@ -198,16 +197,6 @@ export function CourseOverview({ courseId }: { courseId: string }) {
 
   return (
     <div className="space-y-4">
-      <div role="tablist" aria-label="시험 범위" className="inline-flex rounded-xl border bg-white p-1">
-        {(["midterm", "final"] as ExamPeriod[]).map((value) => (
-          <button key={value} type="button" role="tab" aria-selected={period === value} onClick={() => setPeriod(value)}
-            className={cn("rounded-lg px-4 py-1.5 text-sm font-medium transition-colors",
-              period === value ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>
-            {PERIOD_LABELS[value]}<span className="ml-1.5 text-xs opacity-60">{counts[value]}</span>
-          </button>
-        ))}
-      </div>
-
       {error && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
 
       {materials === null ? (
@@ -227,38 +216,51 @@ export function CourseOverview({ courseId }: { courseId: string }) {
             ) : <Empty text="등록된 강의자료가 없어요" />}
           </Column>
 
-          <Column icon={<BookMarked className="h-4 w-4" />} title="문제" count={files.reduce((n, [, list]) => n + list.length, 0)}>
-            {files.length ? (
-              <ul>{files.map(([file, list]) => (
-                <ProblemFile key={file} name={splitSourceFile(file).name} problems={list} onDelete={() => setPending({
-                  title: `「${splitSourceFile(file).name}」의 문제 ${list.length}개를 삭제할까요?`,
-                  detail: "문제은행과 이해도 기록에서도 지워져요.",
-                  run: () => deleteProblemFile(problems.subjectId!, file, problems.problems),
-                })} />
-              ))}</ul>
-            ) : <Empty text="등록된 문제가 없어요" />}
-          </Column>
+          <div className="flex min-h-0 flex-col gap-3 lg:col-span-2">
+            <div role="tablist" aria-label="문제·계획 시험 범위" className="inline-flex rounded-xl border bg-white p-1">
+              {(["midterm", "final"] as ExamPeriod[]).map((value) => (
+                <button key={value} type="button" role="tab" aria-selected={period === value} onClick={() => setPeriod(value)}
+                  className={cn("rounded-lg px-4 py-1.5 text-sm font-medium transition-colors",
+                    period === value ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>
+                  {PERIOD_LABELS[value]}<span className="ml-1.5 text-xs opacity-60">{counts[value]}</span>
+                </button>
+              ))}
+            </div>
+            <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
+              <Column icon={<BookMarked className="h-4 w-4" />} title="문제" count={files.reduce((n, [, list]) => n + list.length, 0)}>
+                {files.length ? (
+                  <ul>{files.map(([file, list]) => (
+                    <ProblemFile key={file} name={splitSourceFile(file).name} problems={list} onDelete={() => setPending({
+                      title: `「${splitSourceFile(file).name}」의 문제 ${list.length}개를 삭제할까요?`,
+                      detail: "문제은행과 이해도 기록에서도 지워져요.",
+                      run: () => deleteProblemFile(problems.subjectId!, file, problems.problems),
+                    })} />
+                  ))}</ul>
+                ) : <Empty text="등록된 문제가 없어요" />}
+              </Column>
 
-          <Column icon={<CalendarCheck className="h-4 w-4" />} title="계획" count={shownPlans.length}>
-            {shownPlans.length ? (
-              <ul>{shownPlans.map((plan) => (
-                <li key={plan.key} className="group flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-muted/60">
-                  {plan.done ? <CircleCheck className="h-4 w-4 shrink-0 text-emerald-600" aria-label="완료" /> : <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="미완료" />}
-                  <div className="min-w-0 flex-1">
-                    <p className={cn("truncate text-sm", plan.done && "text-muted-foreground line-through")}>{plan.title}</p>
-                    <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                      {shortDate(plan.date)}{plan.kind === "ai" && <><span>·</span><Sparkles className="h-3 w-3" />AI 코칭</>}
-                    </p>
-                  </div>
-                  <DeleteButton label={plan.title} onClick={() => setPending({
-                    title: `「${plan.title}」 계획을 삭제할까요?`,
-                    detail: plan.kind === "ai" ? "AI 코칭 계획에서 취소돼요." : "학습 계획·월간 계획·시간표 일정에서도 지워져요.",
-                    run: () => deletePlan(plan),
-                  })} />
-                </li>
-              ))}</ul>
-            ) : <Empty text="등록된 계획이 없어요" />}
-          </Column>
+              <Column icon={<CalendarCheck className="h-4 w-4" />} title="계획" count={shownPlans.length}>
+                {shownPlans.length ? (
+                  <ul>{shownPlans.map((plan) => (
+                    <li key={plan.key} className="group flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-muted/60">
+                      {plan.done ? <CircleCheck className="h-4 w-4 shrink-0 text-emerald-600" aria-label="완료" /> : <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="미완료" />}
+                      <div className="min-w-0 flex-1">
+                        <p className={cn("truncate text-sm", plan.done && "text-muted-foreground line-through")}>{plan.title}</p>
+                        <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                          {shortDate(plan.date)}{plan.kind === "ai" && <><span>·</span><Sparkles className="h-3 w-3" />AI 코칭</>}
+                        </p>
+                      </div>
+                      <DeleteButton label={plan.title} onClick={() => setPending({
+                        title: `「${plan.title}」 계획을 삭제할까요?`,
+                        detail: plan.kind === "ai" ? "AI 코칭 계획에서 취소돼요." : "학습 계획·월간 계획·시간표 일정에서도 지워져요.",
+                        run: () => deletePlan(plan),
+                      })} />
+                    </li>
+                  ))}</ul>
+                ) : <Empty text="등록된 계획이 없어요" />}
+              </Column>
+            </div>
+          </div>
         </div>
       )}
 

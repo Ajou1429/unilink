@@ -20,7 +20,7 @@ const TABS = [
   { id: "sessions", label: "수업 진도" },
   { id: "problems", label: "문제 이해도" },
   { id: "plans", label: "계획" },
-  { id: "materials", label: "자료 시험 범위" },
+  { id: "materials", label: "강의자료" },
 ] as const;
 type Tab = typeof TABS[number]["id"];
 
@@ -222,7 +222,6 @@ function Section({ courseId, tab }: { courseId: string; tab: Tab }) {
             <p className="truncate text-sm">{m.title}</p>
             <p className="text-xs text-muted-foreground">{m.label} · {shortDate(m.date)}</p>
           </div>
-          <PeriodSelect label={m.title} value={resolvePeriod(m.key, m.date, data.midterm ?? null, overrides)} onChange={(p) => { setPeriodOverride(m.key, p); reload(); }} />
         </li>
       ))}
     </ul>
@@ -240,7 +239,7 @@ export function CourseSettingsDialog({ courseId, courseName }: { courseId: strin
         <Settings className="h-[18px] w-[18px]" />
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="flex max-h-[85dvh] flex-col gap-0 p-0 sm:max-w-3xl">
+        <DialogContent size="form" className="flex max-h-[85dvh] flex-col gap-0 p-0 sm:max-w-3xl">
           <DialogHeader className="border-b px-5 pb-3 pt-5">
             <DialogTitle>{courseName} 설정</DialogTitle>
           </DialogHeader>

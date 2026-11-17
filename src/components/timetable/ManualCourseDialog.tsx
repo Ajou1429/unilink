@@ -190,7 +190,7 @@ export function ManualCourseDialog(props: {
       <DialogTrigger render={<Button variant="outline" className="gap-2" />}>
         <PencilLine className="h-4 w-4" /> 직접 추가
       </DialogTrigger>
-      <DialogContent className="max-h-[92dvh] max-w-md overflow-y-auto">
+      <DialogContent size="form" className="max-h-[92dvh] max-w-md overflow-y-auto">
         <DialogHeader><DialogTitle>{props.term} 과목 직접 추가</DialogTitle></DialogHeader>
         {open && (
           <ManualCourseForm

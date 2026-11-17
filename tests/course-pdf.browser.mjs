@@ -7,7 +7,7 @@ const { chromium } = require(process.env.AJOU_PLAYWRIGHT_MODULE || 'playwright')
 const pdf = await PDFDocument.create();
 for (const text of ['Course PDF page one', 'Course PDF page two']) pdf.addPage([480, 640]).drawText(text, { x: 35, y: 550, size: 24 });
 const fileDataUrl = 'data:application/pdf;base64,' + Buffer.from(await pdf.save()).toString('base64');
-const browser = await chromium.launch({ channel: 'msedge', headless: true });
+const browser = await chromium.launch({ executablePath: process.env.AJOU_BROWSER_EXECUTABLE || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
 const output = '../.docx-work/course-pdf-browser';
 mkdirSync(output, { recursive: true });
 try {
@@ -20,8 +20,12 @@ try {
       sessionStorage.setItem('unilink:private:demo:unilink:my-notes', JSON.stringify([{ id: 'pdf-test-note', title: 'Course PDF fixture', linkedType: 'course', linkedId: 'pdf-test-course', courseName: 'PDF test course', source: '직접 작성', syncStatus: 'manual', content: '', fileName: 'lecture.pdf', fileDataUrl, version: 1, tags: [], updatedAt: '2026-11-14T00:00:00Z', createdAt: '2026-11-14T00:00:00Z' }]));
     }, { fileDataUrl });
     await page.goto((process.env.AJOU_TEST_URL || 'http://127.0.0.1:3041') + '/course?courseId=pdf-test-course&demo=1');
-    // 과목 화면: 11월 자료는 기말고사 탭의 강의자료 칸에 있다
+    // 강의자료는 등록 월과 시험 범위 탭에 관계없이 표시된다.
+    await page.getByText('Course PDF fixture', { exact: true }).waitFor();
     await page.getByRole('tab', { name: /기말고사/ }).click();
+    await page.getByText('Course PDF fixture', { exact: true }).waitFor();
+    await page.getByRole('tab', { name: /중간고사/ }).click();
+    await page.getByText('Course PDF fixture', { exact: true }).waitFor();
     await page.getByLabel('정렬', { exact: true }).selectOption('name');
     await page.getByLabel('정렬 순서').selectOption('asc');
     assert.equal(await page.getByLabel('정렬 순서').inputValue(), 'asc');

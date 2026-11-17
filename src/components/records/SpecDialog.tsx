@@ -105,7 +105,7 @@ export function SpecDialog({ open, onOpenChange, initial, editing, onSubmit }: {
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92dvh] max-w-md overflow-y-auto">
+      <DialogContent size="form" className="max-h-[92dvh] max-w-md overflow-y-auto">
         <DialogHeader><DialogTitle>{editing ? "스펙 수정" : "스펙 추가"}</DialogTitle></DialogHeader>
         {open && <SpecForm initial={initial} editing={editing} onSubmit={onSubmit} />}
       </DialogContent>

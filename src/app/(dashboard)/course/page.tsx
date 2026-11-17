@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { BookOpen, Clock, MapPin } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { CourseOverview, COURSE_DATA_CHANGED_EVENT } from "@/components/course/CourseOverview";
+import { CourseEvents } from "@/components/course/CourseEvents";
 import { CourseSettingsDialog } from "@/components/course/CourseSettingsDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,8 +17,7 @@ import { COURSES_CHANGED_EVENT, getCourseFiles, getCourseNotes, getStoredCourses
 import { getMyNotes, MY_NOTES_CHANGED_EVENT } from "@/lib/my-notes-storage";
 import { listPlans } from "@/lib/course-overview/data";
 
-// 과목 화면: 위 과목 정보는 그대로, 아래는 중간·기말별 강의자료 | 문제 | 계획(보기 전용, 삭제만).
-// 추가·수정은 홈 채팅에서 하고, 채팅으로 저장된 기록은 오른쪽 위 설정에서 고친다.
+// 수업 자료 전체 목록, 문제·계획과 편집 가능한 과제·시험 일정을 제공한다.
 
 function formatDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -144,6 +144,7 @@ function CourseContent() {
           </CardContent>
         </Card>
 
+        <CourseEvents key={`events-${course.id}`} courseId={course.id} />
         <CourseOverview key={course.id} courseId={course.id} />
       </div>
     </div>

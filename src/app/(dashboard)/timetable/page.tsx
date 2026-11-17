@@ -777,7 +777,7 @@ export default function TimetablePage() {
               >
                 <Plus className="h-4 w-4" />
               </DialogTrigger>
-              <DialogContent className="max-w-sm">
+              <DialogContent size="form" className="max-w-sm">
                 <DialogHeader>
                   <DialogTitle>시간표 추가</DialogTitle>
                 </DialogHeader>
@@ -1743,7 +1743,7 @@ export default function TimetablePage() {
                     <DialogTrigger render={<Button size="sm" variant="outline" className="h-7 gap-1" />}>
                       <Plus className="h-3.5 w-3.5" /> 추가
                     </DialogTrigger>
-                    <DialogContent className="max-w-md">
+                    <DialogContent size="form" className="max-w-md">
                       <DialogHeader>
                         <DialogTitle>개인 학습 추가</DialogTitle>
                       </DialogHeader>

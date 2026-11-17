@@ -609,7 +609,7 @@ export default function StudyPage() {
                     <Plus className="mr-1.5 h-3.5 w-3.5" />
                     목표 추가
                   </DialogTrigger>
-                  <DialogContent className="max-w-md">
+                  <DialogContent size="form" className="max-w-md">
                     <DialogHeader>
                       <DialogTitle>월별 학습 목표 추가</DialogTitle>
                     </DialogHeader>
@@ -717,7 +717,7 @@ export default function StudyPage() {
                   <Plus className="h-3.5 w-3.5" />
                   계획 추가
                 </DialogTrigger>
-                <DialogContent className="max-w-md">
+                <DialogContent size="form" className="max-w-md">
                   <DialogHeader>
                     <DialogTitle>
                       {editingPlanId ? "이번주 학습 계획 수정" : "이번주 학습 계획 추가"}
@@ -924,7 +924,7 @@ export default function StudyPage() {
                         <Plus className="h-3.5 w-3.5" />
                         월별 계획 추가
                       </DialogTrigger>
-                      <DialogContent className="max-w-md">
+                      <DialogContent size="form" className="max-w-md">
                         <DialogHeader>
                           <DialogTitle>
                             {selectedMonthLabel}{" "}
@@ -1170,7 +1170,7 @@ export default function StudyPage() {
                       <Plus className="h-3.5 w-3.5" />
                       노트 추가
                     </DialogTrigger>
-                    <DialogContent className="max-w-2xl">
+                    <DialogContent size="form" className="max-w-2xl">
                       <DialogHeader>
                         <DialogTitle>강의 노트 작성</DialogTitle>
                       </DialogHeader>

@@ -280,7 +280,7 @@ export function ScheduleDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92dvh] max-w-md overflow-y-auto">
+      <DialogContent size="form" className="max-h-[92dvh] max-w-md overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editing ? "일정 수정" : "일정 추가"}</DialogTitle>
         </DialogHeader>

@@ -1028,7 +1028,7 @@ export default function NotesPage() {
                     <Plus className="h-4 w-4" />
                     노트 추가
                   </DialogTrigger>
-                  <DialogContent className="max-w-2xl">
+                  <DialogContent size="form" className="max-w-2xl">
                     <DialogHeader>
                       <DialogTitle>나의 노트 추가</DialogTitle>
                     </DialogHeader>
@@ -1360,7 +1360,7 @@ export default function NotesPage() {
                         </div>
                       )}
                       <Dialog open={folderPickerOpen} onOpenChange={(open) => { if (!driveBusy) setFolderPickerOpen(open); }}>
-                        <DialogContent className="max-h-[82vh] max-w-xl overflow-y-auto">
+                        <DialogContent size="form" className="max-h-[82vh] max-w-xl overflow-y-auto">
                           <DialogHeader>
                             <DialogTitle>Drive 폴더 선택</DialogTitle>
                           </DialogHeader>

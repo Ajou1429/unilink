@@ -66,7 +66,7 @@ function AddEventDialog({ open, onOpenChange, courses }: { open: boolean; onOpen
   const control = "h-8 w-full rounded-lg border bg-white px-2 text-sm";
   return (
     <Dialog open={open} onOpenChange={(value) => !busy && onOpenChange(value)}>
-      <DialogContent className="max-w-sm">
+      <DialogContent size="form" className="max-w-sm">
         <DialogHeader><DialogTitle>시험·과제 추가</DialogTitle></DialogHeader>
         <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
           <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1" role="tablist" aria-label="종류">

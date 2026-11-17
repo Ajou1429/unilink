@@ -67,7 +67,7 @@ function AddPlanDialog({ open, onOpenChange, date, courses }: { open: boolean; o
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent size="form" className="max-w-sm">
         <DialogHeader><DialogTitle>계획 추가</DialogTitle></DialogHeader>
         <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); if (title.trim() && dueDate) submit(); }}>
           <div className="space-y-1.5">

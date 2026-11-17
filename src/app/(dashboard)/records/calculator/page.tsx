@@ -202,7 +202,7 @@ export default function GradeCalculatorPage() {
             <DialogTrigger render={<Button variant="outline" size="icon-sm" className="mt-0.5 shrink-0 rounded-full bg-white" aria-label="학기 추가" title="학기 추가" />}>
               <Plus className="h-4 w-4" />
             </DialogTrigger>
-            <DialogContent className="max-w-xs">
+            <DialogContent size="form" className="max-w-xs">
               <DialogHeader><DialogTitle>학기 추가</DialogTitle></DialogHeader>
               <div className="grid grid-cols-2 gap-2">
                 <select aria-label="학년" className={`${selectClass} h-9 w-full`} value={newTerm.year} onChange={(event) => setNewTerm((prev) => ({ ...prev, year: Number(event.target.value) }))}>
@@ -273,7 +273,7 @@ export default function GradeCalculatorPage() {
                   <DialogTrigger render={<Button variant="outline" size="sm" className="gap-1" />}>
                     <CalendarDays className="h-4 w-4" /> 시간표 불러오기
                   </DialogTrigger>
-                  <DialogContent className="max-w-sm">
+                  <DialogContent size="form" className="max-w-sm">
                     <DialogHeader><DialogTitle>시간표 불러오기</DialogTitle></DialogHeader>
                     <select aria-label="불러올 시간표" className={`${selectClass} h-9 w-full`} value={importTerm} onChange={(event) => setImportTerm(event.target.value)}>
                       {timetableTerms.map((term) => <option key={term} value={term}>{term}</option>)}
