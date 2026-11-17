@@ -1,5 +1,9 @@
 "use client";
 
+import { conversationContext, validateRecordDraftAction } from "@/lib/chat-continuity";
+import { conversationTitle } from "@/lib/chat-title";
+import { archivedRequestDisplay } from "@/lib/chat-request-display";
+
 import { Suspense, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, FileText, Loader2, Sparkles } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -23,7 +27,7 @@ import { createChatQueue } from "@/lib/chat-record/queue";
 import { converse, getAssistantConsent, setAssistantConsent } from "@/lib/chat-assistant";
 import { CHAT_FEATURES, type AssistantTool } from "../../../supabase/functions/_shared/chatAssistant";
 import { ChatFeatureCard } from "./ChatFeatureCard";
-import type { MyNote } from "@/lib/my-notes-storage";
+import { getMyNotes, type MyNote } from "@/lib/my-notes-storage";
 import type { IntakeRecord } from "@/lib/file-intake/settings";
 import { AUTH_CHANGED_EVENT } from "@/lib/auth-storage";
 import { ChatCommandCard, type CommandStatus } from "./ChatCommandCard";
@@ -35,14 +39,14 @@ import type { AgentRequest } from "../../../supabase/functions/_shared/serviceAg
 import { ServiceWorkflowCard } from "./ServiceWorkflowCard";
 
 export type ThreadItem =
-  | {id:string;kind:"archive";text:string}
+  | (HistoryItem & {kind:"archive"})
   | { id: string; kind: "user"; text: string; fileNames: string[] }
   | { id: string; kind: "files"; recordIds: string[] }
   | { id: string; kind: "notice"; text: string }
   | { id: string; kind: "assistant"; text: string; pending?: boolean }
   | { id: string; kind: "records"; entries: RecordEntry[] }
   | { id: string; kind: "tools"; tools: AssistantTool[]; request: string; notes: MyNote[]; userId: string | null; goalMap: [string,string][] }
-  | { id: string; kind: "command"; command: ChatCommand; source: string; status: CommandStatus; prepared?: PreparedCommand; message?: string }
+  | { id: string; kind: "command"; command: ChatCommand; source: string; status: CommandStatus; prepared?: PreparedCommand; message?: string; resume?: boolean; courseName?: string; card?: HistoryItem["card"] }
   | { id: string; kind: "workflow"; plan: AgentPlan; owner: string; text: string; prerequisiteKeys: string[]; assertActive: () => void }
   | { id: string; kind: "consent"; text: string; fileRecords?: IntakeRecord[]; attachments?: AgentRequest["attachments"]; resume?: (check: () => void) => Promise<void> };
 
@@ -109,7 +113,11 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
       if(disposed)return;
       writer.current=makeWriter(conversation.id,conversation.revision,conversation.items);
       snapshot.current=conversation.items;
-      threadRef.current=conversation.items as ThreadItem[];setThread(conversation.items as ThreadItem[]);
+      const restored:ThreadItem[]=conversation.items.map(item=>item.draft?{
+        id:item.id,kind:"command",command:item.draft.command,source:item.draft.source,status:"needs_input",resume:true,card:item.card,
+        message:item.draft.status==="needs_input"?item.draft.question??"이전 요청에 필요한 정보를 이어서 알려주세요.":"이전 요청이 남아 있어요. 현재 내용으로 다시 확인한 뒤 반영할 수 있어요.",
+      }:item.recordDraft?{id:item.id,kind:"records",entries:item.recordDraft.entries.map((entry,index)=>({key:`${item.id}-restored-${index}`,action:entry.action,source:entry.source,status:"waiting",missing:entry.missing,requestId:entry.requestId??crypto.randomUUID(),observedAt:entry.observedAt??new Date().toISOString(),restored:true}))}:item.kind==="user"?{id:item.id,kind:"user",text:item.text,fileNames:item.fileNames??[]}:item.kind==="assistant"?{id:item.id,kind:"assistant",text:item.text}:{...item,kind:"archive"});
+      threadRef.current=restored;setThread(restored);
     }).catch(error=>{if(!disposed)setHistoryError(error instanceof Error?error.message:"대화를 불러오지 못했어요.");})
       .finally(()=>{if(!disposed)setHistoryLoading(false);});
     return ()=>{disposed=true;};
@@ -143,7 +151,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
       const id=crypto.randomUUID();writer.current=makeWriter(id);
       router.replace(`/dashboard?chat=${id}`,{scroll:false});
     }
-    if (serviceAgentEnabled) { sendService({ text, files }); return; }
+    if (serviceAgentEnabled && !activeCommand()?.resume) { sendService({ text, files }); return; }
     const items: ThreadItem[] = [{ id: nextId(), kind: "user", text, fileNames: files.map((file) => file.name) }];
     let uploaded: Promise<IntakeRecord[]> = lastFiles.current;
     if (files.length) {
@@ -162,11 +170,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
     // 첫 메시지를 보내면 일정 박스가 내려가며 대화창이 커진다
     if (thread.length === 0) setWidgetsOpen(false);
     // 직전까지의 대화(이번 메시지 제외). 되물은 질문에 글로 답하면 앞 메시지와 함께 다시 해석한다.
-    const history = thread.flatMap((item): { role: "user" | "assistant"; text: string }[] =>
-      item.kind === "user" && item.text ? [{ role: "user", text: item.text }]
-        : item.kind === "assistant" && item.text ? [{ role: "assistant", text: item.text }]
-          : item.kind === "archive" ? [{role:"assistant",text:item.text}]
-          : item.kind === "command" && item.message ? [{role:"assistant",text:`요청 상태: ${item.status}\n${item.message}`}]:[]).slice(-6);
+    const history = conversationContext(snapshotThread(thread, intake.records));
     // 아직 되묻는 중인 기록도 알려 준다. 사용자가 버튼 대신 "어제", "운영체제"처럼 글로 답하면 이어서 해석한다.
     for (const entry of waitingEntries(thread)) {
       const course = context?.courses.find((item) => item.id === entry.action.course_id);
@@ -177,7 +181,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
     if(decision) {
       const pending=activeCommand();
       if(pending) {decideCommand(pending.id,decision==="yes");return;}
-      const records=[...threadRef.current].reverse().find(item=>item.kind==="records"&&item.entries.some(e=>(e.status==="waiting"&&!e.missing)||e.status==="error"));
+      const records=[...threadRef.current].reverse().find(item=>item.kind==="records"&&item.entries.some(e=>e.restored||(e.status==="waiting"&&!e.missing)||e.status==="error"));
       if(records?.kind==="records") {decideRecords(records.id,decision==="yes");return;}
     }
     if (text) {
@@ -204,9 +208,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
     // 첫 메시지를 보내면 일정 박스가 내려가며 대화창이 커진다
     if (thread.length === 0) setWidgetsOpen(false);
     // 직전까지의 대화(이번 메시지 제외). 되물은 질문에 글로 답하면 앞 메시지와 함께 다시 해석한다.
-    const history = thread.flatMap((item): { role: "user" | "assistant"; text: string }[] =>
-      item.kind === "user" && item.text ? [{ role: "user", text: item.text }]
-        : item.kind === "assistant" && item.text ? [{ role: "assistant", text: item.text }] : []).slice(-6);
+    const history = conversationContext(snapshotThread(thread, intake.records), 6);
     // 아직 되묻는 중인 기록도 알려 준다. 사용자가 버튼 대신 "어제", "운영체제"처럼 글로 답하면 이어서 해석한다.
     for (const entry of waitingEntries(thread)) {
       const course = context?.courses.find((item) => item.id === entry.action.course_id);
@@ -270,7 +272,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
       if (!ctx.signedIn) { say("로그인 후 AI 비서와 학습 코칭을 이용할 수 있습니다."); return; }
       let plan: AgentPlan | null = null;
       const appendWorkflow = (prerequisiteKeys: string[]) => {
-        if (!plan || (!plan.calendar.length && !plan.coaching)) return;
+        if (!plan || plan.clarification || (!plan.calendar.length && !plan.coaching)) return;
         const workflow: ThreadItem = { id: nextId(), kind: "workflow", plan, owner: ctx.userId!, text, prerequisiteKeys,
           assertActive: () => {
             assertCurrent();
@@ -375,11 +377,11 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
         start_time:t.start_hour!==undefined?`${String(t.start_hour).padStart(2,"0")}:00`:null,end_time:t.end_hour!==undefined?`${String(t.end_hour).padStart(2,"0")}:00`:null,
       })),{courses:ctx.courses,notes});
       if(commands.length) {
-        say(result.reply||"요청한 내용을 정리하고 있어요. 저장 전 예/아니오로 확인할게요.");
+        say("");
         const command=commands[0],id=nextId();
         const source=pending?.command.kind===command.kind?`${pending.source}\n${text}`:text;
         if(pending?.prepared)discardPreparedCommand(pending.prepared);
-        setThread(prev=>[...prev.map(item=>item.kind==="command"&&["ready","needs_input","error"].includes(item.status)?{...item,status:"cancelled" as const,message:"새 요청으로 이전 미확정 제안은 취소했어요."}:item.kind==="records"?{...item,entries:item.entries.map(e=>!e.applied&&(e.status==="waiting"||e.status==="error")?{...e,status:"undone" as const}:e)}:item),{id,kind:"command",command,source,status:"preparing"}]);
+        setThread(prev=>[...prev.map(item=>item.kind==="command"&&["ready","needs_input","error"].includes(item.status)?{...item,status:"cancelled" as const,resume:false,message:item.id===pending?.id&&pending.command.kind===command.kind?"추가 답변을 반영했어요.":"새 요청으로 이전 미확정 제안은 취소했어요."}:item.kind==="records"?{...item,entries:item.entries.map(e=>!e.applied&&(e.status==="waiting"||e.status==="error")?{...e,status:"undone" as const}:e)}:item),{id,kind:"command",command,source,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,status:"preparing"}]);
         try {
           const prepared=await prepareChatCommand(command,ctx,notes,dateKey(new Date()),assertCurrent,source,fileRecords.map(f=>f.noteId).filter((s):s is string=>!!s));assertCurrent();
           patchItem(id,item=>item.kind==="command"?"question" in prepared?{...item,command:prepared.command,status:"needs_input",message:prepared.question}:{...item,command:prepared.prepared.command,status:"ready",prepared:prepared.prepared}:item);
@@ -428,6 +430,26 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
     return item?.kind==="command"?item:null;
   }
 
+  function resumeCommand(id:string) {
+    const item=threadRef.current.find(row=>row.id===id);
+    if(item?.kind!=="command"||!item.resume||!["needs_input","error"].includes(item.status)||confirmations.current.has(id))return;
+    confirmations.current.add(id);
+    patchItem(id,row=>row.kind==="command"?{...row,status:"preparing",resume:false}:row);
+    void requests.current.enqueue(async check=>{
+      try {
+        const ctx=await loadChatContext();check();setContext(ctx);
+        const notes=await getMyNotes();check();
+        const command=parseCommands([item.command],{courses:ctx.courses,notes})[0];
+        if(!command)throw new Error("이전 요청의 과목이나 자료를 찾지 못했어요. 현재 이름으로 다시 알려주세요.");
+        const next=await prepareChatCommand(command,ctx,notes,dateKey(new Date()),check,item.source);check();
+        patchItem(id,row=>row.kind==="command"?"question" in next?{...row,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,command:next.command,status:"needs_input",message:next.question}:{...row,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,command:next.prepared.command,status:"ready",prepared:next.prepared,message:undefined}:row);
+      } catch(error) {
+        try{check();}catch{return;}
+        patchItem(id,row=>row.kind==="command"?{...row,status:"error",resume:true,message:error instanceof Error?error.message:"이전 요청을 확인하지 못했어요."}:row);
+      }
+    }).catch(()=>{}).finally(()=>confirmations.current.delete(id));
+  }
+
   function decideCommand(id:string,yes:boolean) {
     const item=threadRef.current.find(item=>item.id===id);
     if(item?.kind!=="command"||item.status==="done"||item.status==="cancelled")return;
@@ -449,9 +471,32 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
     }).catch(()=>{}).finally(()=>confirmations.current.delete(id));
   }
 
+  function resumeRecords(id:string) {
+    const item=threadRef.current.find(row=>row.id===id);
+    if(item?.kind!=="records"||confirmations.current.has(id))return;
+    confirmations.current.add(id);
+    void requests.current.enqueue(async check=>{
+      try {
+        const ctx=await loadChatContext();check();setContext(ctx);
+        if(!ctx.signedIn)throw new Error("로그인 후 이전 기록을 확인해 주세요.");
+        for(const entry of item.entries.filter(e=>e.restored)) {
+          const action=validateRecordDraftAction(entry.action,ctx,dateKey(new Date()));
+          if(!action) {patchEntry(id,entry.key,{status:"error",restored:false,error:"이전 기록의 과목·문항을 현재 자료에서 확인하지 못했어요. 다시 알려주세요."});continue;}
+          patchEntry(id,entry.key,{restored:false});
+          await runEntry(id,ctx,entry.key,action,check,{requestId:entry.requestId!,observedAt:entry.observedAt!});
+        }
+      } catch(error) {
+        try{check();}catch{return;}
+        setThread(prev=>[...prev,{id:nextId(),kind:"assistant",text:error instanceof Error?error.message:"이전 학습 기록을 확인하지 못했어요."}]);
+      }
+    }).catch(()=>{}).finally(()=>confirmations.current.delete(id));
+  }
+
   function decideRecords(id:string,yes:boolean) {
     const item=threadRef.current.find(item=>item.id===id);
-    if(item?.kind!=="records"||!context||confirmations.current.has(id))return;
+    if(item?.kind!=="records"||confirmations.current.has(id))return;
+    if(item.entries.some(e=>e.restored)){if(yes)resumeRecords(id);else item.entries.forEach(e=>patchEntry(id,e.key,{status:"undone",restored:false}));return;}
+    if(!context)return;
     const entries=item.entries.filter(e=>!e.applied&&!e.missing&&(e.status==="waiting"||e.status==="error"));
     if(!yes) {entries.forEach(e=>patchEntry(id,e.key,{status:"undone"}));return;}
     confirmations.current.add(id);
@@ -470,7 +515,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
       if (serviceAgentEnabled && item?.kind === "consent" && item.resume) {
         void requests.current.enqueue(item.resume).catch(() => {}); return;
       }
-      const history = threadRef.current.flatMap((item) => item.kind === "assistant" && item.text ? [{ role: "assistant" as const, text: item.text }] : []).slice(-3);
+      const history = conversationContext(snapshotThread(threadRef.current,intake.records));
       const observedAt = new Date().toISOString();
       void requests.current.enqueue(check => serviceAgentEnabled
         ? recordService(text, history, check, observedAt, item?.kind === "consent" ? item.attachments : [])
@@ -567,9 +612,12 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
             </div>
           );
         }
-        if (item.kind === "archive")return <section key={item.id} aria-label="보관된 실행 내역" className="whitespace-pre-wrap rounded-2xl border bg-white p-4 text-sm">{item.text}</section>;
+        if (item.kind === "archive") {
+          const details = item.card ?? archivedRequestDisplay(item.text, conversationTitle(thread.filter(row=>row.kind==="user")));
+          return <div key={item.id} aria-label="이전 대화 내용" className="space-y-2 whitespace-pre-wrap text-[15px] leading-relaxed">{details ? <><p className="font-semibold">{details.title}</p><ul className="list-disc space-y-1 pl-5">{details.content.map((line,i)=><li key={i}>{line}</li>)}</ul>{details.dates.map((line,i)=><p key={i} className="text-sm text-muted-foreground">{line}</p>)}</> : item.text}</div>;
+        }
         if (item.kind === "notice") {
-          return <p key={item.id} className="text-sm text-muted-foreground">{item.text}</p>;
+          return <p key={item.id} className="text-sm text-muted-foreground">{item.text.replace(/^\s*#{1,6}\s+/gm,"")}</p>;
         }
         if (item.kind === "workflow") {
           const entries = thread.flatMap(row => row.kind === "records" ? row.entries : []);
@@ -577,9 +625,10 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
             recordsReady={item.prerequisiteKeys.every(key => entries.some(entry => entry.key === key && entry.status === "saved"))} assertActive={item.assertActive} />;
         }
         if (item.kind === "assistant") {
+          if(!item.pending&&!item.text)return null;
           return item.pending
             ? <Loader2 key={item.id} className="h-4 w-4 animate-spin text-muted-foreground" aria-label="답변 준비 중" />
-            : <p key={item.id} className="whitespace-pre-wrap text-[15px]">{item.text}</p>;
+            : <p key={item.id} className="whitespace-pre-wrap text-[15px]">{item.text.replace(/^\s*#{1,6}\s+/gm,"")}</p>;
         }
         if (item.kind === "consent") {
           return (
@@ -593,6 +642,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
           );
         }
         if (item.kind === "records") {
+          if(item.entries.some(e=>e.restored))return <div key={item.id} className="space-y-2 text-[15px]"><p>이전에 확인 중이던 학습 기록이 있어요. 추가 정보를 이어서 말씀하시거나 현재 내용으로 다시 확인해 주세요.</p><button type="button" className="text-sm underline underline-offset-4" onClick={()=>resumeRecords(item.id)}>학습 기록 이어서 확인</button></div>;
           return (
             <div key={item.id} className="space-y-2">
             <ChatRecordCard
@@ -608,7 +658,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
             </div>
           );
         }
-        if(item.kind==="command")return <ChatCommandCard key={item.id} prepared={item.prepared} status={item.status} message={item.message} onDecision={yes=>decideCommand(item.id,yes)}/>;
+        if(item.kind==="command")return <ChatCommandCard key={item.id} subjectTitle={conversationTitle(thread.filter(row=>row.kind==="user"))} courseName={item.courseName??context?.courses.find(c=>c.id===item.command.course_id)?.name} resume={item.resume} onResume={()=>resumeCommand(item.id)} prepared={item.prepared} status={item.status} message={item.message} onDecision={yes=>decideCommand(item.id,yes)}/>;
         if(item.kind==="tools") {
           return <div key={item.id} className="space-y-3">{item.tools.map((tool,index)=><ChatFeatureCard
             key={`${item.id}-${index}`} tool={tool} goalIds={tool.course_id?item.goalMap.filter(([id])=>id===tool.course_id).map(([,goal])=>goal):[]}

@@ -92,19 +92,21 @@ export async function linkedProblemFiles(courseId: string, material: Material): 
 export async function deleteMaterial(courseId: string, material: Material) {
   if (material.kind === "legacy") { removeCourseNote(material.id); return; }
   if (material.kind === "file") { removeCourseFile(material.id); return; }
-  for (const linked of await linkedProblemFiles(courseId, material)) {
-    const images = (await listProblems(linked.subjectId)).filter((p) => p.sourceFile === linked.sourceFile)
-      .flatMap((p) => p.content?.images.map((image) => image.src) ?? []);
-    await deleteFile(linked.subjectId, linked.sourceFile);
-    void removeCrops(images);
-  }
   const driveFileId = material.note.driveFileId;
   if (driveFileId) {
     const s = await session();
     if (s) {
       const { error } = await s.db.from("dismissed_drive_files").upsert({ user_id: s.userId, drive_file_id: driveFileId }, { onConflict: "user_id,drive_file_id" });
-      if (error) throw new Error("Drive 파일을 다시 가져오지 않도록 기억하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      if (error) throw new Error(error.code === "42P01" || error.code === "PGRST205"
+        ? "Drive 자료 삭제를 위해 DB 업데이트 0040이 필요합니다."
+        : "Drive 파일을 다시 가져오지 않도록 기억하지 못했습니다. 잠시 후 다시 시도해 주세요.");
     }
+  }
+  for (const linked of await linkedProblemFiles(courseId, material)) {
+    const images = (await listProblems(linked.subjectId)).filter((p) => p.sourceFile === linked.sourceFile)
+      .flatMap((p) => p.content?.images.map((image) => image.src) ?? []);
+    await deleteFile(linked.subjectId, linked.sourceFile);
+    void removeCrops(images);
   }
   await deleteNote(material.id);
 }

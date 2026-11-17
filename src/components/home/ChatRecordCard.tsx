@@ -20,6 +20,7 @@ export interface RecordEntry {
   missing: Missing | null;
   applied?: Applied;
   error?: string;
+  restored?: boolean;
   requestId?: string;
   observedAt?: string;
 }
@@ -37,7 +38,7 @@ function title(entry: RecordEntry, courses: Course[]) {
   if (a?.kind === "problem") return `${a.courseName}${a.fileLabel ? ` · ${a.fileLabel}` : ""}`;
   const head = course ?? "과목 미정";
   if (entry.action.kind === "topic") return `${head} · ${entry.action.topic}`;
-  if (entry.action.kind === "session") return `${head} · ${entry.action.date ? `${formatDate(entry.action.date)} ` : ""}수업`;
+  if (entry.action.kind === "session") return `${head} 수업 진도`;
   return `${head} · 문제 ${entry.action.problem_labels.join(", ")}`;
 }
 
@@ -158,9 +159,9 @@ export function ChatRecordCard({ entries, courses, today, files, onPick, onUndo,
   const [editing, setEditing] = useState<string | null>(null);
   if (!entries.length) return null;
   return (
-    <ul className="divide-y rounded-2xl border bg-white px-4">
+    <ul className="space-y-3">
       {entries.map((entry) => (
-        <li key={entry.key} className={cn("py-2.5", entry.status === "undone" && "opacity-50")}>
+        <li key={entry.key} className={cn("py-2.5", entry.status==="waiting"&&!entry.missing&&"rounded-2xl border bg-white p-5", entry.status === "undone" && "opacity-50")}>
           <div className="flex items-start gap-2">
             <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">
               {entry.status === "saving" || entry.status === "undoing" ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -169,11 +170,12 @@ export function ChatRecordCard({ entries, courses, today, files, onPick, onUndo,
                     : <span className={cn("h-2 w-2 rounded-full", entry.status === "error" ? "bg-destructive" : "bg-amber-400")} />}
             </span>
             <div className="min-w-0 flex-1">
-              <p className={cn("text-sm font-medium", entry.status === "undone" && "line-through")}>
+              <p className={cn(entry.status==="waiting"&&!entry.missing?"border-b pb-3 text-xl font-bold":"text-sm font-medium", entry.status === "undone" && "line-through")}>
                 {title(entry, courses)}
                 {entry.applied?.kind === "topic" && entry.applied.created && <span className="ml-1.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">새 주제</span>}
               </p>
-              <p className="text-xs text-muted-foreground">{detail(entry)}</p>
+              {entry.status==="waiting"&&!entry.missing?<ul aria-label="내용" className="list-disc py-3 pl-5 text-sm"><li>{detail(entry)}</li></ul>:!entry.missing&&<p className="text-sm text-muted-foreground">{detail(entry)}</p>}
+              {entry.status==="waiting"&&!entry.missing&&entry.action.date&&<p aria-label="일자" className="border-t pt-3 text-sm text-muted-foreground">일자: {entry.action.date}</p>}
               {entry.status === "waiting" && entry.missing && (
                 <>
                   <p className="mt-1.5 text-sm">{QUESTIONS[entry.missing]}</p>

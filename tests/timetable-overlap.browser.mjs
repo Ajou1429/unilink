@@ -38,9 +38,26 @@ try {
     const solo = await page.locator('button.absolute').filter({ has: page.getByText('단독 일정', { exact: true }) }).last().boundingBox();
     assert.ok(solo.width > boxes[0].width*2);
     await page.screenshot({ path: `${output}/${name}.png`, fullPage: true });
+    await page.getByRole('tab', { name: '월간 일정', exact: true }).click();
+    const month = page.getByRole('tabpanel');
+    await month.getByRole('button', { name: '10:30 겹침 시험', exact: true }).waitFor();
+    assert.equal(await month.getByRole('button', { name: '12:00 단독 일정', exact: true }).count(), 1);
+    assert.ok(await month.getByRole('button', { name: '11:00 겹침 고정 일정', exact: true }).count() >= 4);
+    assert.equal(await month.getByText('겹침 수업', { exact: true }).count(), 0);
+    await month.getByRole('button', { name: '11:00 겹침 고정 일정', exact: true }).first().click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('heading', { name: '일정 수정', exact: true }).waitFor();
+    await dialog.locator('input').first().fill('수정된 고정 일정');
+    await dialog.getByRole('button', { name: '일정 수정', exact: true }).click();
+    await page.screenshot({ path: `${output}/${name}-monthly-edit.png`, fullPage: true });
+    await month.getByRole('button', { name: '11:00 수정된 고정 일정', exact: true }).first().waitFor();
+    assert.ok(await month.getByRole('button', { name: '11:00 수정된 고정 일정', exact: true }).count() >= 4);
+    await page.getByRole('tab', { name: '주간 시간표', exact: true }).click();
+    await page.locator('button.absolute').filter({ has: page.getByText('수정된 고정 일정', { exact: true }) }).waitFor();
+    assert.equal(await page.locator('button.absolute').filter({ has: page.getByText('수정된 고정 일정', { exact: true }) }).count(), 1);
     await page.locator('button.absolute').filter({ has: page.getByText('겹침 수업', { exact: true }) }).last().click();
     await page.waitForURL(/\/course\?/);
     assert.deepEqual(errors, []);
-    await context.close(); console.log(`PASS ${name}: class/exam/commitment share separate lanes, disjoint event full width, class navigation`);
+    await context.close(); console.log(`PASS ${name}: class/exam/commitment share separate lanes, disjoint event full width, class navigation, weekly/monthly events and recurrence edits`);
   }
 } finally { await browser.close(); }

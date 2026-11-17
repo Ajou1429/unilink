@@ -20,7 +20,7 @@ export function useSharedCalendar(from: string, until: string) {
         if (!db || !owner) { if (active) { setEvents([]); setError(""); } return; }
         const rows = await db.from("calendar_events").select("id,goal_id,title,description,exam_scope,event_type,starts_at,ends_at,due_at,created_at,metadata")
           .eq("user_id", owner).eq("status", "scheduled")
-          .or(`and(due_at.gte.${from}T00:00:00+09:00,due_at.lte.${until}T23:59:59+09:00),and(starts_at.lte.${until}T23:59:59+09:00,ends_at.gte.${from}T00:00:00+09:00)`)
+          .or(`and(due_at.gte.${from}T00:00:00+09:00,due_at.lte.${until}T23:59:59+09:00),and(starts_at.gte.${from}T00:00:00+09:00,starts_at.lte.${until}T23:59:59+09:00),and(starts_at.lte.${until}T23:59:59+09:00,ends_at.gte.${from}T00:00:00+09:00)`)
           .order("created_at", { ascending: false }).limit(201);
         assertAccount();
         if (rows.error) throw new Error("DB 일정을 불러오지 못했습니다.");

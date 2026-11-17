@@ -61,8 +61,8 @@ export function emptyScheduleForm(overrides: Partial<ScheduleForm> = {}): Schedu
 export function formFromEvent(event: MonthlyEvent): ScheduleForm {
   return emptyScheduleForm({
     title: event.title,
-    location: event.location,
-    memo: event.memo,
+    location: event.location ?? "",
+    memo: event.memo ?? "",
     color: event.color,
     date: event.date,
     allDay: Boolean(event.allDay),
@@ -77,7 +77,7 @@ export function formFromWork(work: WorkSchedule): ScheduleForm {
     : work.days.map((day) => ({ day, startTime: work.startTime, endTime: work.endTime }));
   return emptyScheduleForm({
     title: work.title,
-    location: work.location,
+    location: work.location ?? "",
     memo: work.memo ?? "",
     color: work.color,
     repeat: true,

@@ -1,3 +1,6 @@
+import { readCommandDraft, readRecordDraft, type CommandDraft, type RecordDraft } from "./chat-continuity";
+import { readRequestDisplay, type RequestDisplay } from "./chat-request-display";
+import { conversationTitle } from "./chat-title";
 import { getSupabaseBrowserClient } from "./supabase-client";
 import { captureStorageScope, getStorageUser } from "./private-storage";
 
@@ -7,6 +10,9 @@ export interface HistoryItem {
   kind: "user" | "assistant" | "archive";
   text: string;
   fileNames?: string[];
+  card?: RequestDisplay;
+  draft?: CommandDraft;
+  recordDraft?: RecordDraft;
 }
 export interface ConversationSummary { id: string; title: string; updated_at: string }
 export interface Conversation extends ConversationSummary { items: HistoryItem[]; revision: number }
@@ -16,7 +22,7 @@ export function readHistoryItems(raw: unknown): HistoryItem[] {
   if(!Array.isArray(raw))throw new Error("대화 내역 형식이 올바르지 않아요.");
   return raw.map(item=>{
     if(!item||typeof item.id!=="string"||!["user","assistant","archive"].includes(item.kind)||typeof item.text!=="string")throw new Error("대화 내역 형식이 올바르지 않아요.");
-    return {id:item.id,kind:item.kind,text:item.text,...(item.kind==="user"?{fileNames:Array.isArray(item.fileNames)?item.fileNames.filter((v:unknown)=>typeof v==="string"):[]}: {})};
+    return {id:item.id,kind:item.kind,text:item.text,...(item.kind==="user"?{fileNames:Array.isArray(item.fileNames)?item.fileNames.filter((v:unknown)=>typeof v==="string"):[]}: {card:readRequestDisplay(item.card),draft:item.kind==="archive"?readCommandDraft(item.draft):undefined,recordDraft:item.kind==="archive"?readRecordDraft(item.recordDraft):undefined})};
   });
 }
 function connection() {
@@ -51,8 +57,7 @@ export function createConversationWriter(id:string,revision=0,onError:(message:s
       try {
         check();const serialized=JSON.stringify(items);if(serialized===last)return;
         if(items.length>2000||new TextEncoder().encode(serialized).length>1900000)throw new Error("이 대화가 길어 저장 한도에 도달했어요. 새 채팅을 시작해 주세요.");
-        const first=items.find(item=>item.kind==="user");
-        const title=(first?.text.trim()||first?.fileNames?.[0]||"새 대화").slice(0,80);
+        const title=conversationTitle(items);
         const {data,error}=await db.rpc("save_chat_conversation",{p_id:id,p_title:title,p_items:items,p_revision:revision});
         check();if(error) {
           if(error.code==="40001") {blocked=true;throw new Error("다른 창에서 이 대화가 변경됐어요. 현재 내용을 복사한 뒤 대화를 다시 열어 주세요.");}

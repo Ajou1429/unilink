@@ -74,3 +74,22 @@ test("migration 0038: users only see and write their own dismissed Drive files",
     await db.close();
   }
 });
+
+
+test("missing dismissal DB rejects deletion before touching linked problems or notes", async () => {
+  const { moduleLoader, root } = await import('../scripts/simulation/runtime.mjs');
+  const path = await import('node:path');
+  let touched = 0;
+  const userId = '11111111-1111-4111-8111-111111111111';
+  const db = {auth:{getUser:async()=>({data:{user:{id:userId}}})},from:()=>({upsert:async()=>({error:{code:'PGRST205'}})})};
+  const load = moduleLoader({}, name => {
+    if(name.endsWith('supabase-client'))return {getSupabaseBrowserClient:()=>db};
+    if(name.endsWith('private-storage'))return {getStorageUser:()=>userId};
+    if(name.endsWith('problem-bank-storage'))return {listSubjects:async()=>{touched++;return [];}};
+    if(name.endsWith('my-notes-storage'))return {deleteNote:async()=>{touched++;}};
+    if(/(?:course-storage|p0-sync|file-intake\/settings|problem-bank\/images|study-storage|timetable-storage)$/.test(name))return {};
+  });
+  const service = load(path.join(root,'src/lib/course-overview/data.ts'));
+  await assert.rejects(service.deleteMaterial('course',{kind:'note',id:'note',note:{driveFileId:'drive-file'}}),/0040/);
+  assert.equal(touched,0);
+});

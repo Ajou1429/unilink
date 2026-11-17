@@ -1,5 +1,7 @@
 "use client";
 
+import { monthlyWorkEvents } from "@/lib/monthly-work-events";
+
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -284,8 +286,9 @@ export default function TimetablePage() {
     const today = new Date();
     return today.getFullYear() === 2026 ? today.getMonth() + 1 : 1;
   });
-  const sharedRangeStart = viewTab === "monthly" ? `2026-${String(calendarMonth).padStart(2, "0")}-01` : formatDateKey(weekStart);
-  const sharedRangeEnd = viewTab === "monthly" ? formatDateKey(new Date(2026, calendarMonth, 0)) : formatDateKey(new Date(weekStart.getTime() + 6 * 86400000));
+  const monthCells = getMonthCalendarCells(2026, calendarMonth);
+  const sharedRangeStart = viewTab === "monthly" ? monthCells[0].dateKey : formatDateKey(weekStart);
+  const sharedRangeEnd = viewTab === "monthly" ? monthCells[monthCells.length - 1].dateKey : formatDateKey(new Date(weekStart.getTime() + 6 * 86400000));
   const sharedCalendar = useSharedCalendar(sharedRangeStart, sharedRangeEnd);
   const [sessionFeedback, setSessionFeedback] = useState("");
   const [actionFeedback, setActionFeedback] = useState("");
@@ -532,6 +535,8 @@ export default function TimetablePage() {
     }
 
     setScheduleDialog((prev) => ({ ...prev, open: false, editing: null }));
+    setViewTab("monthly");
+    setCalendarMonth(Number(form.date.slice(5,7)));
     setActionFeedback(
       editing ? `${form.title.trim()} 일정이 수정되었습니다.` : `${form.title.trim()} 일정이 등록되었습니다.`,
     );
@@ -723,18 +728,20 @@ export default function TimetablePage() {
       )
     : [];
   const selectedSessionNote = myNotes.find((note) => note.id === sessionForm.noteId);
-  const monthCells = getMonthCalendarCells(2026, calendarMonth);
   const personalStudyDeadlineEvents = useMemo(
     () => getPersonalStudyDeadlineEvents(personalStudies, personalStudyPlans),
     [personalStudies, personalStudyPlans],
   );
-  const calendarEvents = [...monthlyEvents, ...personalStudyDeadlineEvents, ...sharedCalendar.events];
+  const recurringEvents = monthlyWorkEvents(workSchedules, monthCells.map(cell=>cell.dateKey));
+  const weeklyEvents = [...monthlyEvents, ...personalStudyDeadlineEvents, ...sharedCalendar.events];
+  const calendarEvents = [...weeklyEvents, ...recurringEvents];
 
   function openNewEventForDate(dateKey: string) {
     openScheduleDialog({ date: dateKey });
   }
 
-  function openMonthlyEvent(event: MonthlyEvent) {
+  function openMonthlyEvent(event: MonthlyEvent & {workScheduleId?:string}) {
+    if(event.workScheduleId){const work=workSchedules.find(row=>row.id===event.workScheduleId);if(work)startEditingWorkSchedule(work);return;}
     setSelectedEvent(event);
     setSelectedCourse(null);
     setSelectedOccurrence(null);
@@ -945,12 +952,12 @@ export default function TimetablePage() {
                     <TimetableGrid
                       courses={courses}
                       workSchedules={workSchedules}
-                      monthlyEvents={calendarEvents}
+                      monthlyEvents={weeklyEvents}
+                      onEventClick={openMonthlyEvent}
+                      onWorkClick={startEditingWorkSchedule}
                       courseSessions={courseSessions}
                       weekStart={weekStart}
                       onCourseClick={selectOccurrence}
-                      onEventClick={openMonthlyEvent}
-                      onWorkClick={startEditingWorkSchedule}
                       onTimeSlotClick={({ day, date, startTime, endTime }) =>
                         openScheduleDialog({
                           repeat: true,
@@ -1001,7 +1008,7 @@ export default function TimetablePage() {
                       2026년 {calendarMonth}월 월간 일정
                     </CardTitle>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      날짜를 누르면 일정 추가, 일정 칩을 누르면 상세를 볼 수 있습니다.
+                      시험·과제·개인 일정·반복 일정을 표시합니다. 날짜를 눌러 추가하고 일정을 눌러 상세를 확인하거나 수정하세요.
                     </p>
                   </CardHeader>
                   <CardContent>
@@ -1071,7 +1078,7 @@ export default function TimetablePage() {
                                   {holiday}
                                 </div>
                               ))}
-                              {dayEvents.slice(0, 3).map((event) => (
+                              {dayEvents.map((event) => (
                                 <button
                                   key={event.id}
                                   type="button"
@@ -1086,11 +1093,7 @@ export default function TimetablePage() {
                                   {event.allDay ? event.title : `${event.startTime} ${event.title}`}
                                 </button>
                               ))}
-                              {dayEvents.length > 3 && (
-                                <div className="text-[11px] font-medium text-muted-foreground">
-                                  +{dayEvents.length - 3}개 더
-                                </div>
-                              )}
+
                             </div>
                           </div>
                         );

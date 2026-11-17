@@ -23,7 +23,7 @@ export async function converse(context: ChatContext, message: string, history: {
   const current=captureStorageScope(context.userId),db=getSupabaseBrowserClient();
   if(!db || !context.signedIn || !context.userId) throw new Error("로그인 후 AI와 대화할 수 있어요.");
   const allNotes=await getMyNotes(); current();
-  const attached=new Set(files.map(f=>f.noteId));
+  const attached=new Set([...files.map(f=>f.noteId),pendingCommand?.note_id]);
   const notes=[...allNotes.filter(n=>attached.has(n.id)),...allNotes.filter(n=>!attached.has(n.id))].slice(0,40);
   const courseFor=(note:MyNote)=>context.courses.find(c=>c.id===note.linkedId || c.name===note.courseName)?.id??null;
   const [aiPlans,states,goals]=await Promise.all([
