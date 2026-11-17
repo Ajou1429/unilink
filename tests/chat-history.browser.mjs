@@ -21,7 +21,7 @@ try {
    const encode=v=>btoa(JSON.stringify(v)).replaceAll('=','').replaceAll('+','-').replaceAll('/','_');
    const token=encode({alg:'HS256',typ:'JWT'})+'.'+encode({sub:uid,exp:Math.floor(Date.now()/1000)+3600,role:'authenticated',aud:'authenticated'})+'.mock';
    localStorage.setItem('sb-lqwpcwzjbqeunqfliaso-auth-token',JSON.stringify({access_token:token,refresh_token:'test-only',expires_at:Math.floor(Date.now()/1000)+3600,expires_in:3600,token_type:'bearer',user}));
-   localStorage.setItem(`unilink:private:user:${uid}:unilink:chat-assistant-consent:v2`,'granted');
+   localStorage.setItem(`unilink:private:user:${uid}:unilink:chat-assistant-consent:v3`,'granted');
   },{uid,user});
   await context.route('https://*.supabase.co/**',async route=>{
    const req=route.request(),url=new URL(req.url()),table=url.pathname.split('/').at(-1);

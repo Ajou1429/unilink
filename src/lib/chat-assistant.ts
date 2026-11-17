@@ -1,3 +1,4 @@
+import { chatDocumentContext, loadChatDocumentAnalysis, type ChatDocumentAnalysis } from "./chat-document-analysis";
 import { getSupabaseBrowserClient } from "./supabase-client";
 import { captureStorageScope, privateStorage } from "./private-storage";
 import { describeFunctionError } from "./supabase/function-error";
@@ -9,22 +10,33 @@ import type { ChatContext } from "./chat-record/apply";
 import type { AssistantResult } from "../../supabase/functions/_shared/chatAssistant";
 import type { ChatCommand } from "../../supabase/functions/_shared/chatCommands";
 
-const CONSENT_KEY="unilink:chat-assistant-consent:v2";
-// Expanded metadata/tutoring scope requires fresh consent; do not reuse recorder consent.
+const CONSENT_KEY="unilink:chat-assistant-consent:v3";
+const PREVIOUS_CONSENT_KEY="unilink:chat-assistant-consent:v2";
+// Chat permission now includes needed PDF content analysis. Preserve prior opt-outs.
 export function getAssistantConsent(): "granted" | "declined" | null {
   const value=privateStorage.getItem(CONSENT_KEY);
-  return value==="granted" || value==="declined"?value:null;
+  if(value==="granted" || value==="declined")return value;
+  return privateStorage.getItem(PREVIOUS_CONSENT_KEY)==="declined"?"declined":null;
 }
 export function setAssistantConsent(value:"granted"|"declined") { privateStorage.setItem(CONSENT_KEY,value); }
 
-/** Only metadata is sent. PDF bytes use the existing separate analysis consent. */
-export async function converse(context: ChatContext, message: string, history: {role:"user"|"assistant";text:string}[], today: string, files: IntakeRecord[] = [], pendingCommand?: ChatCommand) {
+/** Reuse completed analysis excerpts when available. PDF transfer runs through note-analyze. */
+export async function converse(context: ChatContext, message: string, history: {role:"user"|"assistant";text:string}[], today: string, files: IntakeRecord[] = [], pendingCommand?: ChatCommand, analysis?: ChatDocumentAnalysis) {
   if(getAssistantConsent()!=="granted") throw new Error("대화와 기능 연결에 대한 AI 전송 동의가 필요해요.");
   const current=captureStorageScope(context.userId),db=getSupabaseBrowserClient();
   if(!db || !context.signedIn || !context.userId) throw new Error("로그인 후 AI와 대화할 수 있어요.");
   const allNotes=await getMyNotes(); current();
   const attached=new Set([...files.map(f=>f.noteId),pendingCommand?.note_id]);
   const notes=[...allNotes.filter(n=>attached.has(n.id)),...allNotes.filter(n=>!attached.has(n.id))].slice(0,40);
+  if (!analysis) {
+    const requested = allNotes.filter(note => [note.title, note.fileName].some(name => name && name.length >= 4 && message.normalize("NFC").includes(name.normalize("NFC"))));
+    const attachedNotes = allNotes.filter(note => attached.has(note.id));
+    const priorText = history.map(turn => turn.text).join("\n").normalize("NFC");
+    const mentionedNotes = allNotes.filter(note => [note.title, note.fileName].some(name => name && name.length >= 4 && priorText.includes(name.normalize("NFC"))));
+    const candidates = requested.length ? requested : attachedNotes.length ? attachedNotes : mentionedNotes;
+    if (candidates.length === 1) analysis = await loadChatDocumentAnalysis(candidates[0], context.userId, current);
+    current();
+  }
   const courseFor=(note:MyNote)=>context.courses.find(c=>c.id===note.linkedId || c.name===note.courseName)?.id??null;
   const [aiPlans,states,goals,assignments]=await Promise.all([
     db.from("study_plan_items").select("id,goal_id,title,scheduled_start,planned_minutes,status,study_plans!inner(source_type,status)")
@@ -40,7 +52,7 @@ export async function converse(context: ChatContext, message: string, history: {
   ]);
   current();
   const plans=getWeeklyStudyPlans().filter(p=>!p.isCompleted).slice(0,15);
-  const overview=JSON.stringify({source:"본인 시간표·일정·수동 계획, 승인된 AI 계획 일부와 최근 자기보고 이해도. 전체 이력이나 PDF 본문은 포함하지 않음. unavailable은 조회 실패이며 기록 없음이 아님",
+  const overview=JSON.stringify({document_analysis:chatDocumentContext(analysis,allNotes,message),source:"본인 시간표·일정·수동 계획, 승인된 AI 계획 일부와 최근 자기보고 이해도. 전체 이력이나 PDF 본문은 포함하지 않음. unavailable은 조회 실패이며 기록 없음이 아님",
     approved_ai_plans:aiPlans.error?{unavailable:true}:aiPlans.data,
     active_goals:goals.error?{unavailable:true}:goals.data?.filter(goal=>goal.goal_type==="personal"||[...context.goals.values()].includes(goal.id)),
     assignment_events:assignments.error?{unavailable:true}:assignments.data,

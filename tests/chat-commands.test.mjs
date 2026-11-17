@@ -99,7 +99,7 @@ test('yes/no command execution uses real storage, P0 SQL, cancellation and accou
   }finally{stop?.();await db.close();}
 });
 
-test('PDF transmission requires the registered yes draft and source changes invalidate approval',async()=>{
+test('PDF analysis uses a registered owned draft and source changes invalidate execution',async()=>{
   let sends=0;
   let note={id:'pdf',title:'강의자료',fileName:'lecture.pdf',filePath:'owned/lecture.pdf',version:1,updatedAt:'2026-11-16T00:00:00Z',linkedType:'course',linkedId:'math'};
   const db={auth:{getUser:async()=>({data:{user:{id:A}}})},functions:{invoke:async()=>{sends++;return {data:{analysis_id:'analysis'},error:null};}},
@@ -117,7 +117,7 @@ test('PDF transmission requires the registered yes draft and source changes inva
   p=(await exec.prepareChatCommand(command,context,[note],'2026-11-16',()=>{},'PDF 분석')).prepared;
   note={...note,version:2};await assert.rejects(exec.executePreparedCommand(p,()=>{}),/변경/);assert.equal(sends,0);
   p=(await exec.prepareChatCommand(command,context,[note],'2026-11-16',()=>{},'PDF 분석')).prepared;
-  const result=await exec.executePreparedCommand(p,()=>{});assert.equal(sends,1);assert.match(result.message,/분석 완료/);assert.match(result.message,/강의 내용/);assert.match(result.message,/아직 일정으로 등록하지 않았어요/);
+  const result=await exec.executePreparedCommand(p,()=>{});assert.equal(result.analysis.noteId,'pdf');assert.equal(result.analysis.version,2);assert.equal(result.analysis.candidates.length,2);assert.equal(sends,1);assert.match(result.message,/분석 완료/);assert.match(result.message,/강의 내용/);assert.match(result.message,/아직 일정으로 등록하지 않았어요/);
 });
 
 test('expired confirmation does not even begin an authenticated mutation',async()=>{

@@ -33,6 +33,14 @@ test('chat history stores owned conversations, paginates summaries, rejects cros
   for(const body of [[],{},[{id:'long',kind:'user',text:'x'.repeat(2100000)}]])assert.ok((await save(a,7,0,body)).error);
   assert.ok((await b.from('chat_conversations').delete().eq('id',id(1))).error===null);
   assert.equal((await a.from('chat_conversations').select('id').eq('id',id(1)).single()).data.id,id(1));
+  await db.query("select set_config('request.method','POST',false)");
+  const conflict=await save(a,1,1);
+  assert.equal(conflict.error.code,'PGRST');assert.equal(JSON.parse(conflict.error.message).code,'40001');
+  await assert.rejects(db.query("select set_config('request.jwt.claim.sub',$1,true), public.save_chat_conversation($2,$3,$4,$5)",[A,id(1),'conflict',items,1]),error=>{
+    assert.equal(error.code,'PGRST');assert.equal(JSON.parse(error.detail).status,409);return true;
+  });
+  assert.equal((await db.query('select revision from chat_conversations where id=$1',[id(1)])).rows[0].revision,3);
+
  }finally{await db.close();}
 });
 
