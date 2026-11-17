@@ -1,5 +1,6 @@
 "use client";
 
+import { layoutTimedBlocks } from "@/lib/timetable-overlap";
 import { Course, CourseSchedule, DayOfWeek } from "@/lib/types";
 import {
   CourseOccurrence,
@@ -155,9 +156,31 @@ export function TimetableGrid({
   ]);
   const hasAllDay = allDayByDate.some((items) => items.length > 0);
 
+  const dayColumns = weekDates.map(({ label, dateKey }) => {
+    const dayCourses = courses.flatMap((course) =>
+      getCourseSchedules(course)
+        .filter((schedule) => schedule.day === label)
+        .map((schedule) => ({ course, schedule })),
+    );
+    const dayWorkSchedules = timedWorks.flatMap((schedule) =>
+      getWorkSchedules(schedule)
+        .filter((workSchedule) => workSchedule.day === label)
+        .map((workSchedule) => ({ schedule, workSchedule })),
+    );
+    const dayEvents = timedEvents.filter((event) => event.date === dateKey);
+    const positions = layoutTimedBlocks([
+      ...dayCourses.map(({ schedule }, index) => ({ id: `course-${index}`, start: timeToMinutes(schedule.startTime), end: timeToMinutes(schedule.endTime) })),
+      ...dayWorkSchedules.map(({ workSchedule }, index) => ({ id: `work-${index}`, start: timeToMinutes(workSchedule.startTime), end: timeToMinutes(workSchedule.endTime) })),
+      ...dayEvents.map((event, index) => ({ id: `event-${index}`, start: timeToMinutes(event.startTime), end: timeToMinutes(event.endTime) })),
+    ]);
+    return { label, dateKey, dayCourses, dayWorkSchedules, dayEvents, positions };
+  });
+  const maxLanes = Math.max(1, ...dayColumns.flatMap(column => [...column.positions.values()].map(position => position.lanes)));
+  const minGridWidth = 56 + 7 * Math.max(80, maxLanes * 28);
+
   return (
-    <div className="max-h-[calc(100vh-260px)] min-h-[520px] w-full overflow-x-hidden overflow-y-auto">
-      <div className="w-full min-w-0">
+    <div className="max-h-[calc(100vh-260px)] min-h-[520px] w-full overflow-x-auto overflow-y-auto">
+      <div className="w-full" style={{ minWidth: minGridWidth }}>
         <div className="flex ml-14 mb-1">
           {weekDates.map(({ label, date, dateKey }) => (
             <div
@@ -205,18 +228,12 @@ export function TimetableGrid({
             ))}
           </div>
 
-          {weekDates.map(({ label, dateKey }) => {
-            const dayCourses = courses.flatMap((course) =>
-              getCourseSchedules(course)
-                .filter((schedule) => schedule.day === label)
-                .map((schedule) => ({ course, schedule })),
-            );
-            const dayWorkSchedules = timedWorks.flatMap((schedule) =>
-              getWorkSchedules(schedule)
-                .filter((workSchedule) => workSchedule.day === label)
-                .map((workSchedule) => ({ schedule, workSchedule })),
-            );
-            const dayEvents = timedEvents.filter((event) => event.date === dateKey);
+          {dayColumns.map(({ label, dateKey, dayCourses, dayWorkSchedules, dayEvents, positions }) => {
+            const horizontalPosition = (id: string) => {
+              const position = positions.get(id);
+              return { left: `calc(${position?.left ?? 0}% + 2px)`, width: `calc(${position?.width ?? 100}% - 4px)` };
+            };
+
 
             return (
               <div
@@ -263,7 +280,7 @@ export function TimetableGrid({
                   );
                 })}
 
-                {dayCourses.map(({ course, schedule }) => {
+                {dayCourses.map(({ course, schedule }, index) => {
                   const topMin = minutesFromStart(schedule.startTime, startHour);
                   const durationMin =
                     timeToMinutes(schedule.endTime) - timeToMinutes(schedule.startTime);
@@ -278,7 +295,7 @@ export function TimetableGrid({
 
                   return (
                     <button
-                      key={`${dateKey}-${course.id}-${schedule.startTime}`}
+                      key={`${dateKey}-${course.id}-${schedule.startTime}-${index}`}
                       onClick={() =>
                         onCourseClick?.({
                           course,
@@ -288,8 +305,9 @@ export function TimetableGrid({
                           endTime: schedule.endTime,
                         })
                       }
-                      className="absolute inset-x-1 rounded-md px-2 py-1.5 text-left overflow-hidden transition-opacity hover:opacity-90 cursor-pointer"
+                      className="absolute rounded-md px-0.5 py-1.5 sm:px-2 text-left overflow-hidden transition-opacity hover:opacity-90 cursor-pointer"
                       style={{
+                        ...horizontalPosition(`course-${index}`),
                         top,
                         height,
                         backgroundColor: course.color,
@@ -317,7 +335,7 @@ export function TimetableGrid({
                   );
                 })}
 
-                {dayWorkSchedules.map(({ schedule, workSchedule }) => {
+                {dayWorkSchedules.map(({ schedule, workSchedule }, index) => {
                   const topMin = minutesFromStart(workSchedule.startTime, startHour);
                   const durationMin =
                     timeToMinutes(workSchedule.endTime) - timeToMinutes(workSchedule.startTime);
@@ -326,11 +344,11 @@ export function TimetableGrid({
 
                   return (
                     <button
-                      key={`${dateKey}-${schedule.id}`}
+                      key={`${dateKey}-${schedule.id}-${workSchedule.startTime}-${index}`}
                       type="button"
                       onClick={() => onWorkClick?.(schedule)}
-                      className="absolute inset-x-1 rounded-md border border-dashed border-white/80 px-2 py-1.5 text-left overflow-hidden transition-opacity hover:opacity-90 cursor-pointer"
-                      style={{ top, height, backgroundColor: schedule.color }}
+                      className="absolute rounded-md border border-dashed border-white/80 px-0.5 py-1.5 sm:px-2 text-left overflow-hidden transition-opacity hover:opacity-90 cursor-pointer"
+                      style={{ ...horizontalPosition(`work-${index}`), top, height, backgroundColor: schedule.color }}
                     >
                       <p className="text-white text-xs font-semibold leading-tight truncate">
                         {schedule.title}
@@ -349,7 +367,7 @@ export function TimetableGrid({
                   );
                 })}
 
-                {dayEvents.map((event) => {
+                {dayEvents.map((event, index) => {
                   const topMin = minutesFromStart(event.startTime, startHour);
                   const durationMin =
                     timeToMinutes(event.endTime) - timeToMinutes(event.startTime);
@@ -360,8 +378,9 @@ export function TimetableGrid({
                     <button
                       key={event.id}
                       onClick={() => onEventClick?.(event)}
-                      className="absolute inset-x-1 rounded-md border-2 border-white px-2 py-1.5 text-left overflow-hidden transition-opacity hover:opacity-90 cursor-pointer"
+                      className="absolute rounded-md border border-white px-0.5 py-1.5 sm:px-2 text-left overflow-hidden transition-opacity hover:opacity-90 cursor-pointer"
                       style={{
+                        ...horizontalPosition(`event-${index}`),
                         top,
                         height,
                         backgroundColor: event.color,

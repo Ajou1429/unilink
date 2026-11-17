@@ -258,6 +258,10 @@ export async function executePreparedCommand(p:PreparedCommand,check:()=>void):P
       if(c.kind==="classify_note"&&note&&note.linkedType===(c.course_id?"course":"personal")&&(note.linkedId??null)===p.payload.linkedId)return {message:`‘${note.title}’은(는) 이미 ${p.payload.linkedTitle}으로 분류되어 있어요.`};
       if(!note||note.version!==p.payload.noteVersion||note.updatedAt!==p.payload.noteUpdatedAt)throw new Error("노트가 변경됐어요. 최신 노트로 다시 확인해 주세요.");
       if(c.kind==="analyze_pdf") {
+        const { compareExistingLecture } = await import("./file-intake/lecture-registration");
+        current();
+        await compareExistingLecture(note,current);
+        current();
         const r=await db.functions.invoke<{analysis_id:string}>("note-analyze",{body:{noteId:note.id,consent:true}});current();
         if(r.error)throw new Error(await describeFunctionError(r.error,"PDF 분석 요청에 실패했어요."));
         if(!r.data?.analysis_id)throw new Error("분석 요청 번호를 확인하지 못했어요.");

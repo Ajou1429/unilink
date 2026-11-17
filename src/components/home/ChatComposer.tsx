@@ -10,7 +10,7 @@ export interface ComposerSubmit {
   files: File[];
 }
 
-/** 채팅 입력창. 글 입력, + 버튼으로 파일 첨부, 입력창이나 화면 어디에든 파일을 끌어다 놓을 수 있다. */
+/** 채팅 입력창. 파일 선택·드래그 앤 드롭·클립보드 파일 붙여넣기를 지원한다. */
 export function ChatComposer({
   onSubmit,
   footer,
@@ -114,6 +114,18 @@ export function ChatComposer({
           placeholder="궁금한 공부 내용이나 하고 싶은 일을 말해 주세요. 노트도 첨부할 수 있어요."
           maxLength={4000}
           onChange={(event) => setText(event.target.value)}
+          onPaste={(event) => {
+            let pasted = Array.from(event.clipboardData.files);
+            if (!pasted.length) {
+              pasted = Array.from(event.clipboardData.items)
+                .filter(item => item.kind === "file")
+                .map(item => item.getAsFile())
+                .filter((file): file is File => file !== null);
+            }
+            if (!pasted.length) return;
+            event.preventDefault();
+            setFiles(previous => [...previous, ...pasted]);
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();

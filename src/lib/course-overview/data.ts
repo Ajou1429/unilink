@@ -1,3 +1,4 @@
+import { preferredLectureNotes } from "../lecture-content";
 // 과목 화면(보기 전용 3단 + 설정)의 데이터. 새 저장소를 만들지 않고 기존 기능의 저장 경로를 그대로 쓴다.
 // 여기서 지우거나 고치면 나의 노트·문제은행·학습 계획·시간표·코칭 데이터에 그대로 반영된다.
 import { getSupabaseBrowserClient } from "../supabase-client";
@@ -62,7 +63,7 @@ function typeLabel(note: MyNote) {
 }
 
 export async function listMaterials(courseId: string): Promise<Material[]> {
-  const notes = (await getMyNotes()).filter((note) => note.linkedType === "course" && note.linkedId === courseId);
+  const notes = preferredLectureNotes((await getMyNotes()).filter((note) => note.linkedType === "course" && note.linkedId === courseId));
   return [
     ...notes.map((note): Material => ({ key: `note:${note.id}`, kind: "note", id: note.id, title: note.title || note.fileName || "제목 없음", date: note.createdAt, label: typeLabel(note), note })),
     ...getCourseNotes(courseId).map((note: LectureNote): Material => ({ key: `legacy:${note.id}`, kind: "legacy", id: note.id, title: note.title, date: note.createdAt, label: "노트", content: note.content })),

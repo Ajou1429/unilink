@@ -1,8 +1,9 @@
+import { registerLecture } from "./lecture-registration";
 import { getCurrentAcademicTermLabel } from "../academic-term";
 import { captureStorageScope } from "../private-storage";
 import { getActiveTermCourses, getAllStoredCourses, saveStoredCourses } from "../course-storage";
 import { fetchDrivePdf, uploadNoteToDrive } from "../drive-connection";
-import { addNote, getMyNotes, updateNoteClassification, updateNoteTags, type MyNote } from "../my-notes-storage";
+import { addNote, getMyNotes, updateNoteClassification, updateNoteTags, type MyNote, type NewNoteInput } from "../my-notes-storage";
 import { analyzeProblemPdf, getProblemConsent, problemAiAvailable, saveAnalyzedProblems } from "../problem-bank/analyze";
 import {
   createSubject, joinSourceFile, listSubjects, syncSubjectsWithCourses,
@@ -94,29 +95,26 @@ async function decide(file: File, kind: IntakeFileKind, ctx: IntakeContext, cour
 type Target = { kind: "new"; file: File } | { kind: "existing"; note: MyNote; file: File };
 
 /** 노트로 저장(새 파일) 또는 기존 Drive 노트의 분류만 바꾼다 */
-async function attachNote(target: Target, course: Course | null, docType: DocType, assertCurrent: () => void): Promise<string> {
+async function attachNote(target: Target, course: Course | null, docType: DocType, assertCurrent: () => void): Promise<{ noteId: string; reused: boolean; message?: string }> {
   assertCurrent();
   const label = DOC_TYPE_LABELS[docType];
   if (target.kind === "existing") {
     await updateNoteClassification(target.note.id, course ? "course" : "unassigned", course?.id, course?.name);
     assertCurrent();
     await updateNoteTags(target.note.id, [...typeTags(target.note.tags), label]);
-    return target.note.id;
+    assertCurrent();
   }
-  const note = await addNote({
-    title: titleOf(target.file.name),
-    courseName: course?.name ?? "미분류",
-    linkedType: course ? "course" : "unassigned",
-    linkedId: course?.id,
-    linkedTitle: course?.name,
-    source: "직접 작성",
-    content: "",
-    file: target.file,
-    fileName: target.file.name,
-    fileSize: target.file.size,
-    tags: [label],
-  });
-  return note.id;
+  const input: NewNoteInput & { file: File } = {
+    title: titleOf(target.file.name), courseName: course?.name ?? "미분류", linkedType: course ? "course" : "unassigned",
+    linkedId: course?.id, linkedTitle: course?.name, source: "직접 작성", content: "", file: target.file,
+    fileName: target.file.name, fileSize: target.file.size, tags: [label],
+  };
+  if (course && (docType === "lecture" || docType === "notes")) {
+    return registerLecture(input, assertCurrent, target.kind === "existing" ? target.note : undefined);
+  }
+  if (target.kind === "existing") return { noteId: target.note.id, reused: false };
+  const note = await addNote(input);
+  return { noteId: note.id, reused: false };
 }
 
 async function subjectFor(course: Course, assertCurrent: () => void) {
@@ -223,18 +221,20 @@ async function run(target: Target, record: IntakeRecord, ctx: IntakeContext, onU
   if (decision.docType === "syllabus") course = await applySyllabus(normalized, kind, ctx, record, course);
   ctx.assertActive?.();
   const fileTarget: Target = target.kind === "new" ? { kind: "new", file: normalized } : { ...target, file: normalized };
-  record.noteId = await attachNote(fileTarget, course, decision.docType, () => ctx.assertActive?.());
+  const attached = await attachNote(fileTarget, course, decision.docType, () => ctx.assertActive?.());
+  record.noteId = attached.noteId;
+  if (attached.message) record.message = attached.message;
   ctx.assertActive?.();
   record.courseId = course?.id ?? null;
   record.courseName = course?.name;
   record.term = record.term ?? course?.term;
   if (decision.docType === "syllabus" && course) linkSyllabusNote(course, record.noteId);
-  if ((decision.docType === "problem_set" || decision.docType === "lecture") && course && kind === "pdf") {
+  if (!attached.reused && (decision.docType === "problem_set" || decision.docType === "lecture") && course && kind === "pdf") {
     await addToProblemBank(normalized, course, record, decision.docType, () => ctx.assertActive?.());
   }
   if (!course && !record.message) record.message = "과목을 찾지 못했어요. 과목을 골라 주세요.";
 
-  if (target.kind === "new" && ctx.uploadToDrive && course) {
+  if (!attached.reused && target.kind === "new" && ctx.uploadToDrive && course) {
     ctx.assertActive?.();
     try {
       await uploadNoteToDrive(record.noteId, { term: course.term, kind: DOC_TYPE_LABELS[decision.docType] });
@@ -309,12 +309,24 @@ export async function reassignRecord(record: IntakeRecord, change: { courseId?: 
   await updateNoteTags(note.id, [...typeTags(note.tags), DOC_TYPE_LABELS[docType]]);
   assertCurrent();
 
+  if (course && (docType === "lecture" || docType === "notes")) {
+    const current = (await getMyNotes()).find(row => row.id === note.id);
+    assertCurrent();
+    const file = sessionFiles.get(record.id);
+    if (current && file) {
+      const compared = await registerLecture({ title: current.title, courseName: current.courseName, linkedType: current.linkedType,
+        linkedId: current.linkedId, linkedTitle: current.linkedTitle, source: current.source, content: current.content,
+        tags: current.tags, file, fileName: current.fileName }, assertCurrent, current);
+      if (compared) { next.noteId = compared.noteId; if (compared.message) next.message = compared.message; }
+    }
+  }
+
   // Classification must not delete independent learning observations or require an in-memory PDF.
   const movedProblems = record.problemSubjectId && record.problemSourceFile && (docType !== record.docType || courseId !== record.courseId);
   if (movedProblems) {
     next.message = "노트 분류를 변경했습니다. 기존 문항과 학습 단계는 원래 문제은행에 보존했습니다.";
   }
-  if ((docType === "problem_set" || docType === "lecture") && course && !record.problemSourceFile) {
+  if (next.noteId === record.noteId && (docType === "problem_set" || docType === "lecture") && course && !record.problemSourceFile) {
     const file = sessionFiles.get(record.id);
     if (file && detectKind(file) === "pdf") await addToProblemBank(file, course, next, docType, assertCurrent);
     else if (docType === "problem_set") next.message = "문제 번호는 문제은행에서 직접 넣어 주세요.";

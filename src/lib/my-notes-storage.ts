@@ -1,3 +1,4 @@
+import { parseContentProfile, type LectureContentProfile } from "./lecture-content";
 import { captureStorageScope, getStorageUser, privateStorage } from "./private-storage.ts";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
@@ -15,6 +16,9 @@ export type NoteSyncStatus = "synced" | "pending" | "manual";
 export type NoteLinkedType = "course" | "personal" | "unassigned";
 
 export interface MyNote {
+  contentProfile?: LectureContentProfile;
+  contentProfileVersion?: number;
+  contentProfileUpdatedAt?: string;
   id: string;
   title: string;
   courseName: string;
@@ -140,6 +144,7 @@ function getLocalNotes(): MyNote[] {
   const notes = readJson<MyNote[]>(MY_NOTES_STORAGE_KEY, defaultLocalNotes);
   return notes.map((note) => ({
     ...note,
+    contentProfile: note.contentProfileVersion === (note.version ?? 1) && note.contentProfileUpdatedAt === note.updatedAt ? note.contentProfile : undefined,
     linkedType: note.linkedType ?? "unassigned",
     version: note.version ?? 1,
     tags: note.tags ?? [],
@@ -375,7 +380,18 @@ async function getSupabaseNotes(): Promise<MyNote[]> {
     .order("updated_at", { ascending: false });
 
   if (error) throw error;
-  return (data as NoteRow[]).map(rowToNote);
+  const notes = (data as NoteRow[]).map(rowToNote);
+  if (!notes.length) return notes;
+  const profiles = await supabase.from("note_content_profiles").select("note_id,source_version,source_updated_at,profile");
+  if (profiles.error) {
+    if (["42P01", "PGRST205"].includes(profiles.error.code)) return notes;
+    throw profiles.error;
+  }
+  return notes.map(note => {
+    const row = profiles.data?.find(item => item.note_id === note.id && item.source_version === note.version && item.source_updated_at === note.updatedAt);
+    const contentProfile = parseContentProfile(row?.profile);
+    return contentProfile ? { ...note, contentProfile } : note;
+  });
 }
 
 async function addSupabaseNote(input: NewNoteInput, assertCurrent: () => void): Promise<MyNote> {
@@ -595,4 +611,22 @@ export async function deleteNotes(noteIds: string[]): Promise<MyNote[]> {
 export function upsertGoodNotesDriveFiles(files: GoodNotesDriveFile[]): MyNote[] | null {
   if (isSupabaseConfigured) return null;
   return upsertLocalGoodNotesDriveFiles(files);
+}
+
+/** Comparison metadata is bound to the exact source revision, without touching note timestamps. */
+export async function saveNoteContentProfile(note: MyNote, profile: LectureContentProfile, assertCurrent: () => void) {
+  assertCurrent();
+  if (isSupabaseConfigured) {
+    const result = await getSupabaseClient()!.rpc("save_note_content_profile", {
+      p_note: note.id, p_version: note.version, p_updated_at: note.updatedAt, p_profile: profile,
+    });
+    if (result.error) throw new Error(result.error.code === "PGRST202" ? "자료 내용 비교 DB 업데이트(0041)가 필요합니다." : "자료가 변경되었거나 내용 비교 결과를 저장하지 못했습니다. 다시 분석해 주세요.");
+    assertCurrent();
+    window.dispatchEvent(new Event(MY_NOTES_CHANGED_EVENT));
+    return;
+  }
+  const current = getLocalNotes();
+  const source = current.find(row => row.id === note.id);
+  if (!source || source.version !== note.version || source.updatedAt !== note.updatedAt) throw new Error("자료가 변경되었습니다. 다시 분석해 주세요.");
+  saveLocalNotes(current.map(row => row.id === note.id ? { ...row, contentProfile: profile, contentProfileVersion: note.version, contentProfileUpdatedAt: note.updatedAt } : row));
 }

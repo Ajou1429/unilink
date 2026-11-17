@@ -17,6 +17,8 @@ export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordproc
 export interface ExtractedContent {
   kind: IntakeFileKind;
   text: string;
+  /** Whether every source page was read without truncation. */
+  complete?: boolean;
   /** 텍스트가 거의 없을 때만 만든 첫 페이지 JPEG (data URL) */
   image?: string;
 }
@@ -70,24 +72,28 @@ async function extractPdf(file: Blob, pages: number, maxChars: number): Promise<
   const pdf = await loadPdf(file);
   try {
     const lines: string[] = [];
+    let readPages = 0;
     for (let p = 1; p <= Math.min(pages, pdf.numPages); p++) {
       const page = await pdf.getPage(p);
       const { items } = await page.getTextContent();
       lines.push(...pageLines(items, page.getViewport({ scale: 1 }).width));
+      readPages = p;
       page.cleanup();
       if (lines.join("\n").length >= maxChars) break;
     }
-    const text = lines.join("\n").slice(0, maxChars);
-    if (text.replace(/\s/g, "").length >= MIN_TEXT_CHARS) return { kind: "pdf", text };
+    const full = lines.join("\n");
+    const complete = readPages === pdf.numPages && full.length <= maxChars;
+    const text = full.slice(0, maxChars);
+    if (text.replace(/\s/g, "").length >= MIN_TEXT_CHARS) return { kind: "pdf", text, complete };
     // 스캔·손글씨 PDF: 첫 페이지만 작게 렌더링
     const page = await pdf.getPage(1);
     const base = page.getViewport({ scale: 1 });
     const { canvas, scale } = scaledCanvas(base.width, base.height);
     const context = canvas.getContext("2d");
-    if (!context) return { kind: "pdf", text };
+    if (!context) return { kind: "pdf", text, complete };
     await page.render({ canvasContext: context, viewport: page.getViewport({ scale }) }).promise;
     page.cleanup();
-    return { kind: "pdf", text, image: canvasToJpeg(canvas) };
+    return { kind: "pdf", text, complete, image: canvasToJpeg(canvas) };
   } finally {
     await pdf.destroy();
   }
@@ -106,12 +112,13 @@ async function extractOffice(file: Blob, kind: "pptx" | "docx", pages: number, m
   if (kind === "docx") {
     const entries = await readZipEntries(bytes, (name) => name === "word/document.xml");
     const xml = entries.get("word/document.xml");
-    return { kind, text: xml ? ooxmlText(new TextDecoder().decode(xml)).slice(0, maxChars) : "" };
+    const text = xml ? ooxmlText(new TextDecoder().decode(xml)) : "";
+    return { kind, text: text.slice(0, maxChars), complete: text.length <= maxChars };
   }
   const entries = await readZipEntries(bytes, (name) => /^ppt\/slides\/slide\d+\.xml$/.test(name));
   const slides = [...entries.keys()].sort((a, b) => slideNumber(a) - slideNumber(b)).slice(0, Math.max(3, pages + 1));
   const text = slides.map((name) => ooxmlText(new TextDecoder().decode(entries.get(name)!))).join("\n\n");
-  return { kind, text: text.slice(0, maxChars) };
+  return { kind, text: text.slice(0, maxChars), complete: slides.length === entries.size && text.length <= maxChars };
 }
 
 /**

@@ -108,6 +108,7 @@ test('PDF transmission requires the registered yes draft and source changes inva
     if(/(?:supabase-client|supabase\/client)(?:\.ts)?$/.test(name))return {getSupabaseBrowserClient:()=>db,getSupabaseClient:()=>db,isSupabaseConfigured:()=>true};
     if(name.endsWith('private-storage'))return {captureStorageScope:()=>()=>{},getStorageUser:()=>A};
     if(name.endsWith('my-notes-storage'))return {getMyNotes:async()=>[note]};
+    if(name.endsWith('file-intake/lecture-registration'))return {compareExistingLecture:async()=>{}};
   });
   const exec=loader(path.join(root,'src/lib/chat-command-executor.ts'));
   const command=parseCommands([{kind:'analyze_pdf',note_id:'pdf'}],{courses:context.courses,notes:[note]})[0];

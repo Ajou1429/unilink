@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase-client";
-import { getStorageUser } from "@/lib/private-storage";
+import { compareExistingLecture } from "@/lib/file-intake/lecture-registration";
+import { captureStorageScope, getStorageUser } from "@/lib/private-storage";
 import { flushP0Changes } from "@/lib/p0-sync";
 import { describeFunctionError } from "@/lib/supabase/function-error";
 import type { MyNote } from "@/lib/my-notes-storage";
@@ -113,7 +114,12 @@ export function NoteAnalysisPanel({ note }: { note: MyNote }) {
     try {
       const db = getSupabaseBrowserClient();
       if (!db) throw new Error("로그인이 필요합니다.");
+      const assertCurrent = captureStorageScope();
       await flushP0Changes();
+      assertCurrent();
+      const compared = await compareExistingLecture(note, assertCurrent);
+      assertCurrent();
+      if (compared?.message) setMessage(compared.message);
       const result = await db.functions.invoke("note-analyze", { body: { noteId: note.id, consent } });
       if (result.error) throw new Error(await describeFunctionError(result.error, "분석을 시작하지 못했습니다."));
       setRevision((n) => n + 1);
