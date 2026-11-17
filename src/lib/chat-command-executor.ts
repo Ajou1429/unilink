@@ -1,3 +1,4 @@
+import type { ChatDocumentAnalysis } from "./chat-document-analysis";
 import { getSupabaseBrowserClient } from "./supabase-client";
 import { captureStorageScope, getStorageUser } from "./private-storage";
 import { flushP0Changes } from "./p0-sync";
@@ -24,7 +25,7 @@ export interface PreparedCommand {
   payload: Data; proposal?: ChatCoachingResult; goals?: {id:string;title:string}[];
 }
 export type Preparation = {question:string;command:ChatCommand} | {prepared:PreparedCommand};
-export interface CommandResult { message: string; next?: PreparedCommand }
+export interface CommandResult { message: string; next?: PreparedCommand; analysis?: ChatDocumentAnalysis }
 const jobs=new Map<string,Promise<CommandResult>>();
 const running=new Set<string>();
 const drafts=new Map<string,{value:PreparedCommand;owner:()=>void}>();
@@ -267,16 +268,16 @@ export async function executePreparedCommand(p:PreparedCommand,check:()=>void):P
         if(!r.data?.analysis_id)throw new Error("분석 요청 번호를 확인하지 못했어요.");
         for(let n=0;n<45;n++) {
           current();
-          const a=resultData(await db.from("note_analyses").select("id,status,error_message,note_version,note_updated_at").eq("user_id",p.userId).eq("id",r.data.analysis_id).single());current();
+          const a=resultData(await db.from("note_analyses").select("id,status,error_message,note_version,note_updated_at,summary").eq("user_id",p.userId).eq("id",r.data.analysis_id).single());current();
           if(!a)throw new Error("분석 상태를 찾지 못했어요.");
           if(a.note_version!==note.version||a.note_updated_at!==note.updatedAt)throw new Error("분석 중 원본이 변경됐어요. 최신 자료를 다시 확인해 주세요.");
           if(a.status==="failed")throw new Error(a.error_message??"PDF를 분석하지 못했어요.");
           if(a.status==="completed") {
-            const rows=resultData(await db.from("note_analysis_candidates").select("kind,title,date_text").eq("user_id",p.userId).eq("analysis_id",a.id).order("page"))??[];current();
+            const rows=resultData(await db.from("note_analysis_candidates").select("kind,title,description,exam_scope,date_text,page").eq("user_id",p.userId).eq("analysis_id",a.id).order("page"))??[];current();
             const sections=Object.entries({topic:"강의 내용",assignment:"과제",exam:"시험"}).flatMap(([kind,label])=>{
               const items=rows.filter(x=>x.kind===kind);return items.length?[label,...items.map(x=>`• ${x.title}${x.date_text?` · ${x.date_text}`:""}`)]:[];
             });
-            return {message:`‘${note.title}’ 분석 완료\n${sections.join("\n")||"명확한 강의 내용·과제·시험 후보가 없어요."}\n아직 일정으로 등록하지 않았어요. 추가할 항목을 말씀해 주세요.`};
+            return {analysis:{noteId:note.id,noteTitle:note.title,version:note.version,updatedAt:note.updatedAt,summary:a.summary??"",candidates:rows},message:`‘${note.title}’ 분석 완료\n${sections.join("\n")||"명확한 강의 내용·과제·시험 후보가 없어요."}\n아직 일정으로 등록하지 않았어요. 추가할 항목을 말씀해 주세요.`};
           }
           await new Promise(resolve=>setTimeout(resolve,3000));
         }

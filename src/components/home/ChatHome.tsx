@@ -1,5 +1,6 @@
 "use client";
 
+import { allowsChatDocumentAnalysis, type ChatDocumentAnalysis } from "@/lib/chat-document-analysis";
 import { conversationContext, validateRecordDraftAction } from "@/lib/chat-continuity";
 import { conversationTitle } from "@/lib/chat-title";
 import { archivedRequestDisplay } from "@/lib/chat-request-display";
@@ -355,7 +356,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
     }
   }
 
-  async function record(text: string, history: { role: "user" | "assistant"; text: string }[], assertCurrent: () => void, observedAt: string, fileRecords: IntakeRecord[] = []) {
+  async function record(text: string, history: { role: "user" | "assistant"; text: string }[], assertCurrent: () => void, observedAt: string, fileRecords: IntakeRecord[] = [], analysis?: ChatDocumentAnalysis, analyzedNotes: string[] = []) {
     assertCurrent();
     if (getAssistantConsent() !== "granted") {
       setThread((prev) => [...prev, { id: nextId(), kind: "consent", text, fileRecords }]);
@@ -369,8 +370,8 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
       assertCurrent();
       setContext(ctx);
       if (!ctx.signedIn) { say("로그인하면 일상 대화, 공부 질문과 서비스 기능 실행을 이용할 수 있어요."); return; }
-      const pending=activeCommand();
-      const {result,notes} = await converse(ctx, text, history.slice(-8), dateKey(new Date()),fileRecords,pending?.command);
+      const pending=analysis ? null : activeCommand();
+      const {result,notes} = await converse(ctx, text, history.slice(-8), dateKey(new Date()),fileRecords,pending?.command,analysis);
       assertCurrent();
       const commands=result.commands?.length?result.commands:parseCommands(result.tools.filter(t=>t.feature==="study_plan"||t.feature==="pdf_analysis").slice(0,1).map(t=>({
         kind:t.feature==="study_plan"?"generate_plan":"analyze_pdf",course_id:t.course_id,note_id:t.note_id,intent:t.intent,minutes:t.daily_minutes,
@@ -384,7 +385,34 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
         setThread(prev=>[...prev.map(item=>item.kind==="command"&&["ready","needs_input","error"].includes(item.status)?{...item,status:"cancelled" as const,resume:false,message:item.id===pending?.id&&pending.command.kind===command.kind?"추가 답변을 반영했어요.":"새 요청으로 이전 미확정 제안은 취소했어요."}:item.kind==="records"?{...item,entries:item.entries.map(e=>!e.applied&&(e.status==="waiting"||e.status==="error")?{...e,status:"undone" as const}:e)}:item),{id,kind:"command",command,source,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,status:"preparing"}]);
         try {
           const prepared=await prepareChatCommand(command,ctx,notes,dateKey(new Date()),assertCurrent,source,fileRecords.map(f=>f.noteId).filter((s):s is string=>!!s));assertCurrent();
-          patchItem(id,item=>item.kind==="command"?"question" in prepared?{...item,command:prepared.command,status:"needs_input",message:prepared.question}:{...item,command:prepared.prepared.command,status:"ready",prepared:prepared.prepared}:item);
+          if ("question" in prepared) {
+            patchItem(id, item => item.kind === "command" ? { ...item, command: prepared.command, status: "needs_input", message: prepared.question } : item);
+            return;
+          }
+          const draft = prepared.prepared;
+          if (draft.command.kind === "analyze_pdf" || draft.phase === "plan_analysis") {
+            if (!allowsChatDocumentAnalysis(source)) {
+              discardPreparedCommand(draft);
+              patchItem(id, item => item.kind === "command" ? { ...item, status: "needs_input", message: "본문 분석을 제외한 요청으로 확인했어요. 파일 분류나 제목 정보로 처리할 내용을 알려주세요." } : item);
+              return;
+            }
+            if (analyzedNotes.includes(draft.command.note_id ?? "") || (analysis && draft.command.kind === "analyze_pdf" && draft.command.note_id === analysis.noteId)) {
+              discardPreparedCommand(draft);
+              patchItem(id, item => item.kind === "command" ? { ...item, status: "done", message: "분석 결과에서 요청한 조건을 확정하지 못했어요. 확인할 부분을 조금 더 구체적으로 알려주세요." } : item);
+              return;
+            }
+            patchItem(id, item => item.kind === "command" ? { ...item, prepared: draft, status: "running", message: undefined } : item);
+            const outcome = await executePreparedCommand(draft, assertCurrent);
+            assertCurrent();
+            if (outcome.next) {
+              patchItem(id, item => item.kind === "command" ? { ...item, command: outcome.next!.command, prepared: outcome.next, status: "ready", message: outcome.message } : item);
+            } else {
+              patchItem(id, item => item.kind === "command" ? { ...item, status: "done", message: outcome.analysis ? `‘${outcome.analysis.noteTitle}’ 본문 분석을 마쳤어요.` : outcome.message } : item);
+              if (outcome.analysis) await record(source, history, assertCurrent, observedAt, fileRecords, outcome.analysis, [...analyzedNotes, outcome.analysis.noteId]);
+            }
+            return;
+          }
+          patchItem(id, item => item.kind === "command" ? { ...item, command: draft.command, status: "ready", prepared: draft } : item);
         } catch(error) {assertCurrent();patchItem(id,item=>item.kind==="command"?{...item,status:"error",message:error instanceof Error?error.message:"요청을 준비하지 못했어요."}:item);}
         return;
       }
@@ -442,6 +470,19 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
         const command=parseCommands([item.command],{courses:ctx.courses,notes})[0];
         if(!command)throw new Error("이전 요청의 과목이나 자료를 찾지 못했어요. 현재 이름으로 다시 알려주세요.");
         const next=await prepareChatCommand(command,ctx,notes,dateKey(new Date()),check,item.source);check();
+        if (!("question" in next) && (next.prepared.command.kind === "analyze_pdf" || next.prepared.phase === "plan_analysis")) {
+          if (getAssistantConsent() !== "granted" || !allowsChatDocumentAnalysis(item.source)) {
+            discardPreparedCommand(next.prepared);
+            patchItem(id,row=>row.kind==="command"?{...row,status:"needs_input",resume:true,message:"이전 요청의 대화 조건을 다시 확인하고 있어요."}:row);
+            await record(item.source, conversationContext(snapshotThread(threadRef.current,intake.records)), check, new Date().toISOString());
+            return;
+          }
+          patchItem(id,row=>row.kind==="command"?{...row,prepared:next.prepared,status:"running"}:row);
+          const outcome=await executePreparedCommand(next.prepared,check);check();
+          patchItem(id,row=>row.kind==="command"?outcome.next?{...row,prepared:outcome.next,status:"ready",resume:false,message:outcome.message}:{...row,status:"done",resume:false,message:outcome.analysis?`‘${outcome.analysis.noteTitle}’ 본문 분석을 마쳤어요.`:outcome.message}:row);
+          if(outcome.analysis) await record(item.source,conversationContext(snapshotThread(threadRef.current,intake.records)),check,new Date().toISOString(),[],outcome.analysis,[outcome.analysis.noteId]);
+          return;
+        }
         patchItem(id,row=>row.kind==="command"?"question" in next?{...row,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,command:next.command,status:"needs_input",message:next.question}:{...row,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,command:next.prepared.command,status:"ready",prepared:next.prepared,message:undefined}:row);
       } catch(error) {
         try{check();}catch{return;}
@@ -466,7 +507,8 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
     void requests.current.enqueue(async check=>{
       try {
         const result=await executePreparedCommand(prepared,check);check();
-        patchItem(id,x=>x.kind==="command"?result.next?{...x,prepared:result.next,status:"ready",message:result.message}:{...x,status:"done",message:result.message}:x);
+        patchItem(id,x=>x.kind==="command"?result.next?{...x,prepared:result.next,status:"ready",message:result.message}:{...x,status:"done",message:result.analysis?`‘${result.analysis.noteTitle}’ 본문 분석을 마쳤어요.`:result.message}:x);
+        if(result.analysis)await record(item.source,conversationContext(snapshotThread(threadRef.current,intake.records)),check,new Date().toISOString(),[],result.analysis,[result.analysis.noteId]);
       } catch(error) {try{check();}catch{return;}patchItem(id,x=>x.kind==="command"?{...x,status:"error",message:error instanceof Error?error.message:"실행하지 못했어요."}:x);}
     }).catch(()=>{}).finally(()=>confirmations.current.delete(id));
   }
@@ -633,7 +675,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
         if (item.kind === "consent") {
           return (
             <div key={item.id} className="space-y-2 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-              <p>대화와 최근 대화 일부, 본인 과목·노트 제목·일정·학습 계획·자기보고 이해도 일부를 AI(OpenAI)로 보내 답변하고 기능을 연결해요. 명시한 진도·이해도는 기록하며, 대화 내용과 요청·계획 결과는 본인 계정에 저장되어 다른 기기에서도 불러올 수 있어요. 보관된 실행 내역은 당시 기록이며 현재 계획 상태와 다를 수 있어요. PDF 본문 분석은 별도 동의를 받아요.</p>
+              <p>대화와 최근 대화 일부, 본인 과목·노트 제목·일정·학습 계획·자기보고 이해도 일부를 AI(OpenAI)로 보내 답변하고 기능을 연결해요. 명시한 진도·이해도는 기록하며, 대화 내용과 요청·계획 결과는 본인 계정에 저장되어 다른 기기에서도 불러올 수 있어요. 보관된 실행 내역은 당시 기록이며 현재 계획 상태와 다를 수 있어요. 대화 요청에 자료 내용이 필요하면 선택한 PDF 원문을 OpenAI로 보내 분석하고 결과를 재사용해요. 일정·목표·계획의 등록은 내용을 확인한 뒤 반영해요.</p>
               <div className="flex gap-2">
                 <button type="button" onClick={() => answerConsent(item.id, item.text, "granted")} className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">{serviceAgentEnabled ? "동의하고 계속" : "동의하고 대화"}</button>
                 <button type="button" onClick={() => answerConsent(item.id, item.text, "declined")} className="rounded-md border bg-white px-3 py-1 text-xs">AI 대화 사용 안 함</button>
