@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getSupabaseBrowserClient } from "@/lib/supabase-client";
-import { getStorageUser } from "@/lib/private-storage";
+import { captureStorageScope, getStorageUser } from "@/lib/private-storage";
 import { flushP0Changes } from "@/lib/p0-sync";
 import { addWeeklyStudyPlan, postponeWeeklyStudyPlan } from "@/lib/study-storage";
 import type { Course, StudyPlan } from "@/lib/types";
@@ -108,25 +108,30 @@ export function TodayPlans({ date: today, plans, courses }: { date: string; plan
     let active = true;
     async function load() {
       const db = getSupabaseBrowserClient();
-      const user = db ? (await db.auth.getUser()).data.user : null;
-      if (!db || !user || getStorageUser() !== user.id) {
+      // AccountBoundary verifies the session before mounting private readers.
+      const userId = getStorageUser();
+      if (!db || !userId) {
         if (active) { setItems([]); setMessage(""); }
         return;
       }
+      const assertCurrent = captureStorageScope(userId);
       await flushP0Changes();
+      if (!active) return;
+      assertCurrent();
       const start = new Date(`${date}T00:00:00+09:00`);
       const end = new Date(start.getTime() + DAY_MS);
       const result = await db.from("study_plan_items")
         .select("id,title,scheduled_start,scheduled_end,planned_minutes,metadata,completion_criteria,study_plans!inner(source_type,status)")
-        .eq("user_id", user.id).eq("study_plans.source_type", "ai")
+        .eq("user_id", userId).eq("study_plans.source_type", "ai")
         .in("study_plans.status", ["approved", "active", "completed"])
         .in("status", ["planned", "in_progress"])
         .gte("scheduled_start", start.toISOString()).lt("scheduled_start", end.toISOString()).order("scheduled_start");
-      if (!active || getStorageUser() !== user.id) return;
+      if (!active) return;
+      assertCurrent();
       if (result.error) throw new Error("AI 계획을 불러오지 못했습니다.");
       setItems((result.data ?? []) as PlanItem[]); setMessage("");
     }
-    void load().catch(() => { if (active) { setItems([]); setMessage("AI 계획을 불러오지 못했습니다."); } });
+    void load().catch(() => { if (active) { setItems([]); setMessage("AI 계획을 불러오지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요."); } });
     return () => { active = false; };
   }, [date, plans, reload]);
 
@@ -222,7 +227,10 @@ export function TodayPlans({ date: today, plans, courses }: { date: string; plan
           <Redo2 className="h-3.5 w-3.5" /> 미루기
         </Button>
       </div>)}
-      {message && <p role="status" className="text-xs text-muted-foreground">{message}</p>}
+      {message && <div className="space-y-2">
+        <p role="status" className="text-xs text-muted-foreground">{message}</p>
+        {message.includes("불러오지 못했습니다") && <Button variant="outline" size="sm" onClick={() => setReload(value => value + 1)}>계획 다시 불러오기</Button>}
+      </div>}
       {!rows.length && !message && <p className="py-6 text-center text-sm text-muted-foreground">예정된 계획이 없어요.</p>}
     </CardContent>
     {adding && <AddPlanDialog open={adding} onOpenChange={setAdding} date={date} courses={courses} />}

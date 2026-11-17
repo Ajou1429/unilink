@@ -641,7 +641,6 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
       {historyLoading&&<p role="status" className="py-3 text-sm">대화를 불러오는 중…</p>}
       {historyError&&<p role="alert" className="py-3 text-sm text-destructive">{historyError} 목록에서 다시 선택하거나 새 채팅을 시작해 주세요.</p>}
       {saveError&&<div role="alert" className="py-3 text-sm text-destructive">{saveError}<button type="button" className="ml-2 underline" onClick={()=>void writer.current?.flush()}>저장 재시도</button></div>}
-      {!historyLoading&&!historyError&&<p className="pt-2 text-xs text-muted-foreground">로그인한 계정에 대화와 계획 내역을 자동 저장해요. 이전 실행 내역은 당시 기록으로 표시돼요.</p>}
       {!historyLoading&&!historyError&&(chatting ? (
         <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">{conversation}</div>
       ) : (
