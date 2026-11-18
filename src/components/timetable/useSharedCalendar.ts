@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase-client";
 import { captureStorageScope, getStorageUser } from "@/lib/private-storage";
 import { COURSE_EVENTS_CHANGED_EVENT } from "@/lib/course-events";
+import { COURSES_CHANGED_EVENT, getAllStoredCourses } from "@/lib/course-storage";
 import { TIMETABLE_CHANGED_EVENT } from "@/lib/timetable-storage";
 import { sharedCalendarEvents, type SharedCalendarEvent } from "@/lib/shared-calendar-view";
 
@@ -29,15 +30,19 @@ export function useSharedCalendar(from: string, until: string) {
         const goals = ids.length ? await db.from("learning_goals").select("id,title,course_id,metadata").eq("user_id", owner).in("id", ids) : { data: [], error: null };
         assertAccount();
         if (goals.error) throw new Error("일정의 과목을 확인하지 못했습니다.");
-        if (active && current === revision) { setEvents(sharedCalendarEvents(rows.data ?? [], goals.data ?? [], from, until)); setError(""); }
+        if (active && current === revision) {
+          const courseColors = new Map(getAllStoredCourses().map(course => [course.id, course.color]));
+          setEvents(sharedCalendarEvents(rows.data ?? [], goals.data ?? [], from, until, courseColors)); setError("");
+        }
       } catch (error) {
         if (active && current === revision) { setEvents([]); setError(error instanceof Error ? error.message : "DB 일정 조회 실패"); }
       }
     }
     void load();
     window.addEventListener(COURSE_EVENTS_CHANGED_EVENT, load);
+    window.addEventListener(COURSES_CHANGED_EVENT, load);
     window.addEventListener(TIMETABLE_CHANGED_EVENT, load);
-    return () => { active = false; window.removeEventListener(COURSE_EVENTS_CHANGED_EVENT, load); window.removeEventListener(TIMETABLE_CHANGED_EVENT, load); };
+    return () => { active = false; window.removeEventListener(COURSE_EVENTS_CHANGED_EVENT, load); window.removeEventListener(COURSES_CHANGED_EVENT, load); window.removeEventListener(TIMETABLE_CHANGED_EVENT, load); };
   }, [from, until]);
   return { events, error };
 }

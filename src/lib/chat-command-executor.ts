@@ -15,6 +15,7 @@ import { courseKnowledgeEnabled, prepareCourseKnowledge, requestCourseKnowledge 
 import { getMyNotes, type MyNote } from "./my-notes-storage";
 import type { ChatCommand } from "../../supabase/functions/_shared/chatCommands.ts";
 import type { ChatContext } from "./chat-record/apply";
+import { classWindowsFor } from "./chat-record/plan";
 import type { ChatCoachingResult } from "../components/coaching/CoachingRequestPanel";
 
 type Db = NonNullable<ReturnType<typeof getSupabaseBrowserClient>>;
@@ -30,6 +31,8 @@ const jobs=new Map<string,Promise<CommandResult>>();
 const running=new Set<string>();
 const drafts=new Map<string,{value:PreparedCommand;owner:()=>void}>();
 const dayName=["일","월","화","수","목","금","토"] as const;
+const duringClass = /수업\s*(?:시간\s*(?:중|내|동안|에)|중)|\bduring (?:the )?class\b|\bin class\b/i;
+const classTimeNote = "시간표상 수업 시간대입니다. 정확한 시험·퀴즈 시작 시각은 공지되지 않았어요.";
 const resultData = <T>(r:{data:T;error:unknown}):T=>{if(r.error)throw new Error((r.error as {message?:string}).message??"요청을 처리하지 못했어요.");return r.data;};
 const iso=(date:string,time:string)=>new Date(`${date}T${time}:00`).toISOString();
 const shift=(date:string,days:number)=>{const d=new Date(date+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);};
@@ -65,13 +68,23 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
   if(["add_event","add_task","add_plan"].includes(c.kind)&&!c.date)return question(c,"몇 월 며칠에 추가할까요?");
   if(c.kind==="add_event"||c.kind==="add_task") {
     if(c.kind==="add_task"&&!course)return question(c,"어느 과목의 과제·시험인가요?");
+    let classWindow=false;
+    if(c.kind==="add_task"&&course&&["exam","quiz"].includes(c.event_type??"")&&!c.start_time&&!c.end_time&&duringClass.test(requestText)) {
+      const windows=classWindowsFor(course,c.date!);
+      if(!windows.length)return question(c,`${c.date} ${course.name} 시간표에서 수업 시간을 확인하지 못했어요. 공지된 시간대가 있나요?`);
+      if(windows.length!==1)return question(c,`${c.date} ${course.name} 수업이 여러 개예요. 어느 시간대인가요? ${windows.map(slot=>`${slot.startTime}~${slot.endTime}`).join(" / ")}`);
+      c.start_time=windows[0].startTime;
+      c.end_time=windows[0].endTime;
+      c.all_day=false;
+      classWindow=true;
+    }
     if(c.kind==="add_task"&&["assignment","project"].includes(c.event_type??"assignment")&&!c.start_time) { c.start_time="23:59"; c.all_day=false; }
     if(!c.all_day&&!c.start_time)return question(c,c.kind==="add_task"?"마감 또는 시험 시작 시각이 언제인가요?":"몇 시에 시작하나요?");
     const timed=c.kind==="add_event"||!["assignment","project"].includes(c.event_type??"assignment");
     if(timed&&!c.all_day&&(!c.end_time||c.end_time<=c.start_time!))return question(c,"종료 시각을 알려주세요. 시작 시각보다 뒤여야 해요.");
     const goal=course?ctx.goals.get(course.id):null;
     if(course&&!goal)throw new Error("과목 동기화 후 다시 요청해 주세요.");
-    return ready(c,uid,[`${course?.name??"개인 일정"} · ${c.title}`,`${c.date} ${c.all_day?"종일":`${c.start_time}${timed?` ~ ${c.end_time}`:" 마감"}`}`,c.details??"",c.exam_scope?`시험 범위: ${c.exam_scope}`:""].filter(Boolean),{goalId:goal??null},"write",id);
+    return ready(c,uid,[`${course?.name??"개인 일정"} · ${c.title}`,`${c.date} ${c.all_day?"종일":`${c.start_time}${timed?` ~ ${c.end_time}`:" 마감"}`}`,c.details??"",c.exam_scope?`시험 범위: ${c.exam_scope}`:"",...(classWindow?[classTimeNote]:[])].filter(Boolean),{goalId:goal??null,classWindow},"write",id);
   }
   if(c.kind==="add_goal")return ready(c,uid,[`개인 학습 목표: ${c.title}`,c.date?`목표일: ${c.date}`:"목표일 미지정",c.details??""].filter(Boolean),{},"write",id);
   if(c.kind==="add_plan")return ready(c,uid,[`${course?.name??"개인 학습"} · ${c.title}`,`수동 계획 · ${c.date}`,c.details??""].filter(Boolean),{},"write",id);
@@ -211,6 +224,11 @@ async function generateProposal(p:PreparedCommand,consent:boolean,check:()=>void
 
 async function insertEvent(db:Db,p:PreparedCommand,check:()=>void) {
   const c=p.command;
+  if(p.payload.classWindow===true) {
+    const course=getAllStoredCourses().find(row=>row.id===c.course_id);
+    const windows=course?classWindowsFor(course,c.date!):[];
+    if(windows.length!==1||windows[0].startTime!==c.start_time||windows[0].endTime!==c.end_time)throw new Error("과목 시간표가 변경됐어요. 현재 시간으로 다시 요청해 주세요.");
+  }
   const assignment=c.kind==="add_task"&&["assignment","project"].includes(c.event_type??"assignment");
   const at=iso(c.date!,c.all_day?assignment?"23:59":"00:00":c.start_time!);
   if(c.kind==="add_event") {
@@ -223,7 +241,7 @@ async function insertEvent(db:Db,p:PreparedCommand,check:()=>void) {
   // Projects use the existing course assignment category; appointments use "other".
   const eventType=assignment?"assignment":c.event_type==="appointment"?"other":c.event_type??"assignment";
   const value={id:p.id,user_id:p.userId,goal_id:p.payload.goalId??null,title:c.title!,event_type:eventType,description:c.details??"",exam_scope:c.exam_scope??"",
-    due_at:assignment?at:null,starts_at:assignment?null:at,ends_at:assignment?null:end,is_blocking:!assignment&&!c.all_day,status:"scheduled",metadata:{schema_version:1,source:"chat-confirmed"}};
+    due_at:assignment?at:null,starts_at:assignment?null:at,ends_at:assignment?null:end,is_blocking:!assignment&&!c.all_day,status:"scheduled",metadata:{schema_version:1,source:"chat-confirmed",...(p.payload.classWindow===true?{time_basis:"course_class_window"}:{})}};
   const existing=resultData(await db.from("calendar_events").select("id,title,starts_at,due_at,ends_at,status,description,exam_scope,goal_id").eq("user_id",p.userId).eq("id",p.id).maybeSingle());check();
   const sameTime=(a:string|null,b:string|null)=>a===b||(a!==null&&b!==null&&Date.parse(a)===Date.parse(b));
   if(existing) {if(existing.title!==value.title||!sameTime(existing.starts_at,value.starts_at)||!sameTime(existing.due_at,value.due_at)||!sameTime(existing.ends_at,value.ends_at)||existing.status!==value.status||existing.description!==value.description||existing.exam_scope!==value.exam_scope||existing.goal_id!==value.goal_id)throw new Error("일정이 변경됐어요. 새로 확인해 주세요.");return;}

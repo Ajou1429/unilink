@@ -414,7 +414,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
             }
             return;
           }
-          patchItem(id, item => item.kind === "command" ? { ...item, command: draft.command, status: "ready", prepared: draft } : item);
+          patchItem(id, item => item.kind === "command" ? { ...item, command: draft.payload.classWindow === true ? command : draft.command, status: "ready", prepared: draft } : item);
         } catch(error) {assertCurrent();patchItem(id,item=>item.kind==="command"?{...item,status:"error",message:error instanceof Error?error.message:"요청을 준비하지 못했어요."}:item);}
         return;
       }
@@ -485,7 +485,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
           if(outcome.analysis) await record(item.source,conversationContext(snapshotThread(threadRef.current,intake.records)),check,new Date().toISOString(),[],outcome.analysis,[outcome.analysis.noteId]);
           return;
         }
-        patchItem(id,row=>row.kind==="command"?"question" in next?{...row,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,command:next.command,status:"needs_input",message:next.question}:{...row,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,command:next.prepared.command,status:"ready",prepared:next.prepared,message:undefined}:row);
+        patchItem(id,row=>row.kind==="command"?"question" in next?{...row,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,command:next.command,status:"needs_input",message:next.question}:{...row,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,command:next.prepared.payload.classWindow===true?command:next.prepared.command,status:"ready",prepared:next.prepared,message:undefined}:row);
       } catch(error) {
         try{check();}catch{return;}
         patchItem(id,row=>row.kind==="command"?{...row,status:"error",resume:true,message:error instanceof Error?error.message:"이전 요청을 확인하지 못했어요."}:row);

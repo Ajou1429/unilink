@@ -115,3 +115,35 @@ test("DB calendar projection keeps one source, hides browser duplicates and spli
   const due = sharedCalendarEvents([{ ...row, starts_at: null, ends_at: null, due_at: "2026-11-18T14:00:00Z" }], [goal], "2026-11-18", "2026-11-18")[0];
   assert.equal(due.allDay, true); assert.match(due.memo, /23:00/);
 });
+
+test("deadlines appear once on their final date, never in timed lanes or earlier weeks", () => {
+  const row = { id: "term-project", goal_id: goal.id, title: "엔디비 팀플", description: null, exam_scope: null,
+    event_type: "presentation", starts_at: "2026-11-02T12:00:00+09:00", ends_at: "2026-12-10T23:59:00+09:00",
+    due_at: null, created_at: "2026-11-17T00:00:00Z", metadata: {} };
+  assert.deepEqual(sharedCalendarEvents([row], [goal], "2026-11-16", "2026-11-22"), []);
+  const december = sharedCalendarEvents([row], [goal], "2026-12-01", "2026-12-31");
+  assert.deepEqual(december.map(event => [event.date, event.allDay, event.deadlineTime, event.title]), [
+    ["2026-12-10", true, "23:59", "마감 · 엔디비 팀플"],
+  ]);
+  const due = sharedCalendarEvents([{ ...row, due_at: "2026-12-08T07:00:00Z" }], [goal], "2026-12-07", "2026-12-13");
+  assert.deepEqual(due.map(event => [event.date, event.deadlineTime]), [["2026-12-08", "16:00"]]);
+  const scheduled = sharedCalendarEvents([{ ...row, metadata: { calendar_timing: "scheduled" } }], [goal], "2026-12-09", "2026-12-10");
+  assert.equal(scheduled.length, 2);
+  assert.ok(scheduled.every(event => !event.allDay));
+  const overnightExam = sharedCalendarEvents([{ ...row, event_type: "exam", starts_at: "2026-12-09T23:00:00+09:00" }],
+    [goal], "2026-12-09", "2026-12-10");
+  assert.equal(overnightExam.length, 2);
+  assert.ok(overnightExam.every(event => !event.allDay));
+});
+
+test("course-linked events use the timetable course color, independent of event type", () => {
+  const assignment = { id: "due", goal_id: goal.id, title: "팀플 제출일", description: null, exam_scope: null,
+    event_type: "assignment", starts_at: null, ends_at: null, due_at: "2026-11-30T23:59:00+09:00", created_at: "2026-11-17T00:00:00Z", metadata: {} };
+  const exam = { ...assignment, id: "exam", event_type: "exam", due_at: null, starts_at: "2026-11-30T13:00:00+09:00", ends_at: "2026-11-30T14:00:00+09:00" };
+  const personal = { ...assignment, id: "personal", goal_id: null };
+  const project = (colors) => sharedCalendarEvents([assignment, exam, personal], [goal], "2026-11-30", "2026-11-30", colors)
+    .map(event => event.color);
+  assert.deepEqual(project(new Map([["my-course", "#F43F5E"]])), ["#F43F5E", "#F43F5E", "#0f766e"]);
+  assert.deepEqual(project(new Map([["my-course", "#EA580C"]])), ["#EA580C", "#EA580C", "#0f766e"]);
+  assert.deepEqual(project(new Map()), ["#0f766e", "#dc2626", "#0f766e"]);
+});

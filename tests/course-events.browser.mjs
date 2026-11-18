@@ -1,23 +1,28 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.AJOU_PLAYWRIGHT_MODULE || 'playwright');
 const browser = await chromium.launch({ headless: true, executablePath: process.env.AJOU_BROWSER_EXECUTABLE || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' });
 const base = process.env.AJOU_TEST_URL || 'http://localhost:3000';
-const output = '/tmp/unilink-course-events-browser';
+const output = process.env.AJOU_SCREENSHOTS || join(tmpdir(), 'unilink-course-events-browser');
 mkdirSync(output, { recursive: true });
 const uid = '00000000-0000-4000-8000-000000007001', cid = '00000000-0000-4000-8000-000000007002', gid = '00000000-0000-4000-8000-000000007003';
 const user = { id: uid, aud: 'authenticated', role: 'authenticated', email: 'course-test@example.invalid', user_metadata: { display_name: '테스트' }, app_metadata: { provider: 'email' }, created_at: '2026-01-01T00:00:00Z' };
 const course = { id: cid, name: '운영체제', term: '2026년 2학기', professor: '', credits: 3, days: [], startTime: '', endTime: '', location: '', color: '#2563eb' };
 try {
   for (const [name, viewport] of [['desktop', { width: 1440, height: 1000 }], ['mobile', { width: 390, height: 844 }]]) {
-    const context = await browser.newContext({ viewport }), page = await context.newPage(), errors = [], writes = [];
+    const context = await browser.newContext({ viewport, timezoneId: 'Asia/Seoul' }), page = await context.newPage(), errors = [], writes = [];
+    const now = new Date('2026-11-18T07:00:00Z');
+    await page.clock.setFixedTime(now);
     const rows = new Map([
       ['assignment', { id: 'assignment', user_id: uid, goal_id: gid, title: '완료 보고서', event_type: 'assignment', description: '기존 과제 내용', exam_scope: '', due_at: '2026-11-20T14:59:00Z', starts_at: null, ends_at: null, status: 'completed' }],
       ['exam', { id: 'exam', user_id: uid, goal_id: gid, title: '중간고사', event_type: 'exam', description: '시험 설명', exam_scope: '1~5장', due_at: null, starts_at: '2026-10-20T05:00:00Z', ends_at: '2026-10-20T06:00:00Z', status: 'scheduled' }],
     ]);
-    rows.set('ongoing', { id: 'ongoing', user_id: uid, goal_id: gid, title: '진행 중 시험', event_type: 'exam', description: '', exam_scope: '', due_at: null, starts_at: new Date(Date.now() - 3600000).toISOString(), ends_at: new Date(Date.now() + 3600000).toISOString(), status: 'scheduled' });
+    rows.set('ongoing', { id: 'ongoing', user_id: uid, goal_id: gid, title: '진행 중 시험', event_type: 'exam', description: '', exam_scope: '', due_at: null, starts_at: new Date(now.getTime() - 3600000).toISOString(), ends_at: new Date(now.getTime() + 3600000).toISOString(), status: 'scheduled' });
+    rows.set('legacy-deadline', { id: 'legacy-deadline', user_id: uid, goal_id: gid, title: '엔디비 팀플', event_type: 'presentation', description: '', exam_scope: '', due_at: null, starts_at: '2026-11-02T12:00:00+09:00', ends_at: '2026-12-10T23:59:00+09:00', status: 'scheduled', metadata: {} });
     rows.set('future', { id: 'future', user_id: uid, goal_id: gid, title: '다음 시험', event_type: 'exam', description: '', exam_scope: '', due_at: null, starts_at: '2030-12-20T05:00:00Z', ends_at: '2030-12-20T06:00:00Z', status: 'scheduled' });
     rows.set('quiz', { id: 'quiz', user_id: uid, goal_id: gid, title: '지난 퀴즈', event_type: 'quiz', description: '', exam_scope: '', due_at: null, starts_at: '2026-10-10T05:00:00Z', ends_at: null, status: 'scheduled' });
     let failSave = false;
@@ -65,6 +70,10 @@ try {
     assert.equal(await section.getByRole('button', { name: /완료 보고서|중간고사/ }).count(), 0);
     await section.getByRole('button', { name: /진행 중 시험/ }).waitFor();
     await section.getByRole('button', { name: /다음 시험/ }).waitFor();
+    const legacy = section.getByRole('button', { name: /엔디비 팀플/ });
+    await legacy.waitFor();
+    assert.match(await legacy.innerText(), /12\. 10\..*23:59 마감/);
+    assert.doesNotMatch(await legacy.innerText(), /11\. 2\./);
     assert.equal(await section.getByRole('button', { name: /지난 퀴즈/ }).count(), 0);
 
     await section.getByRole('button', { name: /^완료 일정/ }).click();
@@ -143,6 +152,39 @@ try {
     await page.getByRole('dialog').getByRole('tab', { name: '강의자료', exact: true }).click();
     assert.equal(await page.getByRole('dialog').getByRole('combobox').count(), 0);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    await page.goto(`${base}/timetable`);
+    await page.getByRole('button', { name: '다음 주', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: /엔디비 팀플/ }).count(), 0);
+    for (let i = 0; i < 3; i++) await page.getByRole('button', { name: '다음 주', exact: true }).click();
+    const deadline = page.getByRole('button', { name: '마감 · 엔디비 팀플', exact: true });
+    await deadline.waitFor();
+    assert.equal(await deadline.count(), 1);
+    assert.ok((await deadline.boundingBox()).height < 35);
+    assert.equal(await deadline.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(37, 99, 235)');
+    await page.screenshot({ path: `${output}/${name}-deadline-week.png` });
+    await page.getByRole('tab', { name: '월간 일정', exact: true }).click();
+    await page.getByRole('button', { name: '다음 달', exact: true }).click();
+    await deadline.waitFor();
+    assert.equal(await deadline.count(), 1);
+    assert.equal(await deadline.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(37, 99, 235)');
+    if (name === 'mobile') {
+      assert.equal(await deadline.innerText(), '마감');
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    }
+    await page.screenshot({ path: `${output}/${name}-deadline-month.png` });
+    await page.goto(`${base}/course?courseId=${cid}`);
+    await legacy.click();
+    dialog = page.getByRole('dialog');
+    assert.equal(await dialog.getByLabel('시간 형식').inputValue(), 'deadline');
+    assert.equal(await dialog.getByLabel('마감 일시').inputValue(), '2026-12-10T23:59');
+    assert.equal(await dialog.getByLabel('종료 일시').count(), 0);
+    await dialog.getByRole('button', { name: '저장', exact: true }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    const savedDeadline = rows.get('legacy-deadline');
+    assert.equal(savedDeadline.starts_at, null);
+    assert.equal(savedDeadline.ends_at, null);
+    assert.equal(savedDeadline.is_blocking, false);
+    assert.equal(savedDeadline.due_at, '2026-12-10T14:59:00.000Z');
     assert.deepEqual(errors, []);
     await context.close();
   }

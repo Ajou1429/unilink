@@ -29,6 +29,15 @@ export function slotFor(course: Pick<Course, "days" | "startTime" | "endTime" | 
   return slot ? { startTime: slot.startTime, endTime: slot.endTime } : { startTime: "", endTime: "" };
 }
 
+/** Return declared timetable windows only; an unknown or ambiguous slot must not be guessed. */
+export function classWindowsFor(course: Pick<Course, "days" | "startTime" | "endTime" | "schedules">, dateValue: string) {
+  const slots = courseSlots(course).filter((item) => item.day === weekdayOf(dateValue));
+  const clock = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+  if (slots.some((slot) => !clock.test(slot.startTime) || !clock.test(slot.endTime) || slot.startTime >= slot.endTime)) return [];
+  return [...new Map(slots.map(({startTime,endTime}) => [`${startTime}-${endTime}`, {startTime,endTime}])).values()]
+    .sort((a,b) => a.startTime.localeCompare(b.startTime));
+}
+
 /** 날짜를 되물을 때 버튼으로 보여 줄 최근 수업일(오늘 포함, 최신순) */
 export function recentClassDates(course: Pick<Course, "days" | "startTime" | "endTime" | "schedules">, today: string, count = 3): string[] {
   const days = new Set(courseSlots(course).map((slot) => slot.day));

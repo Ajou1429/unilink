@@ -77,6 +77,37 @@ test('yes/no command execution uses real storage, P0 SQL, cancellation and accou
       const exam=await run.prepareChatCommand({...task,event_type:'exam',start_time:null},ctx,[],'2030-11-17',noop,'시험 등록');
       assert.ok(exam.question);assert.equal(exam.prepared,undefined);
 
+      const quiz={...task,title:'수업 중 퀴즈',event_type:'quiz',start_time:null,end_time:null,
+        exam_scope:'6장~9장(배운 곳까지), HW 및 Lab 포함'};
+      const notice='11월 20일(수) 수업 시간 중 퀴즈. 범위: 6장~9장(배운 곳까지), HW 및 Lab 포함.';
+      const preview=(command=quiz,context=ctx)=>run.prepareChatCommand(command,context,[],'2030-11-17',noop,notice);
+      const quizDraft=(await preview()).prepared;
+      assert.equal(quizDraft.command.start_time,'10:00');
+      assert.equal(quizDraft.command.end_time,'11:00');
+      assert.equal(quizDraft.payload.classWindow,true);
+      const display=app.lib('chat-request-display').commandDisplay(quizDraft.command,{summary:quizDraft.summary});
+      assert.ok(display.dates.some(line=>line.startsWith('수업 시간대:')));
+      assert.ok(!display.dates.some(line=>line.startsWith('소요 시간:')));
+      assert.ok(display.content.some(line=>line.includes('정확한 시험·퀴즈 시작 시각은 공지되지')));
+      const [archived]=app.lib('chat-history-snapshot').snapshotThread([{id:'quiz',kind:'command',command:quiz,prepared:quizDraft,source:notice,status:'ready'}]);
+      assert.equal(archived.draft.command.start_time,null);
+      assert.match(archived.card.dates[0],/10:00–11:00/);
+      assert.equal((await db.query('select count(*)::int n from calendar_events where id=$1',[quizDraft.id])).rows[0].n,0);
+      await run.executePreparedCommand(quizDraft,noop);
+      const savedQuiz=(await db.query('select event_type,exam_scope,metadata from calendar_events where id=$1',[quizDraft.id])).rows[0];
+      assert.equal(savedQuiz.event_type,'quiz');
+      assert.equal(savedQuiz.exam_scope,quiz.exam_scope);
+      assert.equal(savedQuiz.metadata.time_basis,'course_class_window');
+      assert.match((await preview({...quiz,date:'2030-11-22'})).question,/수업 시간을 확인하지 못했어요/);
+      const several={...local,schedules:[...local.schedules,{day:'수',startTime:'14:00',endTime:'15:00'}]};
+      assert.match((await preview(quiz,{...ctx,courses:[several]})).question,/10:00~11:00 \/ 14:00~15:00/);
+      const exact=(await preview({...quiz,start_time:'10:30',end_time:'10:45'})).prepared;
+      assert.equal(exact.command.start_time,'10:30');
+      assert.equal(exact.payload.classWindow,false);
+      const stale=(await preview()).prepared;
+      app.lib('course-storage').saveStoredCourses([several]);
+      await assert.rejects(run.executePreparedCommand(stale,noop),/시간표가 변경/);
+      app.lib('course-storage').saveStoredCourses([local]);
     });
     await t.test('grade confirmation remains local and preserves fractional credits',async()=>{
       const p=(await run.prepareChatCommand(cmd('add_grade',{title:'세미나',term:'2학년 2학기',credits:0.5,grade:'P'}),context,[],'2030-11-17',noop,'성적추가')).prepared;
