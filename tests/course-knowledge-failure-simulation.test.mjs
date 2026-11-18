@@ -255,6 +255,18 @@ test('course preparation failures with actual Edge handler, PDF parser and SQL t
       assert.deepEqual(overview.payload.extraction.sections.map(item=>item.page_start),[1,6]);
     });
 
+    await t.test('a stored legacy API failure is reopened once after the recovery deploy', async () => {
+      const f=await fixture([{bytes:slicedPdf}]);
+      await f.invoke();await f.invoke();await f.invoke();
+      await db.query("update course_knowledge_tasks set status='failed', attempts=3, error_message='AI 분석 요청에 실패했습니다. 모델의 PDF·검색 지원과 API 설정을 확인해 주세요.' where goal_id=$1 and kind='overview' and page_start=11",[f.goal]);
+      const before=modelCalls.length;
+      assert.equal((await f.status()).status,'processing');
+      await f.invoke();
+      assert.equal((await f.status()).status,'ready');
+      assert.deepEqual(modelCalls.slice(before),[1]);
+      assert.equal((await f.tasks()).filter(row=>row.kind==='overview'&&row.page_start===11).length,2);
+    });
+
     for (const [name, source, message] of [
       ['missing Storage PDF', {}, 'PDF를 불러오지 못했습니다.'],
       ['plain non-PDF bytes', { bytes: new TextEncoder().encode('not a PDF') }, '유효한 PDF 파일이 필요합니다.'],

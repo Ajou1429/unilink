@@ -132,6 +132,12 @@ export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[]
       key = await digest([key, "full-pdf-index"]);
       previous = saved.find((t) => t.task_key === key);
     }
+    // Give a pre-recovery failure one new job identity without invalidating successful slices.
+    if ((kind === "overview" || kind === "detail") && previous?.status === "failed" &&
+        previous.error_message === "AI 분석 요청에 실패했습니다. 모델의 PDF·검색 지원과 API 설정을 확인해 주세요.") {
+      key = await digest([key, "provider-recovery-v1"]);
+      previous = saved.find((t) => t.task_key === key);
+    }
     const task: KnowledgeTask = { ...previous, task_key: key, kind, note_id: note?.id ?? null, source_revision: sourceRevision, source_hash: hash, page_start: a, page_end: b, analysis_epoch: analysisEpoch,
       ...(kind === "research" ? { payload: { ...previous?.payload, concepts: extra } } : {}) };
     // Retain saved research payload for context; extra is only its request on a cache miss.
