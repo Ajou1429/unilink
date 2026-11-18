@@ -18,11 +18,31 @@ function parseResponseJson(value: string, message: string) {
   catch { throw new RequestError(message, 502); }
 }
 
+class ProviderError extends RequestError {
+  constructor(message: string, readonly upstreamStatus: number, readonly canSplit = false) {
+    super(message, upstreamStatus === 429 ? 429 : 502);
+  }
+}
+
 async function response(body: Record<string, unknown>, signal: AbortSignal, parseJson = true) {
   const result = await fetch("https://api.openai.com/v1/responses", { method: "POST", signal,
     headers: { Authorization: `Bearer ${Deno.env.get("OPENAI_API_KEY")}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (result.status === 429) throw new RequestError("AI 서비스의 요청 제한 또는 사용량 한도에 도달했습니다. 잠시 후 다시 시도하거나 사용량을 확인해 주세요.", 429);
-  if (!result.ok) throw new RequestError("AI 분석 요청에 실패했습니다. 모델의 PDF·검색 지원과 API 설정을 확인해 주세요.", 502);
+  if (!result.ok) {
+    const status = result.status;
+    let canSplit = status === 413;
+    if (status === 400 && result.body) {
+      try {
+        const error = JSON.parse(new TextDecoder().decode(await readLimitedBody(result, 8192, signal))).error;
+        canSplit = ["context_length_exceeded", "file_too_large", "request_too_large", "content_too_large"].includes(error?.code);
+      } catch { signal.throwIfAborted(); }
+    } else { void result.body?.cancel().catch(() => {}); }
+    const message = canSplit ? "이 PDF 구간의 요청이 AI 서비스의 크기 한도를 넘었습니다."
+      : status >= 500 ? "AI 서비스에서 일시적인 서버 오류가 발생했습니다. 해당 구간만 다시 시도해 주세요."
+      : [401,403,404].includes(status) ? "AI 분석 인증 또는 모델 접근을 확인해 주세요."
+      : "AI 서비스가 분석 요청을 거절했습니다. 자료 전송 형식과 모델 설정을 확인해 주세요.";
+    throw new ProviderError(`${message} (HTTP ${status})`, status, canSplit);
+  }
   const bytes = await readLimitedBody(result, 262144, signal).catch((error: unknown) => {
     if (error instanceof RequestError && error.status === 413) throw new RequestError("AI 분석 응답이 너무 커 처리하지 못했습니다. 분석 범위를 줄여 다시 시도해 주세요.", 502);
     if (error instanceof RequestError && !result.body) throw new RequestError("AI 서비스에서 빈 응답을 받았습니다. 잠시 후 다시 시도해 주세요.", 502);
@@ -30,7 +50,7 @@ async function response(body: Record<string, unknown>, signal: AbortSignal, pars
   });
   const data = parseResponseJson(new TextDecoder().decode(bytes), "AI 서비스 응답 형식이 올바르지 않습니다. 잠시 후 분석을 다시 시도해 주세요.");
   if (!data || typeof data !== "object" || Array.isArray(data)) throw new RequestError("AI 서비스 응답 형식이 올바르지 않습니다. 잠시 후 분석을 다시 시도해 주세요.", 502);
-  if (data.status === "incomplete" && data.incomplete_details?.reason === "max_output_tokens") throw new RequestError("AI 분석 결과가 출력 한도에 도달해 중단됐습니다. 분석 범위를 줄여 다시 시도해 주세요.", 502);
+  if (data.status === "incomplete" && data.incomplete_details?.reason === "max_output_tokens") throw new ProviderError("AI 분석 결과가 출력 한도에 도달해 중단됐습니다. 분석 범위를 줄여 다시 시도해 주세요.", 200, true);
   if (data.status !== "completed") throw new RequestError("AI 분석이 완료되지 않았습니다. 다시 시도해 주세요.", 502);
   if (!Array.isArray(data.output)) throw new RequestError("AI 서비스 응답 형식이 올바르지 않습니다. 잠시 후 분석을 다시 시도해 주세요.", 502);
   const items: { type?: unknown; content?: { type?: unknown; text?: unknown }[] }[] = data.output;
@@ -118,22 +138,45 @@ async function execute(userId: string, goalId: string, task: KnowledgeTask, clai
       if (task.kind === "index") payload = { ...payload, source_hash: hash, page_count: count };
       else {
         if (hash !== task.source_hash) throw new RequestError("PDF가 변경되었습니다. Drive 변경 반영 후 다시 시도해 주세요.");
-        const a = task.page_start!; const b = task.page_end!;
-        if (a < 1 || b > count) throw new RequestError("PDF 페이지 범위를 확인해 주세요.");
+        const start = task.page_start!; const end = task.page_end!;
+        if (start < 1 || end > count) throw new RequestError("PDF 페이지 범위를 확인해 주세요.");
+        const analyze = async (a: number, b: number) => {
         stage = "pdf_slice";
         const slice = await PDFDocument.create();
         for (const page of await slice.copyPages(pdf, Array.from({ length: b - a + 1 }, (_, i) => a - 1 + i))) slice.addPage(page);
         const fileData = `data:application/pdf;base64,${pdfBase64(await slice.save())}`;
         stage = "ai_response";
-        const result = await response({ model, store: false, max_output_tokens: task.kind === "detail" ? 8000 : 6500,
+        const body = { model, store: false, max_output_tokens: task.kind === "detail" ? 8000 : 6500,
           instructions: extractionInstructions,
           input: [{ role: "user", content: [{ type: "input_text", text: `${task.kind} analysis. Use only submitted physical pages 1-${b - a + 1} for page references.` },
             { type: "input_file", filename: "course-slice.pdf", file_data: fileData }] }],
           text: { format: { type: "json_schema", name: "course_knowledge", strict: true, schema: extractionSchema } },
-        }, signal);
-        usage = result.data.usage ?? {};
+        };
+        const result = await response(body,signal).catch(async (error: unknown) => {
+          if (!(error instanceof ProviderError) || error.upstreamStatus < 500) throw error;
+          await new Promise(resolve=>setTimeout(resolve, 1000));
+          signal.throwIfAborted();
+          return response(body,signal);
+        });
+        for (const key of ["input_tokens", "output_tokens", "total_tokens"]) {
+          usage[key] = Number(usage[key] ?? 0) + Number(result.data.usage?.[key] ?? 0);
+        }
         stage = "evidence_validation";
-        payload = { ...payload, extraction: parseExtractionSlice(result.parsed, a, b), source_hash: hash, page_count: count };
+        return parseExtractionSlice(result.parsed, a, b);
+        };
+        const extraction = await analyze(start,end).catch(async (error: unknown) => {
+          if (!(error instanceof ProviderError) || !error.canSplit || start===end) throw error;
+          const middle=Math.floor((start+end)/2);
+          const left=await analyze(start,middle),right=await analyze(middle+1,end);
+          if (!left.readable || !right.readable) throw new RequestError(`PDF ${!left.readable?`${start}~${middle}`:`${middle+1}~${end}`}쪽에서 읽을 수 있는 근거를 확인하지 못했습니다.`,502);
+          const combined = { readable:true, summary:[left.summary.slice(0,999),right.summary.slice(0,999)].join("\n"),
+            uncertainty:[left.uncertainty.slice(0,749),right.uncertainty.slice(0,749)].filter(Boolean).join("\n"),
+            sections:[...left.sections.slice(0,15),...right.sections.slice(0,15)],
+            syllabus:[...left.syllabus.slice(0,20),...right.syllabus.slice(0,20)],
+            units:[...left.units.slice(0,12),...right.units.slice(0,13)] };
+          return combined;
+        });
+        payload = { ...payload, extraction, source_hash: hash, page_count: count };
       }
     }
     stage = "save";
@@ -155,7 +198,8 @@ async function execute(userId: string, goalId: string, task: KnowledgeTask, clai
       : driveExpired ? "Google Drive 연결이 만료됐습니다. 나의 노트에서 Drive를 다시 연결한 뒤 분석을 이어가 주세요."
       : stage === "source_read" && note?.drive_file_id ? "Drive PDF 원본에 접근하지 못했습니다. Drive 연결과 원본 파일의 열람 권한을 확인해 주세요."
       : stageMessages[stage];
-    console.error("course-knowledge failed", { taskId: claimed.id, kind: task.kind, stage, reason });
+    console.error("course-knowledge failed", { taskId: claimed.id, kind: task.kind, stage, reason,
+      ...(error instanceof ProviderError ? { upstreamStatus:error.upstreamStatus } : {}) });
     await db.from("course_knowledge_tasks").update({ status: "failed", error_message: message, usage_payload: usage, updated_at: new Date().toISOString() })
       .eq("id", claimed.id).eq("user_id", userId).eq("goal_id", goalId).eq("lease_token", claimed.lease_token).eq("status", "processing");
   }

@@ -80,6 +80,8 @@ test('course preparation failures with actual Edge handler, PDF parser and SQL t
         }
         const count = Number(body.input[0].content[0].text.match(/submitted physical pages 1-(\d+)/)[1]);
         modelCalls.push(count);
+        if (provider === 'transient_once') { provider='valid'; return new Response('', {status:503}); }
+        if (provider === 'too_large' && count > 5) return Response.json({error:{code:'context_length_exceeded'}},{status:400});
         if (provider === 'http_error') return new Response('', { status: 503 });
         if (provider === 'rate_limited') return new Response('', { status: 429 });
         if (provider === 'empty_body') return new Response(null);
@@ -228,6 +230,31 @@ test('course preparation failures with actual Edge handler, PDF parser and SQL t
       assert.ok(tasks.some(row=>row.kind==='overview'&&row.page_start===51&&row.status==='ready'));
     });
 
+    // These cases simulate independent usage windows, not one user running every fixture in a day.
+    await db.exec("update course_knowledge_tasks set updated_at=updated_at-interval '25 hours' where status<>'processing'");
+    await t.test('retries a transient PDF API response without downloading the source again', async () => {
+      const f=await fixture([{bytes:goodPdf}]);
+      await f.invoke();
+      const calls=modelCalls.length, reads=sourceReads;
+      provider='transient_once';
+      await f.invoke();
+      assert.equal((await f.status()).status,'ready');
+      assert.equal(modelCalls.length,calls+2);
+      assert.equal(sourceReads,reads+1);
+    });
+
+    await t.test('an oversized range is split without losing original page numbers', async () => {
+      const f=await fixture([{bytes:slicedPdf}]);
+      await f.invoke();
+      const before=modelCalls.length;
+      provider='too_large';
+      await f.invoke();await f.invoke();
+      assert.equal((await f.status()).status,'ready');
+      assert.deepEqual(modelCalls.slice(before),[10,5,5,1]);
+      const overview=(await f.tasks()).find(row=>row.kind==='overview'&&row.page_start===1);
+      assert.deepEqual(overview.payload.extraction.sections.map(item=>item.page_start),[1,6]);
+    });
+
     for (const [name, source, message] of [
       ['missing Storage PDF', {}, 'PDF를 불러오지 못했습니다.'],
       ['plain non-PDF bytes', { bytes: new TextEncoder().encode('not a PDF') }, '유효한 PDF 파일이 필요합니다.'],
@@ -252,7 +279,7 @@ test('course preparation failures with actual Edge handler, PDF parser and SQL t
       ['invalid upstream body', 'bad_envelope', goodPdf, 'AI 서비스 응답 형식이 올바르지 않습니다. 잠시 후 분석을 다시 시도해 주세요.'],
       ['empty upstream body', 'empty_body', goodPdf, 'AI 서비스에서 빈 응답을 받았습니다. 잠시 후 다시 시도해 주세요.'],
       ['oversized upstream body', 'oversized', goodPdf, 'AI 분석 응답이 너무 커 처리하지 못했습니다. 분석 범위를 줄여 다시 시도해 주세요.'],
-      ['provider HTTP failure', 'http_error', goodPdf, 'AI 분석 요청에 실패했습니다. 모델의 PDF·검색 지원과 API 설정을 확인해 주세요.'],
+      ['provider HTTP failure', 'http_error', goodPdf, 'AI 서비스에서 일시적인 서버 오류가 발생했습니다. 해당 구간만 다시 시도해 주세요. (HTTP 503)'],
       ['provider rate limit', 'rate_limited', goodPdf, 'AI 서비스의 요청 제한 또는 사용량 한도에 도달했습니다. 잠시 후 다시 시도하거나 사용량을 확인해 주세요.'],
       ['incomplete provider output', 'incomplete', goodPdf, 'AI 분석이 완료되지 않았습니다. 다시 시도해 주세요.'],
       ['provider output limited', 'output_limited', goodPdf, 'AI 분석 결과가 출력 한도에 도달해 중단됐습니다. 분석 범위를 줄여 다시 시도해 주세요.'],
@@ -266,7 +293,7 @@ test('course preparation failures with actual Edge handler, PDF parser and SQL t
         const status = await f.status();
         assert.equal(status.failed_steps[0].message, named(message, mode === 'out_of_slice' ? '11쪽' : '1쪽'));
         assert.equal(status.failed_steps[0].kind, 'overview');
-        assert.equal(modelCalls.length - modelBefore, mode === 'out_of_slice' ? 2 : 1);
+        assert.equal(modelCalls.length - modelBefore, ['out_of_slice','http_error'].includes(mode) ? 2 : 1);
         if (mode === 'out_of_slice') assert.equal((await f.tasks()).find(row => row.status === 'failed').page_start, 11);
         if (mode === 'bad_json') {
           for (let i = 0; i < 2; i++) await f.invoke({ retry: true });
