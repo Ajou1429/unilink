@@ -128,7 +128,8 @@ export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[]
     const index = await add("index", note, null, null, null);
     if (!index) { overviewComplete = false; detailComplete = false; continue; }
     const count = Number(index.payload?.page_count); const hash = String(index.payload?.source_hash ?? "");
-    if (!Number.isInteger(count) || count < 1 || count > 50 || !/^[a-f0-9]{64}$/.test(hash)) throw new Error("Invalid stored PDF index");
+    // The database may retain indexes written by the newer long-PDF analyzer.
+    if (!Number.isSafeInteger(count) || count < 1 || !/^[a-f0-9]{64}$/.test(hash)) throw new Error("Invalid stored PDF index");
     let complete = true;
     for (const [a, b] of ranges(1, count, OVERVIEW_PAGES)) {
       const overview = await add("overview", note, hash, a, b);
