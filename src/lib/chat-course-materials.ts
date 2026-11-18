@@ -1,0 +1,49 @@
+import type { MyNote } from "./my-notes-storage";
+
+type CourseIdentity = { id: string; name: string; courseCode?: string | null };
+type Note = Pick<MyNote, "id" | "title" | "fileName" | "filePath" | "driveFileId" | "linkedType" | "linkedId">;
+const normalized = (value: string) => value.normalize("NFKC").toLowerCase().replace(/디비/g, "db");
+const compact = (value: string) => normalized(value).replace(/[^\p{L}\p{N}]/gu, "");
+
+export function matchMaterialCourse<T extends CourseIdentity>(courses: T[], request: string): T | undefined {
+  const input = compact(request);
+  const matches = courses.filter(course => {
+    const name = compact(course.name);
+    const code = compact(course.courseCode ?? "");
+    return (name.length >= 2 && input.includes(name)) || (code.length >= 3 && input.includes(code))
+      || (name === "엔지니어링db" && input.includes("엔db"));
+  });
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+export const isReadablePdfSource = (note: Note) => Boolean(note.driveFileId || (note.filePath && /\.pdf$/i.test(note.fileName ?? note.filePath)));
+export const belongsToCourse = (note: Note, id: string) => note.linkedType === "course" && note.linkedId === id;
+
+export function requestedChapters(request: string): number[] {
+  const chapters = new Set<number>();
+  for (const match of normalized(request).matchAll(/(?<![\d.])(\d{1,2})(?:\s*장)?\s*[~–-]\s*(\d{1,2})\s*장/gu)) {
+    const start = Number(match[1]), end = Number(match[2]);
+    for (let n = start; n <= end; n++) chapters.add(n);
+  }
+  for (const match of normalized(request).matchAll(/(?<![\d.])((?:\d{1,2}(?:\s*장)?\s*[,·、]\s*)*\d{1,2})\s*장/gu)) {
+    for (const number of match[1].match(/\d+/g) ?? []) chapters.add(Number(number));
+  }
+  return [...chapters].filter(n => n > 0).sort((a, b) => a - b);
+}
+
+export function matchesChapter(note: Note, chapter: number) {
+  const pattern = new RegExp(`(?<![0-9])0*${chapter}\\s*장|(?:chapter|챕터)\\s*0*${chapter}(?![0-9])`, "iu");
+  return [note.title, note.fileName].some(name => name && pattern.test(normalized(name)));
+}
+
+export function selectChapterMaterials<T extends Note>(notes: T[], courseId: string, chapters: number[], request: string) {
+  const local = notes.filter(note => belongsToCourse(note, courseId));
+  const input = normalized(request);
+  return chapters.map(chapter => {
+    const matching = local.filter(note => matchesChapter(note, chapter));
+    const readable = matching.filter(isReadablePdfSource);
+    const named = readable.filter(note => [note.title, note.fileName].some(name => name && name.length >= 5 && input.includes(normalized(name))));
+    const candidates = named.length ? named : readable;
+    return { chapter, candidates, unavailable: matching.length > 0 && !readable.length };
+  });
+}

@@ -90,11 +90,12 @@ test('course preparation failures with actual Edge handler, PDF parser and SQL t
     }, name => {
       if (/supabaseAdmin\.ts$/.test(name)) return { getAdminClient: () => admin, getUserFromAuthHeader: async () => ({ id: user }) };
       if (name === './crypto.ts') return { decryptSecret: async () => 'mock-only' };
-      if (name === './google.ts') return { refreshAccessToken: async () => ({ access_token: 'mock-only' }), driveFetch: async () => {
+      if (name === './google.ts') return { refreshAccessToken: async () => ({ access_token: 'mock-only' }), driveFetch: async (_token, url) => {
         sourceReads++;
         if (drive === 'denied') throw new Error('Drive API fixture rejected access');
+        if (url.endsWith('alt=media')) return new Response(goodPdf);
         return Response.json({ mimeType: drive === 'not_pdf' ? 'text/plain' : 'application/pdf',
-          size: drive === 'oversized' ? 21 * 1024 * 1024 : goodPdf.length, modifiedTime: '2026-11-18T12:00:00Z' });
+          size: drive === 'oversized' ? 21 * 1024 * 1024 : goodPdf.length, modifiedTime: drive === 'ready' ? '2026-11-18T08:00:00Z' : '2026-11-18T12:00:00Z' });
       } };
       if (name === 'npm:pdf-lib@1.17.1') return { PDFDocument: {
         load: (...args) => PDFDocument.load(...args), create: async () => {
@@ -146,6 +147,23 @@ test('course preparation failures with actual Edge handler, PDF parser and SQL t
       assert.equal((await f.invoke({ consent: false })).status, 'ready');
       assert.equal(sourceReads, reads);
       assert.equal(modelCalls.length - modelBefore, 1);
+    });
+
+    await t.test('multiple selected Drive PDFs reuse per-file analysis, not unselected files', async () => {
+      const f = await fixture([{ drive: true, title: '06장' }, { drive: true, title: '07장' }, { bytes: corruptPdf, title: 'Unselected' }]);
+      const scope = { material_note_ids: f.notes.slice(0,2).map(row => row.note) };
+      drive = 'ready';
+      const calls = modelCalls.length;
+      assert.equal((await f.invoke({...scope, consent:false})).status,'consent_required');
+      assert.equal(modelCalls.length,calls);
+      for (let i=0;i<4;i++) await f.invoke(scope);
+      const reads = sourceReads;
+      const result = await f.invoke({...scope, consent:false});
+      assert.equal(result.status,'ready');
+      assert.deepEqual(result.material_note_ids,scope.material_note_ids);
+      assert.deepEqual(Array.from(result.knowledge.content, item=>item.note_id).sort(),[...scope.material_note_ids].sort());
+      assert.equal(sourceReads,reads);
+      assert.equal(modelCalls.length,calls+2);
     });
 
     await t.test('one broken PDF in the same goal blocks a healthy prepared PDF', async () => {

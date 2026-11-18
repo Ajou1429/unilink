@@ -90,12 +90,13 @@ export async function loadCoachingContext(
     const ranges = (learningStates.data ?? []).filter(s => s.goal_id === goalId && s.note_id && s.page_start && s.page_end
       && (topics.data ?? []).some(t => t.id === s.topic_id && t.goal_id === goalId))
       .map(s => ({ note_id: s.note_id as string, page_start: s.page_start as number, page_end: s.page_end as number }));
-    const loaded = await loadKnowledge(db, userId, goalId, request.period_start, knowledge.model, knowledge.searchModel, focus, ranges, request.material_note_id);
+    const loaded = await loadKnowledge(db, userId, goalId, request.period_start, knowledge.model, knowledge.searchModel, focus, ranges, request.material_note_id, request.material_note_ids);
     if (loaded.plan.tasks.some((task) => task.kind !== "research")) {
       throw new CoachingError("과목 자료 분석이 필요합니다. 계획 추천 화면에서 분석을 완료하거나 실패한 단계를 다시 시도해 주세요.", 409);
     }
-    if (request.material_note_id && !loaded.plan.active.some((step) => step.kind === "overview" && (step.payload?.extraction as { readable?: boolean } | undefined)?.readable)) {
-      throw new CoachingError("선택한 PDF에서 읽을 수 있는 근거를 확인하지 못했습니다. 원본을 확인하거나 다른 PDF를 선택해 주세요.", 409);
+    if (request.material_note_id || request.material_note_ids) {
+      const unreadable = loaded.notes.find(note => !loaded.plan.active.some(step => step.note_id === note.id && step.kind === "overview" && (step.payload?.extraction as { readable?: boolean } | undefined)?.readable));
+      if (unreadable) throw new CoachingError(`‘${unreadable.title}’에서 읽을 수 있는 근거를 확인하지 못했습니다. 원본을 확인하거나 다른 PDF를 선택해 주세요.`, 409);
     }
     courseKnowledge.push(loaded.context);
   }

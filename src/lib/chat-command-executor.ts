@@ -1,4 +1,5 @@
-import type { ChatDocumentAnalysis } from "./chat-document-analysis";
+import { allowsChatDocumentAnalysis, type ChatDocumentAnalysis } from "./chat-document-analysis";
+import { matchesMaterialScope, type MaterialScope } from "../../supabase/functions/_shared/materialScope";
 import { getSupabaseBrowserClient } from "./supabase-client";
 import { captureStorageScope, getStorageUser } from "./private-storage";
 import { flushP0Changes } from "./p0-sync";
@@ -13,6 +14,7 @@ import { listProblems, listSubjects } from "./problem-bank-storage";
 import { getDriveConnectionStatus, syncDriveFolder } from "./drive-connection";
 import { courseKnowledgeEnabled, prepareCourseKnowledge, requestCourseKnowledge } from "./course-knowledge";
 import { getMyNotes, type MyNote } from "./my-notes-storage";
+import { belongsToCourse, isReadablePdfSource, matchMaterialCourse, matchesChapter, requestedChapters, selectChapterMaterials } from "./chat-course-materials";
 import type { ChatCommand } from "../../supabase/functions/_shared/chatCommands.ts";
 import type { ChatContext } from "./chat-record/apply";
 import { classWindowsFor } from "./chat-record/plan";
@@ -112,12 +114,15 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
     return ready(c,uid,[item.title,"이 과제를 제출·완료로 표시합니다. 이해도와 실제 공부시간은 변경하지 않습니다."],{expected:item.updated_at},"write",id);
   }
   if(c.kind==="analyze_pdf"||c.kind==="classify_note") {
-    const pdfs=notes.filter(n=>n.fileName?.toLowerCase().endsWith(".pdf"));
+    const scopedCourse = c.kind === "analyze_pdf" ? matchMaterialCourse(ctx.courses,requestText) ?? course : undefined;
+    const chapters = c.kind === "analyze_pdf" ? requestedChapters(requestText) : [];
+    const pdfs=notes.filter(n=>isReadablePdfSource(n) && (!scopedCourse || belongsToCourse(n,scopedCourse.id)) && (!chapters.length || chapters.some(chapter=>matchesChapter(n,chapter))));
     const recent=pdfs.filter(n=>recentNoteIds.includes(n.id));
     const note=notes.find(n=>n.id===c.note_id)??(recent.length===1?recent[0]:pdfs.length===1?pdfs[0]:null);
     if(!note)return question(c,"어느 노트를 처리할까요? 파일명이나 제목을 알려주세요.");
     c.note_id=note.id;
-    if(c.kind==="analyze_pdf"&&(!note.fileName?.toLowerCase().endsWith(".pdf")||(!note.filePath&&!note.driveFileId)))return question(c,"원본을 읽을 수 있는 PDF를 첨부해 주세요.");
+    if(c.kind==="analyze_pdf"&&!isReadablePdfSource(note))return question(c,`‘${note.title}’에 연결된 PDF 원본이 없거나 지원하지 않는 형식이에요. 과목에 있는 다른 PDF를 선택해 주세요.`);
+    if(c.kind==="analyze_pdf"&&!pdfs.some(pdf=>pdf.id===note.id))return question(c,"선택한 PDF가 요청한 과목이나 장 번호와 일치하지 않아요. 해당 과목의 자료 제목을 알려주세요.");
     let linkedId:string|null=course?.id??null,linkedTitle=course?.name??"개인 학습";
     if(c.kind==="classify_note"&&c.goal_id&&!course) {
       const target=resultData(await db.from("learning_goals").select("id,title").eq("user_id",uid).eq("id",c.goal_id).eq("goal_type","personal").eq("status","active").single());check();
@@ -153,17 +158,31 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
     return ready(c,uid,[item.title,c.kind==="complete_plan"?"완료로 표시": "다음날 같은 시각으로 미루기 · 충돌·마감이 있으면 거절돼요."],{expected:item.updated_at,start:item.scheduled_start},"write",id);
   }
   if(c.kind==="generate_plan") {
+    const materialCourse = matchMaterialCourse(ctx.courses,requestText) ?? course;
+    const chapters = /강의\s*(?:자료|노트)|필기|pdf|분석/i.test(requestText) ? requestedChapters(requestText) : [];
+    if(chapters.length && !allowsChatDocumentAnalysis(requestText))return question(c,"본문 분석 없이 진행하는 요청이에요. PDF에서 근거를 읽지 않는 일반 계획으로 진행할지 알려주세요.");
+    if(chapters.length > 5)return question(c,"한 계획에서 확인할 장을 최대 5개로 나눠 주세요.");
+    if(chapters.length && !materialCourse)return question(c,"어느 과목의 강의자료인지 알려주세요.");
+    const chapterGroups = materialCourse ? selectChapterMaterials(notes,materialCourse.id,chapters,requestText) : [];
+    const missing = chapterGroups.filter(group=>!group.candidates.length);
+    if(missing.length)return question(c,`${materialCourse?.name}에서 ${missing.map(group=>`${group.chapter}장(${group.unavailable ? "PDF 원본 없음 또는 지원하지 않는 형식" : "연결된 자료를 찾지 못함"})`).join(", ")}. 과목의 강의자료 목록이나 파일 제목을 확인해 주세요.`);
+    const ambiguous = chapterGroups.find(group=>group.candidates.length>1);
+    if(ambiguous)return question(c,`${materialCourse?.name} ${ambiguous.chapter}장에 PDF가 여러 개 있어요. 어느 파일을 사용할까요? ${ambiguous.candidates.slice(0,6).map(n=>n.fileName??n.title).join(" / ")}`);
+    if(chapters.length && materialCourse) { c.course_id=materialCourse.id;c.course_ids=[];c.goal_id=null;c.note_id=null; }
     let goalIds=[...new Set([c.course_id,...c.course_ids].filter((s):s is string=>!!s).map(s=>ctx.goals.get(s)).filter((s):s is string=>!!s))];
     if(c.goal_id)goalIds=[c.goal_id];
     if(!goalIds.length)return question(c,"어느 과목이나 학습 목표의 계획을 만들까요?");
     const goals=resultData(await db.from("learning_goals").select("id,title").eq("user_id",uid).eq("status","active").in("id",goalIds))??[];check();
     if(goals.length!==goalIds.length)throw new Error("활성 학습 목표를 다시 확인해 주세요.");
-    const material = c.note_id ? notes.find(note => note.id === c.note_id) : undefined;
-    if (c.note_id && (!material || !/\.pdf$/i.test(material.fileName ?? "") || (!material.filePath && !material.driveFileId))) {
+    const material = !chapters.length && c.note_id ? notes.find(note => note.id === c.note_id) : undefined;
+    if (!chapters.length && c.note_id && (!material || !isReadablePdfSource(material))) {
       return question(c,"계획에 사용할 원본 PDF를 다시 선택해 주세요.");
     }
-    if (material && goalIds.length !== 1) return question(c,"선택한 자료가 속한 한 과목의 목표를 알려주세요.");
-    if (material && !courseKnowledgeEnabled) throw new Error("선택한 PDF 기반 계획은 과목 자료 분석이 활성화되어야 합니다.");
+    const materials = [...new Map([...chapterGroups.flatMap(group=>group.candidates), ...(material ? [material] : [])].map(note=>[note.id,note])).values()];
+    if (materials.length && goalIds.length !== 1) return question(c,"선택한 자료가 속한 한 과목의 목표를 알려주세요.");
+    if (materials.length && !courseKnowledgeEnabled) throw new Error("선택한 PDF 기반 계획은 과목 자료 분석이 활성화되어야 합니다.");
+    const materialScope = materials.length > 1 ? { material_note_ids: materials.map(note=>note.id) }
+      : materials.length ? { material_note_id: materials[0].id } : {};
     // Missing availability is a proposal assumption, never a claimed user preference.
     const suggestedTimes=!c.start_time||!c.end_time||c.minutes===null;
     c.start_time=c.start_time??"09:00";
@@ -190,17 +209,18 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
     if(c.intent==="exam_prep"&&(!c.exam_scope||!c.exam_at||!c.priority||!c.difficulty))return question(c,"시험 범위·일시와 우선도/난이도(각 1~5)를 알려주세요.");
     if(c.intent==="exam_prep"&&goalIds.length>1)return question(c,"시험 범위와 일시가 과목마다 달라요. 먼저 어느 한 과목부터 준비할까요?");
     const request={request_key:id,goal_ids:goalIds,intent:c.intent,period_start:c.date,period_end:c.period_end,desired_outcome:"",constraints:[suggestedTimes?"미입력 시간 조건은 임시 추천값이며 사용자가 확인한 가용시간이 아니다. 기존 일정과 충돌하지 않는 범위에서 필요한 분량만 제안하고, 추천 시간은 저장 전 사용자가 확인한다.":"",c.details??"",requestText].join("\n").slice(0,1000),
-      ...(material ? { material_note_id: material.id } : {}),
+      ...materialScope,
       ...(c.intent==="daily_plan"?{daily_sources:dailySources}:{}),
       ...(c.intent==="exam_prep"?{exam_inputs:goalIds.map(goal_id=>({goal_id,scope:c.exam_scope!,exam_at:c.exam_at!,priority:c.priority!,difficulty:c.difficulty!}))}:{}),
       day_budgets:Array.from({length},(_,i)=>({date:shift(c.date!,i),minutes:c.minutes!,windows:[{start:c.start_time!,end:c.end_time!}]})),
       rules:{transition_minutes:10,break_minutes:10,break_after_minutes:90,method_minimums:{},max_focus_goals:Math.min(3,goalIds.length),carryover:true}};
     const summary=[`${goals.map(g=>g.title).join(", ")} · ${c.date} ~ ${c.period_end}`,`${suggestedTimes?"임시 추천 조건: ":""}${c.start_time} ~ ${c.end_time} 중 하루 최대 ${c.minutes}분`,"직접 추가한 계획은 유지해요."];
+    if(materials.length)summary.push(`계획에 사용할 PDF: ${materials.map(note=>note.title).join(" / ")}`);
     const prepared=ready(c,uid,summary,{request,goalIds},"plan_analysis",id);
     if(!("prepared" in prepared))throw new Error("계획 요청을 확인하지 못했어요.");
     if(courseKnowledgeEnabled) {
       for(const goalId of goalIds) {
-        const state=await requestCourseKnowledge(goalId,c.date,{action:"status",material_note_id:material?.id});check();
+        const state=await requestCourseKnowledge(goalId,c.date,{action:"status",...materialScope});check();
         if(state.pdf_count>0&&(state.pdf_count>state.pdf_ready||!state.overview_complete||!state.detail_complete))return {prepared:seal({...prepared.prepared,goals,summary:[...summary,"계획 전 이 과목 PDF 원문을 OpenAI에 전송해 분석할까요? 분석 후 실제 계획은 다시 보여드리고 저장 여부를 확인해요."]})};
       }
     }
@@ -211,15 +231,15 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
 
 async function generateProposal(p:PreparedCommand,consent:boolean,check:()=>void,retryAnalysis=false):Promise<PreparedCommand> {
   const db=await session(p.userId,check),request=p.payload.request as Record<string,unknown>;
-  const materialNoteId=typeof request.material_note_id==="string"?request.material_note_id:undefined;
+  const scope:MaterialScope={material_note_id:request.material_note_id as string|undefined,material_note_ids:request.material_note_ids as string[]|undefined};
   await flushP0Changes();check();
-  await prepareCourseKnowledge(p.payload.goalIds as string[],String(request.period_start),p.userId,consent,false,()=>{check();},retryAnalysis,check,materialNoteId);check();
+  await prepareCourseKnowledge(p.payload.goalIds as string[],String(request.period_start),p.userId,consent,false,()=>{check();},retryAnalysis,check,scope.material_note_id,scope.material_note_ids);check();
   const response=await db.functions.invoke<ChatCoachingResult>("coaching-propose",{body:request});check();
   if(response.error)throw new Error(await describeFunctionError(response.error,"계획을 만들지 못했어요."));
   const result=response.data;
-  if(materialNoteId&&result?.material_note_id!==materialNoteId)throw new Error("선택한 자료를 반영하려면 코칭 서버를 먼저 업데이트해야 합니다.");
+  if(!matchesMaterialScope(scope,result))throw new Error("선택한 자료를 반영하려면 코칭 서버를 먼저 업데이트해야 합니다.");
   if(!result||result.schema_version!==2||!result.proposal_run_id||!result.proposal?.items?.length||result.persisted!==false)throw new Error(result?.proposal?.summary??"확정 가능한 학습 시간이 없어요. 시간대나 분량을 조정해 주세요.");
-  return seal({...p,id:crypto.randomUUID(),phase:"approve_plan",expiresAt:Date.now()+5*60000,payload:{runId:result.proposal_run_id},proposal:result,summary:[result.proposal.summary,...p.summary.filter(line=>line.startsWith("임시 추천 조건:")),"아래 실제 시간표를 학습 계획에 추가할까요?"]});
+  return seal({...p,id:crypto.randomUUID(),phase:"approve_plan",expiresAt:Date.now()+5*60000,payload:{runId:result.proposal_run_id},proposal:result,summary:[result.proposal.summary,...p.summary.filter(line=>line.startsWith("임시 추천 조건:")||line.startsWith("계획에 사용할 PDF:")),"아래 실제 시간표를 학습 계획에 추가할까요?"]});
 }
 
 async function insertEvent(db:Db,p:PreparedCommand,check:()=>void) {

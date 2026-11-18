@@ -226,7 +226,7 @@ export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[]
 }
 
 export type KnowledgeRange = { note_id: string; page_start: number; page_end: number };
-export function knowledgeContext(plan: KnowledgePlan, focus: string[] = [], ranges: KnowledgeRange[] = []) {
+export function knowledgeContext(plan: KnowledgePlan, focus: string[] = [], ranges: KnowledgeRange[] = [], selectedNotes?: string[]) {
   // This is retrieval ordering only, not a study priority/time allocation algorithm.
   const termsFrom = (values: string[]) => [...new Set(values.join(" ").toLowerCase().match(/[\p{L}\p{N}_]{2,}/gu) ?? [])]
     .filter((t) => !["study", "review", "learn", "lecture", "공부", "학습", "복습"].includes(t)).slice(0, 60);
@@ -278,7 +278,21 @@ export function knowledgeContext(plan: KnowledgePlan, focus: string[] = [], rang
     Number(currentTitles.has(normalize(String((b.payload?.concepts as { title?: string })?.title ?? "")))) - Number(currentTitles.has(normalize(String((a.payload?.concepts as { title?: string })?.title ?? "")))));
   // Reserve a separate bounded budget for supplementary research so long PDFs cannot crowd it out.
   remaining = 8000; const research = bound(take(ranked(researchTasks), 4));
-  remaining = 24000; const content = bound([...rankedTasks(details), ...rankedTasks(overview.filter((t) => relevant.has(t.note_id))), ...take(rankedTasks(overview.filter((t) => !relevant.has(t.note_id))), 2)]);
+  // Reserve one compact extract per requested PDF before spending the shared detail budget.
+  remaining = 24000;
+  const required = selectedNotes?.flatMap(id => overview.find(t => t.note_id === id) ?? []) ?? [];
+  const coverage = required.flatMap(t => {
+    const e = t.payload?.extraction as Extraction | undefined;
+    if (!e?.readable) return [];
+    const units = take(rankedUnits(e.units,t.note_id),3).map(u => ({ title: clipText(u.title,120), page_start: u.page_start, page_end: u.page_end,
+      required_depth: clipText(u.required_depth,260), concepts: take(u.concepts,4).map(v=>clipText(v,100)) }));
+    const item = { artifact_id: t.id, note_id: t.note_id, source_hash: t.source_hash, note_version: t.payload?.note_version,
+      pages: [t.page_start,t.page_end], kind: "overview", content: { summary: clipText(e.summary,630), readable: true, units } };
+    remaining -= JSON.stringify(item).length;
+    includedArtifacts++;includedUnits+=units.length;return [item];
+  });
+  const optionalOverviews = overview.filter(t=>!required.includes(t));
+  const content = [...coverage,...bound([...rankedTasks(details), ...rankedTasks(optionalOverviews.filter((t) => relevant.has(t.note_id))), ...take(rankedTasks(optionalOverviews.filter((t) => !relevant.has(t.note_id))), 2)])];
   return { version: KNOWLEDGE_VERSION, overview_complete: plan.overview_complete, detail_complete: plan.detail_complete,
     research_status: plan.research_status, actual_class_progress: take(plan.actual_progress, 20),
     warnings: take(plan.warnings, 10), syllabus_facts: syllabus, content, research, context_truncated: truncated,

@@ -6,6 +6,7 @@ import { validatePageCount } from "../_shared/pdfLimits.ts";
 import { readNotePdf, pdfBase64 } from "../_shared/noteSource.ts";
 import { KNOWLEDGE_VERSION, RESEARCH_VERSION, extractionSchema, parseExtractionSlice, researchSchemaForSources, parseResearch, digest, revision, type KnowledgeTask, type KnowledgeNote } from "../_shared/courseKnowledge.ts";
 import { loadKnowledge, knowledgeModels, publicKnowledgeStatus } from "../_shared/courseKnowledgeStore.ts";
+import { parseMaterialScope } from "../_shared/materialScope.ts";
 import { loadCoachingSettings, featureEnabled } from "../_shared/coachingSettings.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
@@ -146,10 +147,12 @@ async function execute(userId: string, goalId: string, task: KnowledgeTask, clai
     const timedOut = signal.aborted && !(error instanceof RequestError);
     const reason = error instanceof RequestError ? "handled_request_error" : timedOut ? "timeout"
       : pageMismatch ? "page_out_of_range" : encryptedPdf ? "encrypted_pdf" : stage;
+    const driveExpired = stage === "source_read" && note?.drive_file_id && error instanceof Error && "code" in error && error.code === "invalid_grant";
     const message = error instanceof RequestError ? error.message
       : timedOut ? "분석 제한 시간을 초과했습니다. 잠시 후 다시 시도해 주세요."
       : pageMismatch ? "AI가 분석한 근거의 페이지 번호가 분석 대상 범위를 벗어났습니다. 분석을 다시 시도해 주세요."
       : encryptedPdf ? "암호화된 PDF는 분석할 수 없습니다. 암호가 없는 원본 PDF를 사용해 주세요."
+      : driveExpired ? "Google Drive 연결이 만료됐습니다. 나의 노트에서 Drive를 다시 연결한 뒤 분석을 이어가 주세요."
       : stage === "source_read" && note?.drive_file_id ? "Drive PDF 원본에 접근하지 못했습니다. Drive 연결과 원본 파일의 열람 권한을 확인해 주세요."
       : stageMessages[stage];
     console.error("course-knowledge failed", { taskId: claimed.id, kind: task.kind, stage, reason });
@@ -170,8 +173,8 @@ Deno.serve(async (req) => {
     const body = await readSmallJson(req);
     if (typeof body.goal_id !== "string" || !uuid.test(body.goal_id)) throw new RequestError("학습 목표를 선택해 주세요.");
     if (typeof body.as_of !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.as_of) || !Number.isFinite(Date.parse(body.as_of))) throw new RequestError("진도 기준 날짜를 확인해 주세요.");
-    const materialNoteId = body.material_note_id;
-    if (materialNoteId !== undefined && (typeof materialNoteId !== "string" || !uuid.test(materialNoteId) || body.action === "refresh")) {
+    const materialScope = parseMaterialScope(body.material_note_id,body.material_note_ids);
+    if (!materialScope || ((materialScope.material_note_id || materialScope.material_note_ids) && body.action === "refresh")) {
       throw new RequestError("계획에 사용할 PDF를 다시 선택해 주세요.");
     }
     if (body.retry_task_id !== undefined && (typeof body.retry_task_id !== "string" || !uuid.test(body.retry_task_id) || body.retry !== true)) {
@@ -185,9 +188,9 @@ Deno.serve(async (req) => {
         .gte("lease_until", new Date().toISOString()).limit(1).maybeSingle();
       if (running.error) throw new RequestError("분석 진행 상태를 확인하지 못했습니다.", 503);
       if (running.data) return jsonResponse({ status: "working", goal_id: body.goal_id, task_id: running.data.id, kind: running.data.kind,
-        ...(materialNoteId ? { material_note_id: materialNoteId } : {}) }, { status: 202 });
+        ...materialScope }, { status: 202 });
     }
-    const loaded = await loadKnowledge(db, user.id, body.goal_id, body.as_of, models.model, models.searchModel, [], [], materialNoteId);
+    const loaded = await loadKnowledge(db, user.id, body.goal_id, body.as_of, models.model, models.searchModel, [], [], materialScope.material_note_id, materialScope.material_note_ids);
     if (body.action === "refresh") {
       if (body.consent !== true) throw new RequestError("PDF 재분석 전송에 동의해 주세요.");
       const note = loaded.notes.find((n) => n.id === body.note_id);

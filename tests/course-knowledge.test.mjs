@@ -313,5 +313,17 @@ test("actual Edge handler + PostgreSQL: first preparation, incremental PDF slici
     assert.equal(modelContexts.at(-1).course_knowledge[0].material_scope,"selected_pdf");
     assert.ok(modelContexts.at(-1).course_knowledge[0].content.every(record=>record.note_id===nid));
     assert.deepEqual(calls,{pdf:4,search:1,coaching:2});
+    const material_note_ids=[nid,other];
+    assert.equal((await sendProposal({request_key:"scoped-missing",material_note_ids:[nid,id(90)]})).status,404);
+    assert.equal((await sendProposal({request_key:"scoped-unprepared",material_note_ids})).status,409);
+    for(let i=0;i<5;i++){const status=await invoke({material_note_ids});if(status.status==="ready")break;}
+    const multiResponse=await sendProposal({request_key:"scoped-multiple",material_note_ids});
+    const multiProposal=await multiResponse.json();
+    assert.equal(multiResponse.status,200,JSON.stringify(multiProposal));
+    assert.deepEqual(multiProposal.material_note_ids,material_note_ids);
+    const multiContext=modelContexts.at(-1).course_knowledge[0];
+    assert.equal(multiContext.material_scope,"selected_pdfs");
+    assert.deepEqual(multiContext.content.filter(record=>record.kind==="overview").map(record=>record.note_id),material_note_ids);
+    assert.equal(calls.search,1);
   }finally{await db.close();}
 });

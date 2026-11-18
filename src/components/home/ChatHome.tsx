@@ -371,7 +371,10 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
       setContext(ctx);
       if (!ctx.signedIn) { say("로그인하면 일상 대화, 공부 질문과 서비스 기능 실행을 이용할 수 있어요."); return; }
       const pending=analysis ? null : activeCommand();
-      const {result,notes} = await converse(ctx, text, history.slice(-8), dateKey(new Date()),fileRecords,pending?.command,analysis);
+      const continuation = /^(?:시작|(?:분석\s*)?동의|해줘|확인해봐|해당 과목|같은 과목|강의자료에|\d{1,2}장)/.test(text.trim());
+      const materialRequest = pending ? `${pending.source}\n${text}` : continuation
+        ? [history.slice(-8).findLast(turn => turn.role === "user" && /\d\s*장/.test(turn.text))?.text, text].filter(Boolean).join("\n") : text;
+      const {result,notes,allNotes} = await converse(ctx, text, history.slice(-8), dateKey(new Date()),fileRecords,pending?.command,analysis,materialRequest);
       assertCurrent();
       const commands=result.commands?.length?result.commands:parseCommands(result.tools.filter(t=>t.feature==="study_plan"||t.feature==="pdf_analysis").slice(0,1).map(t=>({
         kind:t.feature==="study_plan"?"generate_plan":"analyze_pdf",course_id:t.course_id,note_id:t.note_id,intent:t.intent,minutes:t.daily_minutes,
@@ -382,11 +385,11 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
         const first=commands[0],id=nextId();
         const command=first.kind==="generate_plan"&&!first.note_id&&analysis&&notes.some(note=>note.id===analysis.noteId)
           ? {...first,note_id:analysis.noteId} : first;
-        const source=pending?.command.kind===command.kind?`${pending.source}\n${text}`:text;
+        const source=pending?.command.kind===command.kind||!pending?materialRequest:text;
         if(pending?.prepared)discardPreparedCommand(pending.prepared);
         setThread(prev=>[...prev.map(item=>item.kind==="command"&&["ready","needs_input","error"].includes(item.status)?{...item,status:"cancelled" as const,resume:false,message:item.id===pending?.id&&pending.command.kind===command.kind?"추가 답변을 반영했어요.":"새 요청으로 이전 미확정 제안은 취소했어요."}:item.kind==="records"?{...item,entries:item.entries.map(e=>!e.applied&&(e.status==="waiting"||e.status==="error")?{...e,status:"undone" as const}:e)}:item),{id,kind:"command",command,source,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,status:"preparing"}]);
         try {
-          const prepared=await prepareChatCommand(command,ctx,notes,dateKey(new Date()),assertCurrent,source,fileRecords.map(f=>f.noteId).filter((s):s is string=>!!s));assertCurrent();
+          const prepared=await prepareChatCommand(command,ctx,allNotes,dateKey(new Date()),assertCurrent,source,fileRecords.map(f=>f.noteId).filter((s):s is string=>!!s));assertCurrent();
           if ("question" in prepared) {
             patchItem(id, item => item.kind === "command" ? { ...item, command: prepared.command, status: "needs_input", message: prepared.question } : item);
             return;
