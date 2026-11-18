@@ -12,13 +12,15 @@ export async function readNotePdf(db: SupabaseClient, userId: string, note: Sour
     if (connection.error) throw new RequestError("Drive 연결을 확인해 주세요.");
     const token = await refreshAccessToken(await decryptSecret(connection.data.refresh_token_encrypted, connection.data.refresh_token_iv));
     const meta = await (await driveFetch(token.access_token, `/files/${encodeURIComponent(note.drive_file_id)}?fields=mimeType,size,modifiedTime`, { signal })).json();
-    if (meta.mimeType !== "application/pdf" || Number(meta.size) > MAX_PDF_BYTES) throw new RequestError("20MB 이하 PDF만 분석할 수 있습니다.");
+    if (meta.mimeType !== "application/pdf") throw new RequestError("Drive 원본이 PDF 형식이 아닙니다.", 415);
+    if (Number(meta.size) > MAX_PDF_BYTES) throw new RequestError("PDF는 20MB 이하만 분석할 수 있습니다.", 413);
     if (!sameSourceTimestamp(meta.modifiedTime, note.drive_modified_time)) throw new RequestError("Drive 자료가 변경되었습니다. Drive 변경 반영 후 다시 분석해 주세요.");
     bytes = await readLimitedBody(await driveFetch(token.access_token, `/files/${encodeURIComponent(note.drive_file_id)}?alt=media`, { signal }), MAX_PDF_BYTES, signal);
   } else if (note.file_path) {
     if (!note.file_path.startsWith(`${userId}/`)) throw new RequestError("자료 접근 권한을 확인해 주세요.");
     const file = await db.storage.from("note-files").download(note.file_path);
-    if (file.error || !file.data || file.data.size > MAX_PDF_BYTES) throw new RequestError("PDF를 불러오지 못했습니다.");
+    if (file.error || !file.data) throw new RequestError("PDF를 불러오지 못했습니다.");
+    if (file.data.size > MAX_PDF_BYTES) throw new RequestError("PDF는 20MB 이하만 분석할 수 있습니다.", 413);
     bytes = new Uint8Array(await file.data.arrayBuffer());
   } else throw new RequestError("PDF 파일을 첨부해 주세요.");
   validatePdf(bytes, "application/pdf");

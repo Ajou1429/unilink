@@ -127,11 +127,23 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
 }
 
 const DRIVE_PROOF_KEY = "unilink:drive-oauth-proof";
+const DRIVE_SETTINGS_RETURN_KEY = "unilink:drive-settings-return";
+
+/** Consume only the initiating account's short-lived settings return marker. */
+export function takeDriveSettingsReturn() {
+  const raw = window.sessionStorage.getItem(DRIVE_SETTINGS_RETURN_KEY);
+  window.sessionStorage.removeItem(DRIVE_SETTINGS_RETURN_KEY);
+  try {
+    const value = JSON.parse(raw ?? "null");
+    return Boolean(value && value.userId === getStorageUser() && Number.isFinite(value.createdAt)
+      && Date.now() - value.createdAt >= 0 && Date.now() - value.createdAt < 600_000);
+  } catch { return false; }
+}
 let completion: Promise<boolean> | null = null;
 let completionOwner: string | null = null;
 
 /** The verifier never leaves the initiating tab until authenticated completion. */
-export async function startDriveConnection(): Promise<void> {
+export async function startDriveConnection(returnPage: "notes" | "settings" = "notes"): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error("Supabase가 설정되지 않았습니다.");
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -146,6 +158,9 @@ export async function startDriveConnection(): Promise<void> {
   const target = new URL(data.url);
   if (target.origin !== "https://accounts.google.com") throw new Error("유효하지 않은 Google 인증 주소입니다.");
   window.sessionStorage.setItem(DRIVE_PROOF_KEY, JSON.stringify({ verifier, state: data.state, userId: user.id, createdAt: Date.now() }));
+  if (returnPage === "settings") {
+    window.sessionStorage.setItem(DRIVE_SETTINGS_RETURN_KEY, JSON.stringify({ userId: user.id, createdAt: Date.now() }));
+  } else window.sessionStorage.removeItem(DRIVE_SETTINGS_RETURN_KEY);
   completion = null;
   window.location.assign(target.toString());
 }

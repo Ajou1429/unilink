@@ -32,7 +32,8 @@ export async function handleChatRecord(req: Request): Promise<Response> {
 
     const db = getAdminClient();
     const settings = await loadCoachingSettings(db);
-    const model = Deno.env.get("CHAT_RECORD_MODEL") ?? settings.analysis_model ?? Deno.env.get("COACHING_MODEL");
+    const model = assistant ? Deno.env.get("CHAT_ASSISTANT_MODEL")?.trim() || "gpt-6.1-terra"
+      : Deno.env.get("CHAT_RECORD_MODEL") ?? settings.analysis_model ?? Deno.env.get("COACHING_MODEL");
     if (!model || !Deno.env.get("OPENAI_API_KEY")) throw new RequestError("AI 설정이 필요합니다.", 503);
     const reserved = await db.rpc("reserve_file_classification", { p_user: user.id, p_mode: "chat" });
     if (reserved.error) throw new RequestError("대화 기록 한도를 확인하지 못했습니다. 서버 DB 적용 상태를 확인해 주세요.", 503);

@@ -6,6 +6,7 @@ import { captureStorageScope, privateStorage } from "@/lib/private-storage";
 
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
 import { Badge } from "@/components/ui/badge";
@@ -42,7 +43,6 @@ import {
   RefreshCw,
   Search,
   Trash2,
-  Unlink,
   Upload,
 } from "lucide-react";
 import { getStoredCourses } from "@/lib/course-storage";
@@ -67,13 +67,12 @@ import {
   DriveFolder,
   DrivePdfFile,
   DriveConnectionStatus,
-  disconnectDrive,
   enableRealtimeWatch,
   getDriveConnectionStatus,
   listDriveFolderContents,
   getDriveFolderPaths,
   completeDriveConnection,
-  startDriveConnection,
+  takeDriveSettingsReturn,
   syncDriveFolders,
   uploadNoteToDrive,
 } from "@/lib/drive-connection";
@@ -382,6 +381,10 @@ export default function NotesPage() {
       try {
         // On an OAuth return, confirm the connection before applying its status.
         const completed = await completeDriveConnection();
+        if (completed && takeDriveSettingsReturn()) {
+          window.location.replace(`${window.location.pathname.startsWith("/unilink/") ? "/unilink" : ""}/settings?drive=connected#google-drive`);
+          return;
+        }
         const status = await getDriveConnectionStatus();
         if (cancelled) return;
         setDriveStatus(status);
@@ -406,6 +409,10 @@ export default function NotesPage() {
           );
         }
       } catch (error) {
+        if (takeDriveSettingsReturn()) {
+          window.location.replace(`${window.location.pathname.startsWith("/unilink/") ? "/unilink" : ""}/settings?drive=error#google-drive`);
+          return;
+        }
         if (!cancelled) setDriveMessage(error instanceof Error ? error.message : "Google Drive 연결 상태를 불러오지 못했습니다.");
       }
     }
@@ -502,8 +509,6 @@ export default function NotesPage() {
 
   const syncedCount = notes.filter((note) => note.syncStatus === "synced").length;
   const assignedCount = notes.filter((note) => note.linkedType !== "unassigned").length;
-  const connectedDriveAccount =
-    driveStatus?.accountEmail || driveStatus?.accountName || null;
   const currentPickerFolder = folderPath[folderPath.length - 1];
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -775,34 +780,6 @@ export default function NotesPage() {
       setDriveMessage(error instanceof Error ? error.message : "폴더 동기화에 실패했습니다.");
       setSyncDisplay({ state: "error", names: folders.map((folder) => folder.name), message: error instanceof Error ? error.message : "폴더 동기화에 실패했습니다.", folders });
       await loadDriveStatus().catch(() => undefined);
-    } finally {
-      setDriveBusy(false);
-    }
-  }
-
-  async function handleConnectDrive() {
-    setDriveBusy(true);
-    setDriveMessage(null);
-    try {
-      await startDriveConnection();
-    } catch (error) {
-      setDriveMessage(error instanceof Error ? error.message : "연결 시작에 실패했습니다.");
-      setDriveBusy(false);
-    }
-  }
-
-  async function handleDisconnectDrive() {
-    setDriveBusy(true);
-    setDriveMessage(null);
-    try {
-      await disconnectDrive();
-      await loadDriveStatus();
-      setDriveStatus(null);
-      setDriveFolderInput("");
-      setSelectedDriveFolders([]);
-      setDriveMessage("Google Drive 연결을 해제했습니다.");
-    } catch (error) {
-      setDriveMessage(error instanceof Error ? error.message : "연결 해제에 실패했습니다.");
     } finally {
       setDriveBusy(false);
     }
@@ -1258,58 +1235,13 @@ export default function NotesPage() {
                 </p>
               ) : (
                 <>
-                  <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">Google Drive</p>
-                      <p className="text-xs text-muted-foreground">
-                        {driveStatus?.connected
-                          ? driveStatus.requiresReconnect
-                            ? "Google 인증이 만료되어 다시 연결해야 합니다"
-                            : "계정이 연결되어 있습니다"
-                          : "아직 연결되지 않았습니다"}
-                      </p>
-                      {driveStatus?.connected && (
-                        <div className="mt-2 flex min-w-0 items-center gap-2">
-                          {driveStatus.accountPhotoUrl && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={driveStatus.accountPhotoUrl}
-                              alt=""
-                              className="h-5 w-5 rounded-full"
-                            />
-                          )}
-                          <p className="truncate text-xs font-medium text-foreground">
-                            {connectedDriveAccount ?? "계정 정보 동기화 대기"}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                    {driveStatus?.connected && driveStatus.requiresReconnect ? (
-                      <Badge variant="destructive">재연결 필요</Badge>
-                    ) : driveStatus?.connected ? (
-                      <Badge variant="secondary" className="gap-1">
-                        <CheckCircle2 className="h-3 w-3" />
-                        연결됨
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline">연결 안 됨</Badge>
-                    )}
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+                    <p className="text-sm text-muted-foreground">{driveStatus?.requiresReconnect ? "Drive 인증이 만료되었습니다." : driveStatus?.connected ? "Google Drive 연결됨" : "Google Drive 연결이 필요합니다."}</p>
+                    <Button size="sm" variant="outline" nativeButton={false} render={<Link href="/settings#google-drive" />}>설정에서 계정 관리</Button>
                   </div>
 
                   {driveStatus?.connected && driveStatus.requiresReconnect ? (
-                    <div className="space-y-2">
-                      <Button
-                        className="w-full gap-2"
-                        onClick={handleConnectDrive}
-                        disabled={driveBusy}
-                      >
-                        <Link2 className="h-4 w-4" />
-                        Google Drive 다시 연결
-                      </Button>
-                      <p className="text-xs text-muted-foreground">
-                        기존 노트와 분류 정보는 유지됩니다. Google 계정 권한만 다시 승인합니다.
-                      </p>
-                    </div>
+                    <p className="text-sm text-muted-foreground">계정 옆 설정에서 Google Drive를 다시 연결한 뒤 폴더를 동기화해 주세요.</p>
                   ) : driveStatus?.connected ? (
                     <div className="space-y-2">
                       <Label className="text-xs">GoodNotes 백업 폴더</Label>
@@ -1526,27 +1458,11 @@ export default function NotesPage() {
                             실시간 동기화 켜기
                           </Button>
                         )}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="gap-1.5 text-destructive"
-                          onClick={handleDisconnectDrive}
-                          disabled={driveBusy}
-                        >
-                          <Unlink className="h-3.5 w-3.5" />
-                          연결 해제
-                        </Button>
+
                       </div>
                     </div>
                   ) : (
-                    <Button
-                      className="w-full gap-2"
-                      onClick={handleConnectDrive}
-                      disabled={driveBusy}
-                    >
-                      <Link2 className="h-4 w-4" />
-                      Google Drive 연결하기
-                    </Button>
+                    <p className="text-sm text-muted-foreground">Google Drive 연결은 계정 옆 설정에서 관리할 수 있습니다.</p>
                   )}
 
                   {driveMessage && (

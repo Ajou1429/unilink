@@ -37,8 +37,9 @@ export function commandDisplay(command: ChatCommand, options: {courseName?:strin
   if(c.kind==="sync_drive")content.push("이미 선택한 Drive 폴더의 변경사항 반영");
   if(c.date) {
     const deadline=c.kind==="add_task"&&!["exam","quiz"].includes(c.event_type??"");
-    dates.push(`${deadline?"마감":"일시"}: ${c.date}${c.period_end&&c.period_end!==c.date?` ~ ${c.period_end}`:""}${c.all_day?" · 종일":c.start_time?` · ${c.start_time}${c.end_time?`–${c.end_time}`:""}`:""}`);
-    if(c.start_time&&c.end_time) {
+    const classWindow=options.summary?.some(line=>line.startsWith("시간표상 수업 시간대입니다."));
+    dates.push(`${classWindow?"수업 시간대":deadline?"마감":"일시"}: ${c.date}${c.period_end&&c.period_end!==c.date?` ~ ${c.period_end}`:""}${c.all_day?" · 종일":c.start_time?` · ${c.start_time}${c.end_time?`–${c.end_time}`:""}`:""}`);
+    if(c.start_time&&c.end_time&&!classWindow) {
       const minutes=(s:string)=>Number(s.slice(0,2))*60+Number(s.slice(3));
       const duration=minutes(c.end_time)-minutes(c.start_time);
       if(duration>0&&c.kind!=="generate_plan")dates.push(`소요 시간: ${duration>=60?`${Math.floor(duration/60)}시간 `:""}${duration%60?`${duration%60}분`:""}`.trim());
@@ -47,7 +48,7 @@ export function commandDisplay(command: ChatCommand, options: {courseName?:strin
   if(c.term)dates.push(`학기: ${c.term}`);
   if(c.weekdays?.length)dates.push(`반복: ${c.weekdays.map(d=>["일","월","화","수","목","금","토"][d]).join("·")}요일${c.start_time?` ${c.start_time}–${c.end_time??""}`:""}`);
   // Preserve preparation-specific disclosures not represented by fields (e.g. temporary availability).
-  content.push(...(options.summary??[]).filter(s=>/브라우저에 저장/.test(s)));
+  content.push(...(options.summary??[]).filter(s=>/브라우저에 저장|^시간표상 수업 시간대입니다\./.test(s)));
   dates.push(...(options.summary??[]).filter(s=>s.startsWith("임시 추천 조건:")));
   if(!content.length)content.push(`${kind} ${c.kind==="generate_plan"?"생성":"반영"}`);
   return {title,content:unique(content),dates:unique(dates)};

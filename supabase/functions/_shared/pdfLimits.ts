@@ -14,6 +14,16 @@ export function validatePageCount(count: number) {
     throw new RequestError("PDF는 1~50페이지까지 분석할 수 있습니다.", 413);
   }
 }
+
+export function validateLecturePageCount(count: number) {
+  if (!Number.isSafeInteger(count) || count < 1) throw new RequestError("분석할 PDF 페이지가 없습니다.", 415);
+}
+
+export function* pdfPageRanges(count: number, size: number) {
+  validateLecturePageCount(count);
+  if (!Number.isSafeInteger(size) || size < 1) throw new Error("Invalid PDF slice size");
+  for (let start = 1; start <= count; start += size) yield { start, end: Math.min(start + size - 1, count) };
+}
 export function flattenLabels(items: unknown): string[] {
   if (!Array.isArray(items) || items.length > MAX_LABELS) throw new RequestError("분석 결과 형식이 올바르지 않습니다.", 502);
   const out: string[] = [];

@@ -9,6 +9,7 @@ import type { IntakeRecord } from "./file-intake/settings";
 import type { ChatContext } from "./chat-record/apply";
 import type { AssistantResult } from "../../supabase/functions/_shared/chatAssistant";
 import type { ChatCommand } from "../../supabase/functions/_shared/chatCommands";
+import { belongsToCourse, matchMaterialCourse, requestedChapters, selectChapterMaterials } from "./chat-course-materials";
 
 const CONSENT_KEY="unilink:chat-assistant-consent:v3";
 const PREVIOUS_CONSENT_KEY="unilink:chat-assistant-consent:v2";
@@ -21,13 +22,18 @@ export function getAssistantConsent(): "granted" | "declined" | null {
 export function setAssistantConsent(value:"granted"|"declined") { privateStorage.setItem(CONSENT_KEY,value); }
 
 /** Reuse completed analysis excerpts when available. PDF transfer runs through note-analyze. */
-export async function converse(context: ChatContext, message: string, history: {role:"user"|"assistant";text:string}[], today: string, files: IntakeRecord[] = [], pendingCommand?: ChatCommand, analysis?: ChatDocumentAnalysis) {
+export async function converse(context: ChatContext, message: string, history: {role:"user"|"assistant";text:string}[], today: string, files: IntakeRecord[] = [], pendingCommand?: ChatCommand, analysis?: ChatDocumentAnalysis, materialRequest = message) {
   if(getAssistantConsent()!=="granted") throw new Error("대화와 기능 연결에 대한 AI 전송 동의가 필요해요.");
   const current=captureStorageScope(context.userId),db=getSupabaseBrowserClient();
   if(!db || !context.signedIn || !context.userId) throw new Error("로그인 후 AI와 대화할 수 있어요.");
   const allNotes=await getMyNotes(); current();
   const attached=new Set([...files.map(f=>f.noteId),pendingCommand?.note_id]);
-  const notes=[...allNotes.filter(n=>attached.has(n.id)),...allNotes.filter(n=>!attached.has(n.id))].slice(0,40);
+  const materialCourse = matchMaterialCourse(context.courses, materialRequest) ?? context.courses.find(c => c.id === pendingCommand?.course_id);
+  const chapters = requestedChapters(materialRequest);
+  const chapterMatches = materialCourse ? selectChapterMaterials(allNotes, materialCourse.id, chapters.slice(0, 5), materialRequest) : [];
+  const notes = [...new Map([...chapterMatches.flatMap(group => group.candidates),
+    ...allNotes.filter(n => attached.has(n.id) || n.id === analysis?.noteId),
+    ...allNotes.filter(n => materialCourse && belongsToCourse(n, materialCourse.id)), ...allNotes].map(n => [n.id, n])).values()].slice(0, 40);
   if (!analysis) {
     const requested = allNotes.filter(note => [note.title, note.fileName].some(name => name && name.length >= 4 && message.normalize("NFC").includes(name.normalize("NFC"))));
     const attachedNotes = allNotes.filter(note => attached.has(note.id));
@@ -37,7 +43,7 @@ export async function converse(context: ChatContext, message: string, history: {
     if (candidates.length === 1) analysis = await loadChatDocumentAnalysis(candidates[0], context.userId, current);
     current();
   }
-  const courseFor=(note:MyNote)=>context.courses.find(c=>c.id===note.linkedId || c.name===note.courseName)?.id??null;
+  const courseFor=(note:MyNote)=>context.courses.find(c=>belongsToCourse(note,c.id))?.id??null;
   const [aiPlans,states,goals,assignments]=await Promise.all([
     db.from("study_plan_items").select("id,goal_id,title,scheduled_start,planned_minutes,status,study_plans!inner(source_type,status)")
       .eq("user_id",context.userId!).eq("study_plans.source_type","ai").in("study_plans.status",["approved","active","completed"])
@@ -52,7 +58,9 @@ export async function converse(context: ChatContext, message: string, history: {
   ]);
   current();
   const plans=getWeeklyStudyPlans().filter(p=>!p.isCompleted).slice(0,15);
-  const overview=JSON.stringify({document_analysis:chatDocumentContext(analysis,allNotes,message),source:"본인 시간표·일정·수동 계획, 승인된 AI 계획 일부와 최근 자기보고 이해도. 전체 이력이나 PDF 본문은 포함하지 않음. unavailable은 조회 실패이며 기록 없음이 아님",
+  const continuedRequest = materialRequest !== message && materialRequest.length > 1800
+    ? `${materialRequest.slice(0,800)}\n…\n${materialRequest.slice(-1000)}` : materialRequest;
+  const overview=JSON.stringify({pending_user_requirements:materialRequest!==message?continuedRequest:undefined, material_course:materialCourse?.id, requested_chapters:chapters.slice(0,5), chapter_matches:chapterMatches.map(group=>({chapter:group.chapter, count:group.candidates.length, unavailable:group.unavailable})), document_analysis:chatDocumentContext(analysis,allNotes,message),source:"본인 시간표·일정·수동 계획, 승인된 AI 계획 일부와 최근 자기보고 이해도. 전체 이력이나 PDF 본문은 포함하지 않음. unavailable은 조회 실패이며 기록 없음이 아님",
     approved_ai_plans:aiPlans.error?{unavailable:true}:aiPlans.data,
     active_goals:goals.error?{unavailable:true}:goals.data?.filter(goal=>goal.goal_type==="personal"||[...context.goals.values()].includes(goal.id)),
     assignment_events:assignments.error?{unavailable:true}:assignments.data,
@@ -69,5 +77,5 @@ export async function converse(context: ChatContext, message: string, history: {
   current();
   if(result.error) throw new Error(await describeFunctionError(result.error,"대화 답변을 준비하지 못했어요."));
   if(!result.data?.result || result.data.result.protocol_version!==2) throw new Error("대화 서버를 최신 버전으로 업데이트해야 해요. 현재 예/아니오 확인 실행 프로토콜을 지원하지 않습니다.");
-  return {result:result.data.result,notes};
+  return {result:result.data.result,notes,allNotes};
 }

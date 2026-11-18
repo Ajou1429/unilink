@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
+import { DriveAccountSettings } from "@/components/settings/DriveAccountSettings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -239,7 +240,7 @@ export default function SettingsPage() {
         </Card>
 
         {currentUser && <Card className="border-0 shadow-sm">
-          <CardHeader className="pb-3"><CardTitle>Google 계정 연결</CardTitle></CardHeader>
+          <CardHeader className="pb-3"><CardTitle>Google 로그인 연결</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
               {googleLinked
@@ -252,6 +253,8 @@ export default function SettingsPage() {
             {googleMessage && <p role="alert" className="text-sm text-destructive">{googleMessage}</p>}
           </CardContent>
         </Card>}
+
+        <DriveAccountSettings />
 
         <Card className="border-0 shadow-sm">
           <CardHeader className="pb-3">

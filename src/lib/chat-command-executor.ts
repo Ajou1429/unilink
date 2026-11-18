@@ -1,4 +1,5 @@
-import type { ChatDocumentAnalysis } from "./chat-document-analysis";
+import { allowsChatDocumentAnalysis, type ChatDocumentAnalysis } from "./chat-document-analysis";
+import { matchesMaterialScope, type MaterialScope } from "../../supabase/functions/_shared/materialScope";
 import { getSupabaseBrowserClient } from "./supabase-client";
 import { captureStorageScope, getStorageUser } from "./private-storage";
 import { flushP0Changes } from "./p0-sync";
@@ -13,8 +14,10 @@ import { listProblems, listSubjects } from "./problem-bank-storage";
 import { getDriveConnectionStatus, syncDriveFolder } from "./drive-connection";
 import { courseKnowledgeEnabled, prepareCourseKnowledge, requestCourseKnowledge } from "./course-knowledge";
 import { getMyNotes, type MyNote } from "./my-notes-storage";
+import { belongsToCourse, isReadablePdfSource, matchMaterialCourse, namedPlanMaterials, matchesChapter, requestedChapters, requestedPlanChapters, selectChapterMaterials } from "./chat-course-materials";
 import type { ChatCommand } from "../../supabase/functions/_shared/chatCommands.ts";
 import type { ChatContext } from "./chat-record/apply";
+import { classWindowsFor } from "./chat-record/plan";
 import type { ChatCoachingResult } from "../components/coaching/CoachingRequestPanel";
 
 type Db = NonNullable<ReturnType<typeof getSupabaseBrowserClient>>;
@@ -30,6 +33,8 @@ const jobs=new Map<string,Promise<CommandResult>>();
 const running=new Set<string>();
 const drafts=new Map<string,{value:PreparedCommand;owner:()=>void}>();
 const dayName=["일","월","화","수","목","금","토"] as const;
+const duringClass = /수업\s*(?:시간\s*(?:중|내|동안|에)|중)|\bduring (?:the )?class\b|\bin class\b/i;
+const classTimeNote = "시간표상 수업 시간대입니다. 정확한 시험·퀴즈 시작 시각은 공지되지 않았어요.";
 const resultData = <T>(r:{data:T;error:unknown}):T=>{if(r.error)throw new Error((r.error as {message?:string}).message??"요청을 처리하지 못했어요.");return r.data;};
 const iso=(date:string,time:string)=>new Date(`${date}T${time}:00`).toISOString();
 const shift=(date:string,days:number)=>{const d=new Date(date+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);};
@@ -65,13 +70,23 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
   if(["add_event","add_task","add_plan"].includes(c.kind)&&!c.date)return question(c,"몇 월 며칠에 추가할까요?");
   if(c.kind==="add_event"||c.kind==="add_task") {
     if(c.kind==="add_task"&&!course)return question(c,"어느 과목의 과제·시험인가요?");
+    let classWindow=false;
+    if(c.kind==="add_task"&&course&&["exam","quiz"].includes(c.event_type??"")&&!c.start_time&&!c.end_time&&duringClass.test(requestText)) {
+      const windows=classWindowsFor(course,c.date!);
+      if(!windows.length)return question(c,`${c.date} ${course.name} 시간표에서 수업 시간을 확인하지 못했어요. 공지된 시간대가 있나요?`);
+      if(windows.length!==1)return question(c,`${c.date} ${course.name} 수업이 여러 개예요. 어느 시간대인가요? ${windows.map(slot=>`${slot.startTime}~${slot.endTime}`).join(" / ")}`);
+      c.start_time=windows[0].startTime;
+      c.end_time=windows[0].endTime;
+      c.all_day=false;
+      classWindow=true;
+    }
     if(c.kind==="add_task"&&["assignment","project"].includes(c.event_type??"assignment")&&!c.start_time) { c.start_time="23:59"; c.all_day=false; }
     if(!c.all_day&&!c.start_time)return question(c,c.kind==="add_task"?"마감 또는 시험 시작 시각이 언제인가요?":"몇 시에 시작하나요?");
     const timed=c.kind==="add_event"||!["assignment","project"].includes(c.event_type??"assignment");
     if(timed&&!c.all_day&&(!c.end_time||c.end_time<=c.start_time!))return question(c,"종료 시각을 알려주세요. 시작 시각보다 뒤여야 해요.");
     const goal=course?ctx.goals.get(course.id):null;
     if(course&&!goal)throw new Error("과목 동기화 후 다시 요청해 주세요.");
-    return ready(c,uid,[`${course?.name??"개인 일정"} · ${c.title}`,`${c.date} ${c.all_day?"종일":`${c.start_time}${timed?` ~ ${c.end_time}`:" 마감"}`}`,c.details??"",c.exam_scope?`시험 범위: ${c.exam_scope}`:""].filter(Boolean),{goalId:goal??null},"write",id);
+    return ready(c,uid,[`${course?.name??"개인 일정"} · ${c.title}`,`${c.date} ${c.all_day?"종일":`${c.start_time}${timed?` ~ ${c.end_time}`:" 마감"}`}`,c.details??"",c.exam_scope?`시험 범위: ${c.exam_scope}`:"",...(classWindow?[classTimeNote]:[])].filter(Boolean),{goalId:goal??null,classWindow},"write",id);
   }
   if(c.kind==="add_goal")return ready(c,uid,[`개인 학습 목표: ${c.title}`,c.date?`목표일: ${c.date}`:"목표일 미지정",c.details??""].filter(Boolean),{},"write",id);
   if(c.kind==="add_plan")return ready(c,uid,[`${course?.name??"개인 학습"} · ${c.title}`,`수동 계획 · ${c.date}`,c.details??""].filter(Boolean),{},"write",id);
@@ -99,12 +114,15 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
     return ready(c,uid,[item.title,"이 과제를 제출·완료로 표시합니다. 이해도와 실제 공부시간은 변경하지 않습니다."],{expected:item.updated_at},"write",id);
   }
   if(c.kind==="analyze_pdf"||c.kind==="classify_note") {
-    const pdfs=notes.filter(n=>n.fileName?.toLowerCase().endsWith(".pdf"));
+    const scopedCourse = c.kind === "analyze_pdf" ? matchMaterialCourse(ctx.courses,requestText) ?? course : undefined;
+    const chapters = c.kind === "analyze_pdf" ? requestedChapters(requestText) : [];
+    const pdfs=notes.filter(n=>isReadablePdfSource(n) && (!scopedCourse || belongsToCourse(n,scopedCourse.id)) && (!chapters.length || chapters.some(chapter=>matchesChapter(n,chapter))));
     const recent=pdfs.filter(n=>recentNoteIds.includes(n.id));
     const note=notes.find(n=>n.id===c.note_id)??(recent.length===1?recent[0]:pdfs.length===1?pdfs[0]:null);
     if(!note)return question(c,"어느 노트를 처리할까요? 파일명이나 제목을 알려주세요.");
     c.note_id=note.id;
-    if(c.kind==="analyze_pdf"&&(!note.fileName?.toLowerCase().endsWith(".pdf")||(!note.filePath&&!note.driveFileId)))return question(c,"원본을 읽을 수 있는 PDF를 첨부해 주세요.");
+    if(c.kind==="analyze_pdf"&&!isReadablePdfSource(note))return question(c,`‘${note.title}’에 연결된 PDF 원본이 없거나 지원하지 않는 형식이에요. 과목에 있는 다른 PDF를 선택해 주세요.`);
+    if(c.kind==="analyze_pdf"&&!pdfs.some(pdf=>pdf.id===note.id))return question(c,"선택한 PDF가 요청한 과목이나 장 번호와 일치하지 않아요. 해당 과목의 자료 제목을 알려주세요.");
     let linkedId:string|null=course?.id??null,linkedTitle=course?.name??"개인 학습";
     if(c.kind==="classify_note"&&c.goal_id&&!course) {
       const target=resultData(await db.from("learning_goals").select("id,title").eq("user_id",uid).eq("id",c.goal_id).eq("goal_type","personal").eq("status","active").single());check();
@@ -140,11 +158,43 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
     return ready(c,uid,[item.title,c.kind==="complete_plan"?"완료로 표시": "다음날 같은 시각으로 미루기 · 충돌·마감이 있으면 거절돼요."],{expected:item.updated_at,start:item.scheduled_start},"write",id);
   }
   if(c.kind==="generate_plan") {
+    const materialCourse = matchMaterialCourse(ctx.courses,requestText) ?? course;
+    const requested = requestedPlanChapters(requestText);
+    const chapters = requested.length ? requested : requestedChapters(c.exam_scope ?? "");
+    if(chapters.length && !allowsChatDocumentAnalysis(requestText))return question(c,"본문 분석 없이 진행하는 요청이에요. PDF에서 근거를 읽지 않는 일반 계획으로 진행할지 알려주세요.");
+    if(chapters.length > 5)return question(c,"한 계획에서 확인할 장을 최대 5개로 나눠 주세요.");
+    if(chapters.length && !materialCourse)return question(c,"어느 과목의 강의자료인지 알려주세요.");
+    const chapterGroups = materialCourse ? selectChapterMaterials(notes,materialCourse.id,chapters,requestText) : [];
+    const missing = chapterGroups.filter(group=>!group.candidates.length);
+    if(missing.length)return question(c,`${materialCourse?.name}에서 ${missing.map(group=>`${group.chapter}장(${group.unavailable ? "PDF 원본 없음 또는 지원하지 않는 형식" : "연결된 자료를 찾지 못함"})`).join(", ")}. 과목의 강의자료 목록이나 파일 제목을 확인해 주세요.`);
+    const ambiguous = chapterGroups.find(group=>group.candidates.length>1);
+    if(ambiguous)return question(c,`${materialCourse?.name} ${ambiguous.chapter}장에 PDF가 여러 개 있어요. 어느 파일을 사용할까요? ${ambiguous.candidates.slice(0,6).map(n=>n.fileName??n.title).join(" / ")}`);
+    if(chapters.length && materialCourse) { c.course_id=materialCourse.id;c.course_ids=[];c.goal_id=null;c.note_id=null; }
     let goalIds=[...new Set([c.course_id,...c.course_ids].filter((s):s is string=>!!s).map(s=>ctx.goals.get(s)).filter((s):s is string=>!!s))];
     if(c.goal_id)goalIds=[c.goal_id];
     if(!goalIds.length)return question(c,"어느 과목이나 학습 목표의 계획을 만들까요?");
     const goals=resultData(await db.from("learning_goals").select("id,title").eq("user_id",uid).eq("status","active").in("id",goalIds))??[];check();
     if(goals.length!==goalIds.length)throw new Error("활성 학습 목표를 다시 확인해 주세요.");
+    const named = chapters.length ? [] : namedPlanMaterials(notes, requestText, materialCourse?.id);
+    if (named.length > 1) return question(c,"이름이 같은 PDF가 여러 개 있어요. 계획에 사용할 파일을 하나 선택해 주세요.");
+    if (named.length === 1) c.note_id = named[0].id;
+    const singlePdfOnly = /(?:pdf|파일|자료|노트)\s*(?:(?:한|1|하나)\s*개\s*)?만|(?:이|해당|선택한)\s*(?:pdf|파일|자료|노트)\s*만/i.test(requestText);
+    if (!chapters.length && !c.note_id && singlePdfOnly) {
+      const recent = notes.filter(note => recentNoteIds.includes(note.id) && isReadablePdfSource(note)
+        && (!materialCourse || belongsToCourse(note, materialCourse.id)));
+      if (recent.length !== 1) return question(c,"사용할 PDF 한 개를 특정하지 못했어요. 파일명을 알려주거나 자료를 선택해 주세요. 과목 전체로 범위를 넓히지 않습니다.");
+      c.note_id = recent[0].id;
+    }
+    const material = !chapters.length && c.note_id ? notes.find(note => note.id === c.note_id) : undefined;
+    if (!chapters.length && c.note_id && (!material || !isReadablePdfSource(material))) {
+      return question(c,"계획에 사용할 원본 PDF를 다시 선택해 주세요.");
+    }
+    if (material && materialCourse && !belongsToCourse(material, materialCourse.id)) return question(c,"선택한 PDF가 이 과목에 연결되어 있지 않아요. 수업 자료를 다시 선택해 주세요.");
+    const materials = [...new Map([...chapterGroups.flatMap(group=>group.candidates), ...(material ? [material] : [])].map(note=>[note.id,note])).values()];
+    if (materials.length && goalIds.length !== 1) return question(c,"선택한 자료가 속한 한 과목의 목표를 알려주세요.");
+    if (materials.length && !courseKnowledgeEnabled) throw new Error("선택한 PDF 기반 계획은 과목 자료 분석이 활성화되어야 합니다.");
+    const materialScope = materials.length > 1 ? { material_note_ids: materials.map(note=>note.id) }
+      : materials.length ? { material_note_id: materials[0].id } : {};
     // Missing availability is a proposal assumption, never a claimed user preference.
     const suggestedTimes=!c.start_time||!c.end_time||c.minutes===null;
     c.start_time=c.start_time??"09:00";
@@ -168,19 +218,44 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
       dailySources.push(...sources.slice(0,10).map(({kind,id})=>({kind,id})));
       if(!dailySources.length)return question(c,"이 과목에 진행 중인 과제나 기존 계획이 없어요. 오늘 새 학습을 할까요, 먼저 과제를 등록할까요?");
     }
-    if(c.intent==="exam_prep"&&(!c.exam_scope||!c.exam_at||!c.priority||!c.difficulty))return question(c,"시험 범위·일시와 우선도/난이도(각 1~5)를 알려주세요.");
     if(c.intent==="exam_prep"&&goalIds.length>1)return question(c,"시험 범위와 일시가 과목마다 달라요. 먼저 어느 한 과목부터 준비할까요?");
-    const request={request_key:id,goal_ids:goalIds,intent:c.intent,period_start:c.date,period_end:c.period_end,desired_outcome:"",constraints:[suggestedTimes?"미입력 시간 조건은 임시 추천값이며 사용자가 확인한 가용시간이 아니다. 기존 일정과 충돌하지 않는 범위에서 필요한 분량만 제안하고, 추천 시간은 저장 전 사용자가 확인한다.":"",c.details??"",requestText].join("\n").slice(0,1000),
+    const assumptions:string[]=[];
+    if(c.intent==="exam_prep") {
+      const inClass=duringClass.test(requestText)||/수업\s*시간(?:인데|이고|이야)/.test(requestText);
+      if (!c.exam_at || (!c.exam_scope && !chapters.length) || inClass) {
+        const events=resultData(await db.from("calendar_events").select("title,event_type,starts_at,exam_scope").eq("user_id",uid).eq("goal_id",goalIds[0])
+          .eq("status","scheduled").in("event_type",["exam","quiz"]).gte("starts_at",`${c.date}T00:00:00+09:00`).lte("starts_at",`${shift(c.period_end,7)}T23:59:59+09:00`).limit(20))??[];check();
+        const matching=events.filter(event=>(!/퀴즈|quiz/i.test(requestText)||event.event_type==="quiz")&&(!c.exam_at||!event.starts_at||Date.parse(c.exam_at)===Date.parse(event.starts_at)||inClass));
+        if(matching.length===1) {
+          c.exam_at=matching[0].starts_at??c.exam_at;
+          if(!chapters.length)c.exam_scope=c.exam_scope??matching[0].exam_scope;
+          if(inClass)assumptions.push("정확한 퀴즈 시각은 미정. 등록된 수업 시작을 대비 계획의 보수적인 마감으로만 사용한다.");
+        } else if (inClass) {
+          c.exam_at=null;
+        }
+      }
+      if(chapters.length)c.exam_scope=chapters.map(chapter=>`${chapter}장`).join(", ");
+      const missingExam=[!c.exam_scope?"시험 범위":null,!c.exam_at?"시험 날짜 또는 등록된 시험 일정":null].filter(Boolean);
+      if(missingExam.length)return question(c,`${missingExam.join("와 ")}만 더 확인해 주세요. 이미 받은 조건은 유지할게요.`);
+      if(/중간고사급|비중이\s*(?:꽤\s*)?큰|비중이\s*높/.test(requestText))c.priority=5;
+      if(!c.priority){c.priority=3;assumptions.push("우선도 3은 사용자 평가가 아닌 임시값이다.");}
+      if(!c.difficulty||/난이도.{0,12}(?:서칭|판단|확인|알려)/.test(requestText)){
+        c.difficulty=3;assumptions.push("난이도 3은 미확인 임시값이다. 선택된 PDF의 개념과 예제, 요구 수준을 바탕으로 체감 난이도를 추정하고 근거를 설명하라. 외부 검색을 수행했다고 주장하지 마라.");
+      }
+    }
+    const request={request_key:id,goal_ids:goalIds,intent:c.intent,period_start:c.date,period_end:c.period_end,desired_outcome:"",constraints:[...assumptions,suggestedTimes?"미입력 시간 조건은 임시 추천값이며 사용자가 확인한 가용시간이 아니다. 기존 일정과 충돌하지 않는 범위에서 필요한 분량만 제안하고, 추천 시간은 저장 전 사용자가 확인한다.":"",c.details??"",requestText].join("\n").slice(0,1000),
+      ...materialScope,
       ...(c.intent==="daily_plan"?{daily_sources:dailySources}:{}),
       ...(c.intent==="exam_prep"?{exam_inputs:goalIds.map(goal_id=>({goal_id,scope:c.exam_scope!,exam_at:c.exam_at!,priority:c.priority!,difficulty:c.difficulty!}))}:{}),
-      day_budgets:Array.from({length},(_,i)=>({date:shift(c.date!,i),minutes:c.minutes!,windows:[{start:c.start_time!,end:c.end_time!}]})),
+      day_budgets:Array.from({length},(_,i)=>{const date=shift(c.date!,i);const allowed=!c.weekdays.length||c.weekdays.includes(new Date(date).getUTCDay());return {date,minutes:allowed?c.minutes!:0,windows:allowed?[{start:c.start_time!,end:c.end_time!}]:[]};}),
       rules:{transition_minutes:10,break_minutes:10,break_after_minutes:90,method_minimums:{},max_focus_goals:Math.min(3,goalIds.length),carryover:true}};
     const summary=[`${goals.map(g=>g.title).join(", ")} · ${c.date} ~ ${c.period_end}`,`${suggestedTimes?"임시 추천 조건: ":""}${c.start_time} ~ ${c.end_time} 중 하루 최대 ${c.minutes}분`,"직접 추가한 계획은 유지해요."];
+    if(materials.length)summary.push(`계획에 사용할 PDF: ${materials.map(note=>note.title).join(" / ")}`);
     const prepared=ready(c,uid,summary,{request,goalIds},"plan_analysis",id);
     if(!("prepared" in prepared))throw new Error("계획 요청을 확인하지 못했어요.");
     if(courseKnowledgeEnabled) {
       for(const goalId of goalIds) {
-        const state=await requestCourseKnowledge(goalId,c.date,{action:"status"});check();
+        const state=await requestCourseKnowledge(goalId,c.date,{action:"status",...materialScope});check();
         if(state.pdf_count>0&&(state.pdf_count>state.pdf_ready||!state.overview_complete||!state.detail_complete))return {prepared:seal({...prepared.prepared,goals,summary:[...summary,"계획 전 이 과목 PDF 원문을 OpenAI에 전송해 분석할까요? 분석 후 실제 계획은 다시 보여드리고 저장 여부를 확인해요."]})};
       }
     }
@@ -189,19 +264,26 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
   throw new Error("이 요청의 직접 실행 방법을 확인하지 못했어요.");
 }
 
-async function generateProposal(p:PreparedCommand,consent:boolean,check:()=>void):Promise<PreparedCommand> {
+async function generateProposal(p:PreparedCommand,consent:boolean,check:()=>void,retryAnalysis=false):Promise<PreparedCommand> {
   const db=await session(p.userId,check),request=p.payload.request as Record<string,unknown>;
+  const scope:MaterialScope={material_note_id:request.material_note_id as string|undefined,material_note_ids:request.material_note_ids as string[]|undefined};
   await flushP0Changes();check();
-  await prepareCourseKnowledge(p.payload.goalIds as string[],String(request.period_start),p.userId,consent,false,()=>{check();},false,check);check();
+  await prepareCourseKnowledge(p.payload.goalIds as string[],String(request.period_start),p.userId,consent,false,()=>{check();},retryAnalysis,check,scope.material_note_id,scope.material_note_ids);check();
   const response=await db.functions.invoke<ChatCoachingResult>("coaching-propose",{body:request});check();
   if(response.error)throw new Error(await describeFunctionError(response.error,"계획을 만들지 못했어요."));
   const result=response.data;
+  if(!matchesMaterialScope(scope,result))throw new Error("선택한 자료를 반영하려면 코칭 서버를 먼저 업데이트해야 합니다.");
   if(!result||result.schema_version!==2||!result.proposal_run_id||!result.proposal?.items?.length||result.persisted!==false)throw new Error(result?.proposal?.summary??"확정 가능한 학습 시간이 없어요. 시간대나 분량을 조정해 주세요.");
-  return seal({...p,id:crypto.randomUUID(),phase:"approve_plan",expiresAt:Date.now()+5*60000,payload:{runId:result.proposal_run_id},proposal:result,summary:[result.proposal.summary,...p.summary.filter(line=>line.startsWith("임시 추천 조건:")),"아래 실제 시간표를 학습 계획에 추가할까요?"]});
+  return seal({...p,id:crypto.randomUUID(),phase:"approve_plan",expiresAt:Date.now()+5*60000,payload:{runId:result.proposal_run_id},proposal:result,summary:[result.proposal.summary,...p.summary.filter(line=>line.startsWith("임시 추천 조건:")||line.startsWith("계획에 사용할 PDF:")),"아래 실제 시간표를 학습 계획에 추가할까요?"]});
 }
 
 async function insertEvent(db:Db,p:PreparedCommand,check:()=>void) {
   const c=p.command;
+  if(p.payload.classWindow===true) {
+    const course=getAllStoredCourses().find(row=>row.id===c.course_id);
+    const windows=course?classWindowsFor(course,c.date!):[];
+    if(windows.length!==1||windows[0].startTime!==c.start_time||windows[0].endTime!==c.end_time)throw new Error("과목 시간표가 변경됐어요. 현재 시간으로 다시 요청해 주세요.");
+  }
   const assignment=c.kind==="add_task"&&["assignment","project"].includes(c.event_type??"assignment");
   const at=iso(c.date!,c.all_day?assignment?"23:59":"00:00":c.start_time!);
   if(c.kind==="add_event") {
@@ -214,7 +296,7 @@ async function insertEvent(db:Db,p:PreparedCommand,check:()=>void) {
   // Projects use the existing course assignment category; appointments use "other".
   const eventType=assignment?"assignment":c.event_type==="appointment"?"other":c.event_type??"assignment";
   const value={id:p.id,user_id:p.userId,goal_id:p.payload.goalId??null,title:c.title!,event_type:eventType,description:c.details??"",exam_scope:c.exam_scope??"",
-    due_at:assignment?at:null,starts_at:assignment?null:at,ends_at:assignment?null:end,is_blocking:!assignment&&!c.all_day,status:"scheduled",metadata:{schema_version:1,source:"chat-confirmed"}};
+    due_at:assignment?at:null,starts_at:assignment?null:at,ends_at:assignment?null:end,is_blocking:!assignment&&!c.all_day,status:"scheduled",metadata:{schema_version:1,source:"chat-confirmed",...(p.payload.classWindow===true?{time_basis:"course_class_window"}:{})}};
   const existing=resultData(await db.from("calendar_events").select("id,title,starts_at,due_at,ends_at,status,description,exam_scope,goal_id").eq("user_id",p.userId).eq("id",p.id).maybeSingle());check();
   const sameTime=(a:string|null,b:string|null)=>a===b||(a!==null&&b!==null&&Date.parse(a)===Date.parse(b));
   if(existing) {if(existing.title!==value.title||!sameTime(existing.starts_at,value.starts_at)||!sameTime(existing.due_at,value.due_at)||!sameTime(existing.ends_at,value.ends_at)||existing.status!==value.status||existing.description!==value.description||existing.exam_scope!==value.exam_scope||existing.goal_id!==value.goal_id)throw new Error("일정이 변경됐어요. 새로 확인해 주세요.");return;}
@@ -222,7 +304,7 @@ async function insertEvent(db:Db,p:PreparedCommand,check:()=>void) {
 }
 
 /** An unforgeable UI confirmation calls this once; retries keep the same IDs/request keys. */
-export async function executePreparedCommand(p:PreparedCommand,check:()=>void):Promise<CommandResult> {
+export async function executePreparedCommand(p:PreparedCommand,check:()=>void,retryAnalysis=false):Promise<CommandResult> {
   const registered=drafts.get(p.id);
   if(registered?.value!==p)throw new Error("취소되었거나 유효하지 않은 확인 요청이에요.");
   const current=()=>{registered.owner();check();if(drafts.get(p.id)?.value!==p)throw new Error("취소된 확인 요청이에요.");};current();
@@ -235,7 +317,7 @@ export async function executePreparedCommand(p:PreparedCommand,check:()=>void):P
       await flushP0Changes();current();
       const saved=resultData(await db.rpc("approve_coaching_proposal",{p_run_id:p.payload.runId}));current();if(typeof saved!=="string")throw new Error("계획 저장 결과를 확인하지 못했어요.");return {message:"확인한 시간표를 학습 계획에 저장했어요."};
     }
-    if(p.phase==="plan_analysis")return {message:"PDF 분석과 계획 제안을 준비했어요. 실제 계획을 확인해 주세요.",next:await generateProposal(p,true,current)};
+    if(p.phase==="plan_analysis")return {message:"PDF 분석과 계획 제안을 준비했어요. 실제 계획을 확인해 주세요.",next:await generateProposal(p,true,current,retryAnalysis)};
     if(c.kind==="add_event"||c.kind==="add_task") {await insertEvent(db,p,current);return {message:`${c.title}을(를) ${c.kind==="add_task"?"수업 일정":"시간표"}에 등록했어요.`};}
     if(c.kind==="add_goal") {
       const goals=getPersonalStudies();

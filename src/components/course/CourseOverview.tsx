@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookMarked, CalendarCheck, ChevronRight, Circle, CircleCheck, FileText, Loader2, Sparkles, Trash2 } from "lucide-react";
+import { BookMarked, CalendarCheck, ChevronRight, FileText, Loader2, Sparkles, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { NoteViewerDialog } from "@/components/notes/NoteViewerDialog";
@@ -11,7 +11,7 @@ import { MY_NOTES_CHANGED_EVENT } from "@/lib/my-notes-storage";
 import { compareLabels, understandingPercent } from "@/lib/problem-bank-labels";
 import { splitSourceFile, type ProblemBankProblem } from "@/lib/problem-bank-storage";
 import {
-  deleteMaterial, deletePlan, sortMaterials, type MaterialSort, deleteProblemFile, linkedProblemFiles, listMaterials, listPlans, loadCourseProblems, loadMidtermDate,
+  deleteMaterial, deletePlan, updatePlan, sortMaterials, type MaterialSort, deleteProblemFile, linkedProblemFiles, listMaterials, listPlans, loadCourseProblems, loadMidtermDate,
   type CoursePlan, type Material,
 } from "@/lib/course-overview/data";
 import { getPeriodOverrides, PERIOD_LABELS, PERIODS_CHANGED_EVENT, resolvePeriod, type ExamPeriod } from "@/lib/course-overview/period";
@@ -124,6 +124,7 @@ export function CourseOverview({ courseId }: { courseId: string }) {
   const [error, setError] = useState("");
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
+  const [savingPlan, setSavingPlan] = useState<string | null>(null);
   const [sort, setSort] = useState<MaterialSort>("modified");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
 
@@ -149,7 +150,8 @@ export function CourseOverview({ courseId }: { courseId: string }) {
 
   const inPeriod = useCallback((key: string, date: string) => resolvePeriod(key, date, midterm, overrides) === period, [midterm, overrides, period]);
   const shownMaterials = useMemo(() => sortMaterials(materials ?? [], sort, direction), [materials, sort, direction]);
-  const shownPlans = useMemo(() => plans.filter((p) => inPeriod(p.key, p.date)), [plans, inPeriod]);
+  const shownPlans = useMemo(() => plans.filter((p) => inPeriod(p.key, p.date))
+    .sort((a, b) => Number(a.done) - Number(b.done) || a.date.localeCompare(b.date)), [plans, inPeriod]);
   const files = useMemo(() => {
     const groups = new Map<string, ProblemBankProblem[]>();
     for (const problem of problems.problems) {
@@ -192,6 +194,21 @@ export function CourseOverview({ courseId }: { courseId: string }) {
       setPending(null);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function changePlanCompletion(plan: CoursePlan, done: boolean) {
+    if (savingPlan !== null) return;
+    setSavingPlan(plan.key);
+    setError("");
+    try {
+      await updatePlan(plan, { title: plan.title, date: plan.date, done });
+      setPlans(previous => previous.map(item => item.key === plan.key ? { ...item, done } : item));
+      window.dispatchEvent(new Event(COURSE_DATA_CHANGED_EVENT));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "계획 완료 상태를 저장하지 못했습니다.");
+    } finally {
+      setSavingPlan(null);
     }
   }
 
@@ -243,7 +260,10 @@ export function CourseOverview({ courseId }: { courseId: string }) {
                 {shownPlans.length ? (
                   <ul>{shownPlans.map((plan) => (
                     <li key={plan.key} className="group flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-muted/60">
-                      {plan.done ? <CircleCheck className="h-4 w-4 shrink-0 text-emerald-600" aria-label="완료" /> : <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="미완료" />}
+                      <input type="checkbox" aria-label={`${plan.title} 완료`} checked={plan.done}
+                        disabled={savingPlan !== null} aria-busy={savingPlan === plan.key}
+                        onChange={event => void changePlanCompletion(plan, event.target.checked)}
+                        className="size-5 shrink-0 cursor-pointer accent-emerald-600 disabled:cursor-wait disabled:opacity-50" />
                       <div className="min-w-0 flex-1">
                         <p className={cn("truncate text-sm", plan.done && "text-muted-foreground line-through")}>{plan.title}</p>
                         <p className="flex items-center gap-1 text-xs text-muted-foreground">

@@ -111,6 +111,7 @@ export function AccountBoundary({ children }: { children: React.ReactNode }) {
   return <Fragment key={identity}>
     {isDemoMode() && <div role="status" className="flex flex-wrap items-center justify-center gap-3 bg-amber-100 px-4 py-3 text-sm text-amber-950">
       <span>데모 체험 · 샘플 데이터와 변경사항은 이 탭에만 저장됩니다. 실제 Drive 연결은 로그인 후 이용하세요.</span>
+      <a className="rounded border border-amber-700 px-3 py-1 font-medium" href={`${process.env.NODE_ENV === "production" ? "/unilink" : ""}/dashboard?demo=1`}>전체 기능 체험</a>
       <a className="rounded border border-amber-700 px-3 py-1 font-medium" href={`${process.env.NODE_ENV === "production" ? "/unilink" : ""}/login`} onClick={() => {
         window.sessionStorage.removeItem(DEMO_MODE_KEY);
       }}>실제 서비스로 돌아가기</a>

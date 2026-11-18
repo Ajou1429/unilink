@@ -883,13 +883,13 @@ export default function TimetablePage() {
           </div>
         )}
 
-        <div className="grid 2xl:grid-cols-[minmax(0,1fr)_320px] gap-6">
+        <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_320px] gap-6">
           <div className="min-w-0">
             <Tabs
               value={viewTab}
               onValueChange={(value) => setViewTab(value as "weekly" | "monthly")}
             >
-              <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                 <TabsList className="bg-white border shadow-sm">
                   <TabsTrigger value="weekly">주간 시간표</TabsTrigger>
                   <TabsTrigger value="monthly">월간 일정</TabsTrigger>

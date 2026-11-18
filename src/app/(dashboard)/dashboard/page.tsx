@@ -1,6 +1,8 @@
 "use client";
 
 import { useCurrentTime } from "@/lib/use-current-time";
+import { DemoExperience } from "@/components/demo/DemoExperience";
+import { isDemoMode } from "@/lib/demo-mode";
 import { TodayPlans } from "@/components/dashboard/TodayPlans";
 import { ExamAssignments } from "@/components/dashboard/ExamAssignments";
 import { ChatHome } from "@/components/home/ChatHome";
@@ -55,6 +57,10 @@ function getKoreanToday() {
 }
 
 export default function DashboardPage() {
+  return isDemoMode() ? <DemoExperience /> : <ServiceDashboard />;
+}
+
+function ServiceDashboard() {
   const now = useCurrentTime();
   const [courses, setCourses] = useState<Course[]>(mockCourses);
   // 시험·과제·계획을 붙일 과목 (방학 중에는 직전 학기)

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { getAllStoredCourses } from "@/lib/course-storage";
 import { docTypeLabelFromTags } from "@/lib/file-intake/classify-local";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
@@ -14,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { MyNote } from "@/lib/my-notes-storage";
 import { getSupabaseClient } from "@/lib/supabase/client";
-import { fetchDrivePdf, startDriveConnection, uploadNoteToDrive } from "@/lib/drive-connection";
+import { fetchDrivePdf, uploadNoteToDrive } from "@/lib/drive-connection";
 import { PdfPreview } from "@/components/notes/PdfPreview";
 import { NoteAnalysisPanel } from "@/components/notes/NoteAnalysisPanel";
 import { MY_NOTES_CHANGED_EVENT } from "@/lib/my-notes-storage";
@@ -64,15 +65,6 @@ export function NoteViewerDialog({
   const [fileError, setFileError] = useState<string | null>(null);
   const [fileRetry, setFileRetry] = useState(0);
   const [fileLoading, setFileLoading] = useState(false);
-  const [reconnecting, setReconnecting] = useState(false);
-  async function reconnectDrive() {
-    setReconnecting(true);
-    try { await startDriveConnection(); }
-    catch (error) {
-      setFileError(error instanceof Error ? error.message : "Drive 연결을 시작하지 못했습니다.");
-      setReconnecting(false);
-    }
-  }
   const [expanded, setExpanded] = useState(false);
   const [driveUploading, setDriveUploading] = useState(false);
   const [driveUploaded, setDriveUploaded] = useState(false);
@@ -277,7 +269,7 @@ export function NoteViewerDialog({
               <p className="text-sm text-destructive">{fileError}</p>
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" onClick={() => setFileRetry((value) => value + 1)}><RefreshCw className="size-4" /> 다시 불러오기</Button>
-                {note.driveFileId && fileError.includes("다시 연결") && <Button size="sm" disabled={reconnecting} onClick={() => void reconnectDrive()}><Link2 className="size-4" /> Drive 다시 연결</Button>}
+                {note.driveFileId && fileError.includes("다시 연결") && <Button size="sm" nativeButton={false} render={<Link href="/settings#google-drive" />}><Link2 className="size-4" /> 설정에서 Drive 다시 연결</Button>}
               </div>
             </div>}
             {fileUrl && (
