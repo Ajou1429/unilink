@@ -58,7 +58,9 @@ export async function converse(context: ChatContext, message: string, history: {
   ]);
   current();
   const plans=getWeeklyStudyPlans().filter(p=>!p.isCompleted).slice(0,15);
-  const overview=JSON.stringify({material_course:materialCourse?.id, requested_chapters:chapters.slice(0,5), chapter_matches:chapterMatches.map(group=>({chapter:group.chapter, count:group.candidates.length, unavailable:group.unavailable})), document_analysis:chatDocumentContext(analysis,allNotes,message),source:"본인 시간표·일정·수동 계획, 승인된 AI 계획 일부와 최근 자기보고 이해도. 전체 이력이나 PDF 본문은 포함하지 않음. unavailable은 조회 실패이며 기록 없음이 아님",
+  const continuedRequest = materialRequest !== message && materialRequest.length > 1800
+    ? `${materialRequest.slice(0,800)}\n…\n${materialRequest.slice(-1000)}` : materialRequest;
+  const overview=JSON.stringify({pending_user_requirements:materialRequest!==message?continuedRequest:undefined, material_course:materialCourse?.id, requested_chapters:chapters.slice(0,5), chapter_matches:chapterMatches.map(group=>({chapter:group.chapter, count:group.candidates.length, unavailable:group.unavailable})), document_analysis:chatDocumentContext(analysis,allNotes,message),source:"본인 시간표·일정·수동 계획, 승인된 AI 계획 일부와 최근 자기보고 이해도. 전체 이력이나 PDF 본문은 포함하지 않음. unavailable은 조회 실패이며 기록 없음이 아님",
     approved_ai_plans:aiPlans.error?{unavailable:true}:aiPlans.data,
     active_goals:goals.error?{unavailable:true}:goals.data?.filter(goal=>goal.goal_type==="personal"||[...context.goals.values()].includes(goal.id)),
     assignment_events:assignments.error?{unavailable:true}:assignments.data,

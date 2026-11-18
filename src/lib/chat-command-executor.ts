@@ -206,13 +206,36 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
       dailySources.push(...sources.slice(0,10).map(({kind,id})=>({kind,id})));
       if(!dailySources.length)return question(c,"이 과목에 진행 중인 과제나 기존 계획이 없어요. 오늘 새 학습을 할까요, 먼저 과제를 등록할까요?");
     }
-    if(c.intent==="exam_prep"&&(!c.exam_scope||!c.exam_at||!c.priority||!c.difficulty))return question(c,"시험 범위·일시와 우선도/난이도(각 1~5)를 알려주세요.");
     if(c.intent==="exam_prep"&&goalIds.length>1)return question(c,"시험 범위와 일시가 과목마다 달라요. 먼저 어느 한 과목부터 준비할까요?");
-    const request={request_key:id,goal_ids:goalIds,intent:c.intent,period_start:c.date,period_end:c.period_end,desired_outcome:"",constraints:[suggestedTimes?"미입력 시간 조건은 임시 추천값이며 사용자가 확인한 가용시간이 아니다. 기존 일정과 충돌하지 않는 범위에서 필요한 분량만 제안하고, 추천 시간은 저장 전 사용자가 확인한다.":"",c.details??"",requestText].join("\n").slice(0,1000),
+    const assumptions:string[]=[];
+    if(c.intent==="exam_prep") {
+      const inClass=duringClass.test(requestText)||/수업\s*시간(?:인데|이고|이야)/.test(requestText);
+      if (!c.exam_at || (!c.exam_scope && !chapters.length) || inClass) {
+        const events=resultData(await db.from("calendar_events").select("title,event_type,starts_at,exam_scope").eq("user_id",uid).eq("goal_id",goalIds[0])
+          .eq("status","scheduled").in("event_type",["exam","quiz"]).gte("starts_at",`${c.date}T00:00:00+09:00`).lte("starts_at",`${shift(c.period_end,7)}T23:59:59+09:00`).limit(20))??[];check();
+        const matching=events.filter(event=>(!/퀴즈|quiz/i.test(requestText)||event.event_type==="quiz")&&(!c.exam_at||!event.starts_at||Date.parse(c.exam_at)===Date.parse(event.starts_at)||inClass));
+        if(matching.length===1) {
+          c.exam_at=matching[0].starts_at??c.exam_at;
+          if(!chapters.length)c.exam_scope=c.exam_scope??matching[0].exam_scope;
+          if(inClass)assumptions.push("정확한 퀴즈 시각은 미정. 등록된 수업 시작을 대비 계획의 보수적인 마감으로만 사용한다.");
+        } else if (inClass) {
+          c.exam_at=null;
+        }
+      }
+      if(chapters.length)c.exam_scope=chapters.map(chapter=>`${chapter}장`).join(", ");
+      const missingExam=[!c.exam_scope?"시험 범위":null,!c.exam_at?"시험 날짜 또는 등록된 시험 일정":null].filter(Boolean);
+      if(missingExam.length)return question(c,`${missingExam.join("와 ")}만 더 확인해 주세요. 이미 받은 조건은 유지할게요.`);
+      if(/중간고사급|비중이\s*(?:꽤\s*)?큰|비중이\s*높/.test(requestText))c.priority=5;
+      if(!c.priority){c.priority=3;assumptions.push("우선도 3은 사용자 평가가 아닌 임시값이다.");}
+      if(!c.difficulty||/난이도.{0,12}(?:서칭|판단|확인|알려)/.test(requestText)){
+        c.difficulty=3;assumptions.push("난이도 3은 미확인 임시값이다. 선택된 PDF의 개념과 예제, 요구 수준을 바탕으로 체감 난이도를 추정하고 근거를 설명하라. 외부 검색을 수행했다고 주장하지 마라.");
+      }
+    }
+    const request={request_key:id,goal_ids:goalIds,intent:c.intent,period_start:c.date,period_end:c.period_end,desired_outcome:"",constraints:[...assumptions,suggestedTimes?"미입력 시간 조건은 임시 추천값이며 사용자가 확인한 가용시간이 아니다. 기존 일정과 충돌하지 않는 범위에서 필요한 분량만 제안하고, 추천 시간은 저장 전 사용자가 확인한다.":"",c.details??"",requestText].join("\n").slice(0,1000),
       ...materialScope,
       ...(c.intent==="daily_plan"?{daily_sources:dailySources}:{}),
       ...(c.intent==="exam_prep"?{exam_inputs:goalIds.map(goal_id=>({goal_id,scope:c.exam_scope!,exam_at:c.exam_at!,priority:c.priority!,difficulty:c.difficulty!}))}:{}),
-      day_budgets:Array.from({length},(_,i)=>({date:shift(c.date!,i),minutes:c.minutes!,windows:[{start:c.start_time!,end:c.end_time!}]})),
+      day_budgets:Array.from({length},(_,i)=>{const date=shift(c.date!,i);const allowed=!c.weekdays.length||c.weekdays.includes(new Date(date).getUTCDay());return {date,minutes:allowed?c.minutes!:0,windows:allowed?[{start:c.start_time!,end:c.end_time!}]:[]};}),
       rules:{transition_minutes:10,break_minutes:10,break_after_minutes:90,method_minimums:{},max_focus_goals:Math.min(3,goalIds.length),carryover:true}};
     const summary=[`${goals.map(g=>g.title).join(", ")} · ${c.date} ~ ${c.period_end}`,`${suggestedTimes?"임시 추천 조건: ":""}${c.start_time} ~ ${c.end_time} 중 하루 최대 ${c.minutes}분`,"직접 추가한 계획은 유지해요."];
     if(materials.length)summary.push(`계획에 사용할 PDF: ${materials.map(note=>note.title).join(" / ")}`);

@@ -33,6 +33,21 @@ export interface ChatCommand {
 }
 const nullableString={type:["string","null"]};
 const nullableInt={type:["integer","null"]};
+
+export function mergePlanFollowup(previous: ChatCommand | undefined, next: ChatCommand, text: string): ChatCommand {
+  if (previous?.kind !== "generate_plan" || next.kind !== "generate_plan" ||
+      (next.course_id && previous.course_id && next.course_id !== previous.course_id) ||
+      (next.goal_id && previous.goal_id && next.goal_id !== previous.goal_id) ||
+      (next.course_ids.length && !next.course_ids.every(id => previous.course_ids.includes(id) || id === previous.course_id))) return next;
+  const retained = Object.fromEntries(Object.entries(next).filter(([,value]) => value !== null && (!Array.isArray(value) || value.length)));
+  const choiceOnly = /^(?:전자|후자|첫\s*번째|두\s*번째|아무거나|같은\s*거|이미지\s*말고|\(\d+\)|다시\s*(?:진행|시도)|앞에서\s*얘기|시작)/.test(text.trim());
+  if(choiceOnly)for(const key of ["date","period_end","start_time","end_time","minutes","intent","exam_scope","exam_at","priority","difficulty"] as const) {
+    if(previous[key]!==null)delete retained[key];
+  }
+  return { ...previous, ...retained,
+    weekdays: /요일|매일|전일/.test(text) ? (/매일|전일/.test(text) ? [] : next.weekdays.length ? next.weekdays : previous.weekdays) : previous.weekdays.length ? previous.weekdays : next.weekdays,
+  } as ChatCommand;
+}
 const fields={kind:{type:"string",enum:[...COMMAND_KINDS]},course_id:nullableString,course_ids:{type:"array",items:{type:"string"}},goal_id:nullableString,note_id:nullableString,target_id:nullableString,
   title:nullableString,date:nullableString,start_time:nullableString,end_time:nullableString,period_end:nullableString,minutes:nullableInt,
   intent:{type:["string","null"],enum:["weekly_plan","daily_plan","exam_prep","topic_review",null]},
@@ -82,4 +97,5 @@ export const COMMAND_INSTRUCTIONS = [
   "analyze_pdf=analyze an owned note_id (a uniquely attached PDF may be selected); classify_note=classify an owned note into course_id, or personal if user explicitly says personal; set_problem_level=explicitly reported problem ACTIVITY stage with course_id,labels,source_file if ambiguous and level 0-5 per existing scale. Never equate asking for a solution with independent solving. complete_plan/postpone_plan require a listed target_id; postpone only AI plans, never move manual plans. sync_drive=sync already selected folders, never choose a Drive folder by guessing. add_grade requires title,credits,term,grade A+/A0/B+/B0/C+/C0/D+/D0/F/P/NP. Grades currently remain browser-local.",
   "The app automatically runs needed PDF analysis under chat analysis permission, then continues the original request with the completed analysis. For document-content questions, extracting schedules, or visual conditions such as red borders, return analyze_pdf for the owned note before drafting a registration when no current analysis is available. Respect explicit no-analysis/title-only/classification-only restrictions. Once a completed analysis is provided, answer or draft the requested change from its evidence, and ask for actual missing information only. If its excerpt is partial, never claim every relevant item was reviewed. For plans the app analyzes needed PDFs first, then shows the actual generated schedule and asks yes/no to save. Never silently approve a future unseen plan. Unsupported destructive/account actions are not commands; explain the limitation instead of inventing execution. Prefer one focused follow-up question, and only ask for information actually missing.",
   "A class command currently represents one common time range on the listed weekdays. Do not flatten differing daily times into one range; clarify instead. Never output duplicate commands and learning actions for the same change. Keep time and other explicit restrictions in details when merging a follow-up answer, and the newest explicit correction takes precedence.",
+  "For generate_plan, put the requested study weekdays (Sunday=0 through Saturday=6) in weekdays. When the user is selecting a file or says continue, keep the pending plan, exam conditions, study days and date range. Leave difficulty unset when the user asks to infer it from course materials; do not ask the user to rate it. Do not ask for an exact quiz start when the user refers to a registered quiz during class.",
 ].join("\n");

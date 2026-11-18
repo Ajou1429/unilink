@@ -33,7 +33,7 @@ import type { IntakeRecord } from "@/lib/file-intake/settings";
 import { AUTH_CHANGED_EVENT } from "@/lib/auth-storage";
 import { ChatCommandCard, type CommandStatus } from "./ChatCommandCard";
 import { discardChatDrafts, discardPreparedCommand, executePreparedCommand, parseConfirmation, prepareChatCommand, type PreparedCommand } from "@/lib/chat-command-executor";
-import { parseCommands, type ChatCommand } from "../../../supabase/functions/_shared/chatCommands";
+import { mergePlanFollowup, parseCommands, type ChatCommand } from "../../../supabase/functions/_shared/chatCommands";
 
 import { getAgentConsent, requestServiceAgent, serviceAgentEnabled, setAgentConsent, type AgentPlan } from "@/lib/service-agent";
 import type { AgentRequest } from "../../../supabase/functions/_shared/serviceAgent.ts";
@@ -152,7 +152,8 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
       const id=crypto.randomUUID();writer.current=makeWriter(id);
       router.replace(`/dashboard?chat=${id}`,{scroll:false});
     }
-    if (serviceAgentEnabled && !activeCommand()?.resume) { sendService({ text, files }); return; }
+    const currentDraft = activeCommand();
+    if (serviceAgentEnabled && !currentDraft?.resume && currentDraft?.command.kind !== "generate_plan") { sendService({ text, files }); return; }
     const items: ThreadItem[] = [{ id: nextId(), kind: "user", text, fileNames: files.map((file) => file.name) }];
     let uploaded: Promise<IntakeRecord[]> = lastFiles.current;
     if (files.length) {
@@ -380,14 +381,23 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
         kind:t.feature==="study_plan"?"generate_plan":"analyze_pdf",course_id:t.course_id,note_id:t.note_id,intent:t.intent,minutes:t.daily_minutes,
         start_time:t.start_hour!==undefined?`${String(t.start_hour).padStart(2,"0")}:00`:null,end_time:t.end_hour!==undefined?`${String(t.end_hour).padStart(2,"0")}:00`:null,
       })),{courses:ctx.courses,notes});
+      const retryPlan = pending?.command.kind === "generate_plan" && /^(?:다시\s*(?:진행|시도|해봐)|진행해|시작해|앞에서\s*얘기)/.test(text.trim());
+      if (!commands.length && retryPlan && pending) commands.push(pending.command);
       if(commands.length) {
-        say("");
-        const first=commands[0],id=nextId();
+        const first=mergePlanFollowup(pending?.command,commands[0],text),id=nextId();
         const command=first.kind==="generate_plan"&&!first.note_id&&analysis&&notes.some(note=>note.id===analysis.noteId)
           ? {...first,note_id:analysis.noteId} : first;
-        const source=pending?.command.kind===command.kind||!pending?materialRequest:text;
+        const source=[pending?.command.kind===command.kind||!pending?materialRequest:text,...fileRecords.map(file=>file.fileName)].join("\n");
         if(pending?.prepared)discardPreparedCommand(pending.prepared);
-        setThread(prev=>[...prev.map(item=>item.kind==="command"&&["ready","needs_input","error"].includes(item.status)?{...item,status:"cancelled" as const,resume:false,message:item.id===pending?.id&&pending.command.kind===command.kind?"추가 답변을 반영했어요.":"새 요청으로 이전 미확정 제안은 취소했어요."}:item.kind==="records"?{...item,entries:item.entries.map(e=>!e.applied&&(e.status==="waiting"||e.status==="error")?{...e,status:"undone" as const}:e)}:item),{id,kind:"command",command,source,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,status:"preparing"}]);
+        setThread(prev=>[...prev.flatMap((item):ThreadItem[]=>{
+          if(item.id===replyId)return [];
+          if(item.kind==="command"&&["ready","needs_input","error"].includes(item.status)) {
+            // Preserve a real question in the conversation, but replace obsolete approval cards.
+            return item.message&&(item.status==="needs_input"||item.status==="error") ? [{id:item.id,kind:"assistant",text:item.message}] : [];
+          }
+          if(item.kind==="records")return [{...item,entries:item.entries.map(e=>!e.applied&&(e.status==="waiting"||e.status==="error")?{...e,status:"undone" as const}:e)}];
+          return [item];
+        }),{id,kind:"command",command,source,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,status:"preparing"}]);
         try {
           const prepared=await prepareChatCommand(command,ctx,allNotes,dateKey(new Date()),assertCurrent,source,fileRecords.map(f=>f.noteId).filter((s):s is string=>!!s));assertCurrent();
           if ("question" in prepared) {
@@ -410,7 +420,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
             const outcome = await executePreparedCommand(draft, assertCurrent);
             assertCurrent();
             if (outcome.next) {
-              patchItem(id, item => item.kind === "command" ? { ...item, command: outcome.next!.command, prepared: outcome.next, status: "ready", message: outcome.message } : item);
+              patchItem(id, item => item.kind === "command" ? { ...item, command: outcome.next!.command, prepared: outcome.next, status: "ready" } : item);
             } else {
               patchItem(id, item => item.kind === "command" ? { ...item, status: "done", message: outcome.analysis ? `‘${outcome.analysis.noteTitle}’ 본문 분석을 마쳤어요.` : outcome.message } : item);
               if (outcome.analysis) await record(source, history, assertCurrent, observedAt, fileRecords, outcome.analysis, [...analyzedNotes, outcome.analysis.noteId]);

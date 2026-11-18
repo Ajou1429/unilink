@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { matchMaterialCourse, requestedChapters, selectChapterMaterials } from '../src/lib/chat-course-materials.ts';
 import { matchesMaterialScope, parseMaterialScope } from '../supabase/functions/_shared/materialScope.ts';
+import { mergePlanFollowup } from '../supabase/functions/_shared/chatCommands.ts';
 
 const note = (id, title, linkedId = 'db', driveFileId = `drive-${id}`) => ({ id, title, linkedType: 'course', linkedId, driveFileId });
 const courses = [{ id: 'db', name: '엔지니어링DB' }, { id: 'os', name: '운영체제' }];
@@ -34,4 +35,12 @@ test('scoped responses require every requested note and reject invalid scope', (
   assert.equal(matchesMaterialScope(scope, {material_note_id: ids[0]}), false);
   assert.equal(parseMaterialScope(ids[0],ids), null);
   assert.equal(parseMaterialScope(undefined,[ids[0],ids[0]]), null);
+});
+
+test('a numbered file reply and a retry keep already supplied exam conditions', () => {
+  const prior={kind:'generate_plan',course_id:'db',course_ids:[],goal_id:null,weekdays:[1,2,4,5],date:'2026-11-20',period_end:'2026-11-26',exam_scope:'6, 7, 8장',exam_at:'2026-11-27T10:30:00+09:00',priority:5,difficulty:null};
+  const next={...prior,weekdays:[],date:null,exam_scope:null,exam_at:null,priority:null};
+  assert.deepEqual(mergePlanFollowup(prior,next,'다시 진행해봐'),prior);
+  const notes=[note('regular','07장 SQL 교재'),note('revised','07장 SQL 교재 (1)')];
+  assert.equal(selectChapterMaterials(notes,'db',[7],`${request}\n아무거나\n(1)버전으로 해\n다시 진행해봐`)[0].candidates[0].id,'revised');
 });

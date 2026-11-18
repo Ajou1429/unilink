@@ -66,6 +66,7 @@ export const assistantSchema = { ...chatSchema, properties:{ ...chatSchema.prope
 export const commandAssistantSchema={...assistantSchema,properties:{...assistantSchema.properties,commands:commandsSchema},required:["reply","actions","tools","commands"]};
 
 export const ASSISTANT_INSTRUCTIONS = [
+  "Treat short replies such as '전자', '(1) 버전으로 해', and '다시 진행해봐' as a continuation when they refer to the current draft. Reuse pending_user_requirements and pending_command; change only what the user corrected. Do not repeat an intake checklist or restate the entire request. If a real blocker remains, ask one concise, ordinary question about that blocker only. Do not claim files were read or a plan was saved before the app reports it.",
   "Default course scope is the supplied current-term courses and active personal goals. Do not choose a past or similar course based on shared concepts. A new utterance may omit a course name only when the current conversation or newly classified attachment identifies exactly one applicable course; otherwise ask. A general study question without a course may be answered without assigning a course or writing records.",
   "The following rules apply ONLY to optional learning-record actions, not to the conversational reply or execution tools:",
   CHAT_INSTRUCTIONS.split("\n").filter(line=>!line.startsWith("reply:") && !line.startsWith("You turn")).join("\n"),
