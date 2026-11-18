@@ -9,7 +9,7 @@ export type KnowledgeTask = {
   id?: string; task_key: string; kind: "index" | "overview" | "detail" | "research" | "refresh";
   status?: "processing" | "ready" | "failed"; note_id: string | null; source_revision: string | null;
   source_hash: string | null; page_start: number | null; page_end: number | null;
-  payload?: Record<string, unknown>; error_message?: string | null; created_at?: string;
+  payload?: Record<string, unknown>; error_message?: string | null; created_at?: string; attempts?: number;
   analysis_epoch?: string | null;
 };
 export type Unit = {
@@ -82,6 +82,17 @@ export function parseExtraction(raw: unknown, start: number, end: number): Extra
   if (!result.readable && (result.units.length || result.syllabus.length)) throw new Error("Unreadable PDF cannot contain confirmed extraction");
   return result;
 }
+/** Validate slice-local references, then store original page numbers for every evidence type. */
+export function parseExtractionSlice(raw: unknown, start: number, end: number): Extraction {
+  const result = parseExtraction(raw, 1, end - start + 1);
+  const offset = start - 1;
+  return { ...result,
+    sections: result.sections.map((section) => ({ ...section, page_start: section.page_start + offset, page_end: section.page_end + offset })),
+    units: result.units.map((unit) => ({ ...unit, page_start: unit.page_start + offset, page_end: unit.page_end + offset })),
+    syllabus: result.syllabus.map((fact) => ({ ...fact, page: fact.page + offset })),
+  };
+}
+
 export function revision(note: KnowledgeNote): string {
   return JSON.stringify([note.version, note.updated_at, note.file_path, note.drive_file_id, note.drive_modified_time]);
 }

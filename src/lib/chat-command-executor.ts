@@ -145,6 +145,12 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
     if(!goalIds.length)return question(c,"어느 과목이나 학습 목표의 계획을 만들까요?");
     const goals=resultData(await db.from("learning_goals").select("id,title").eq("user_id",uid).eq("status","active").in("id",goalIds))??[];check();
     if(goals.length!==goalIds.length)throw new Error("활성 학습 목표를 다시 확인해 주세요.");
+    const material = c.note_id ? notes.find(note => note.id === c.note_id) : undefined;
+    if (c.note_id && (!material || !/\.pdf$/i.test(material.fileName ?? "") || (!material.filePath && !material.driveFileId))) {
+      return question(c,"계획에 사용할 원본 PDF를 다시 선택해 주세요.");
+    }
+    if (material && goalIds.length !== 1) return question(c,"선택한 자료가 속한 한 과목의 목표를 알려주세요.");
+    if (material && !courseKnowledgeEnabled) throw new Error("선택한 PDF 기반 계획은 과목 자료 분석이 활성화되어야 합니다.");
     // Missing availability is a proposal assumption, never a claimed user preference.
     const suggestedTimes=!c.start_time||!c.end_time||c.minutes===null;
     c.start_time=c.start_time??"09:00";
@@ -171,6 +177,7 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
     if(c.intent==="exam_prep"&&(!c.exam_scope||!c.exam_at||!c.priority||!c.difficulty))return question(c,"시험 범위·일시와 우선도/난이도(각 1~5)를 알려주세요.");
     if(c.intent==="exam_prep"&&goalIds.length>1)return question(c,"시험 범위와 일시가 과목마다 달라요. 먼저 어느 한 과목부터 준비할까요?");
     const request={request_key:id,goal_ids:goalIds,intent:c.intent,period_start:c.date,period_end:c.period_end,desired_outcome:"",constraints:[suggestedTimes?"미입력 시간 조건은 임시 추천값이며 사용자가 확인한 가용시간이 아니다. 기존 일정과 충돌하지 않는 범위에서 필요한 분량만 제안하고, 추천 시간은 저장 전 사용자가 확인한다.":"",c.details??"",requestText].join("\n").slice(0,1000),
+      ...(material ? { material_note_id: material.id } : {}),
       ...(c.intent==="daily_plan"?{daily_sources:dailySources}:{}),
       ...(c.intent==="exam_prep"?{exam_inputs:goalIds.map(goal_id=>({goal_id,scope:c.exam_scope!,exam_at:c.exam_at!,priority:c.priority!,difficulty:c.difficulty!}))}:{}),
       day_budgets:Array.from({length},(_,i)=>({date:shift(c.date!,i),minutes:c.minutes!,windows:[{start:c.start_time!,end:c.end_time!}]})),
@@ -180,7 +187,7 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
     if(!("prepared" in prepared))throw new Error("계획 요청을 확인하지 못했어요.");
     if(courseKnowledgeEnabled) {
       for(const goalId of goalIds) {
-        const state=await requestCourseKnowledge(goalId,c.date,{action:"status"});check();
+        const state=await requestCourseKnowledge(goalId,c.date,{action:"status",material_note_id:material?.id});check();
         if(state.pdf_count>0&&(state.pdf_count>state.pdf_ready||!state.overview_complete||!state.detail_complete))return {prepared:seal({...prepared.prepared,goals,summary:[...summary,"계획 전 이 과목 PDF 원문을 OpenAI에 전송해 분석할까요? 분석 후 실제 계획은 다시 보여드리고 저장 여부를 확인해요."]})};
       }
     }
@@ -189,13 +196,15 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
   throw new Error("이 요청의 직접 실행 방법을 확인하지 못했어요.");
 }
 
-async function generateProposal(p:PreparedCommand,consent:boolean,check:()=>void):Promise<PreparedCommand> {
+async function generateProposal(p:PreparedCommand,consent:boolean,check:()=>void,retryAnalysis=false):Promise<PreparedCommand> {
   const db=await session(p.userId,check),request=p.payload.request as Record<string,unknown>;
+  const materialNoteId=typeof request.material_note_id==="string"?request.material_note_id:undefined;
   await flushP0Changes();check();
-  await prepareCourseKnowledge(p.payload.goalIds as string[],String(request.period_start),p.userId,consent,false,()=>{check();},false,check);check();
+  await prepareCourseKnowledge(p.payload.goalIds as string[],String(request.period_start),p.userId,consent,false,()=>{check();},retryAnalysis,check,materialNoteId);check();
   const response=await db.functions.invoke<ChatCoachingResult>("coaching-propose",{body:request});check();
   if(response.error)throw new Error(await describeFunctionError(response.error,"계획을 만들지 못했어요."));
   const result=response.data;
+  if(materialNoteId&&result?.material_note_id!==materialNoteId)throw new Error("선택한 자료를 반영하려면 코칭 서버를 먼저 업데이트해야 합니다.");
   if(!result||result.schema_version!==2||!result.proposal_run_id||!result.proposal?.items?.length||result.persisted!==false)throw new Error(result?.proposal?.summary??"확정 가능한 학습 시간이 없어요. 시간대나 분량을 조정해 주세요.");
   return seal({...p,id:crypto.randomUUID(),phase:"approve_plan",expiresAt:Date.now()+5*60000,payload:{runId:result.proposal_run_id},proposal:result,summary:[result.proposal.summary,...p.summary.filter(line=>line.startsWith("임시 추천 조건:")),"아래 실제 시간표를 학습 계획에 추가할까요?"]});
 }
@@ -222,7 +231,7 @@ async function insertEvent(db:Db,p:PreparedCommand,check:()=>void) {
 }
 
 /** An unforgeable UI confirmation calls this once; retries keep the same IDs/request keys. */
-export async function executePreparedCommand(p:PreparedCommand,check:()=>void):Promise<CommandResult> {
+export async function executePreparedCommand(p:PreparedCommand,check:()=>void,retryAnalysis=false):Promise<CommandResult> {
   const registered=drafts.get(p.id);
   if(registered?.value!==p)throw new Error("취소되었거나 유효하지 않은 확인 요청이에요.");
   const current=()=>{registered.owner();check();if(drafts.get(p.id)?.value!==p)throw new Error("취소된 확인 요청이에요.");};current();
@@ -235,7 +244,7 @@ export async function executePreparedCommand(p:PreparedCommand,check:()=>void):P
       await flushP0Changes();current();
       const saved=resultData(await db.rpc("approve_coaching_proposal",{p_run_id:p.payload.runId}));current();if(typeof saved!=="string")throw new Error("계획 저장 결과를 확인하지 못했어요.");return {message:"확인한 시간표를 학습 계획에 저장했어요."};
     }
-    if(p.phase==="plan_analysis")return {message:"PDF 분석과 계획 제안을 준비했어요. 실제 계획을 확인해 주세요.",next:await generateProposal(p,true,current)};
+    if(p.phase==="plan_analysis")return {message:"PDF 분석과 계획 제안을 준비했어요. 실제 계획을 확인해 주세요.",next:await generateProposal(p,true,current,retryAnalysis)};
     if(c.kind==="add_event"||c.kind==="add_task") {await insertEvent(db,p,current);return {message:`${c.title}을(를) ${c.kind==="add_task"?"수업 일정":"시간표"}에 등록했어요.`};}
     if(c.kind==="add_goal") {
       const goals=getPersonalStudies();

@@ -379,7 +379,9 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
       })),{courses:ctx.courses,notes});
       if(commands.length) {
         say("");
-        const command=commands[0],id=nextId();
+        const first=commands[0],id=nextId();
+        const command=first.kind==="generate_plan"&&!first.note_id&&analysis&&notes.some(note=>note.id===analysis.noteId)
+          ? {...first,note_id:analysis.noteId} : first;
         const source=pending?.command.kind===command.kind?`${pending.source}\n${text}`:text;
         if(pending?.prepared)discardPreparedCommand(pending.prepared);
         setThread(prev=>[...prev.map(item=>item.kind==="command"&&["ready","needs_input","error"].includes(item.status)?{...item,status:"cancelled" as const,resume:false,message:item.id===pending?.id&&pending.command.kind===command.kind?"추가 답변을 반영했어요.":"새 요청으로 이전 미확정 제안은 취소했어요."}:item.kind==="records"?{...item,entries:item.entries.map(e=>!e.applied&&(e.status==="waiting"||e.status==="error")?{...e,status:"undone" as const}:e)}:item),{id,kind:"command",command,source,courseName:ctx.courses.find(c=>c.id===command.course_id)?.name,status:"preparing"}]);
@@ -396,7 +398,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
               patchItem(id, item => item.kind === "command" ? { ...item, status: "needs_input", message: "본문 분석을 제외한 요청으로 확인했어요. 파일 분류나 제목 정보로 처리할 내용을 알려주세요." } : item);
               return;
             }
-            if (analyzedNotes.includes(draft.command.note_id ?? "") || (analysis && draft.command.kind === "analyze_pdf" && draft.command.note_id === analysis.noteId)) {
+            if (draft.command.kind === "analyze_pdf" && (analyzedNotes.includes(draft.command.note_id ?? "") || (analysis && draft.command.note_id === analysis.noteId))) {
               discardPreparedCommand(draft);
               patchItem(id, item => item.kind === "command" ? { ...item, status: "done", message: "분석 결과에서 요청한 조건을 확정하지 못했어요. 확인할 부분을 조금 더 구체적으로 알려주세요." } : item);
               return;
@@ -506,7 +508,7 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
     patchItem(id,x=>x.kind==="command"?{...x,status:"running",message:undefined}:x);
     void requests.current.enqueue(async check=>{
       try {
-        const result=await executePreparedCommand(prepared,check);check();
+        const result=await executePreparedCommand(prepared,check,item.status==="error");check();
         patchItem(id,x=>x.kind==="command"?result.next?{...x,prepared:result.next,status:"ready",message:result.message}:{...x,status:"done",message:result.analysis?`‘${result.analysis.noteTitle}’ 본문 분석을 마쳤어요.`:result.message}:x);
         if(result.analysis)await record(item.source,conversationContext(snapshotThread(threadRef.current,intake.records)),check,new Date().toISOString(),[],result.analysis,[result.analysis.noteId]);
       } catch(error) {try{check();}catch{return;}patchItem(id,x=>x.kind==="command"?{...x,status:"error",message:error instanceof Error?error.message:"실행하지 못했어요."}:x);}

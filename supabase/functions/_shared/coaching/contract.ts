@@ -11,6 +11,7 @@ export type TimeWindow = { start: string; end: string };
 export type DayBudget = { date: string; minutes: number; windows: TimeWindow[] };
 export type PlanningRules = { transition_minutes: number; break_minutes: number; break_after_minutes: number; method_minimums: Record<string, number>; max_focus_goals: number; carryover: boolean };
 export type CoachingRequest = {
+  material_note_id?: string;
   review_other_goals?: boolean;
   use_related_learning?: boolean;
   preparation_end?: string;
@@ -105,6 +106,10 @@ export function parseCoachingRequest(value: unknown): CoachingRequest {
     throw new CoachingError("Select 1 to 5 unique goals");
   }
   if (typeof value.intent !== "string" || !intents.has(value.intent)) throw new CoachingError("Invalid intent");
+  const materialNoteId = value.material_note_id;
+  if (materialNoteId !== undefined && (typeof materialNoteId !== "string" || !uuid.test(materialNoteId) || value.goal_ids.length !== 1)) {
+    throw new CoachingError("한 학습 목표에 연결된 PDF를 선택해 주세요.");
+  }
   const sources = value.daily_sources ?? [];
   if (!Array.isArray(sources) || sources.length > 30 || sources.some((s) => !record(s) ||
     !["event", "plan"].includes(String(s.kind)) || typeof s.id !== "string" || !uuid.test(s.id))) throw new CoachingError("Invalid daily sources");
@@ -157,6 +162,7 @@ export function parseCoachingRequest(value: unknown): CoachingRequest {
     methodMinimums[code] = minutes as number;
   }
   return {
+    ...(materialNoteId ? { material_note_id: materialNoteId } : {}),
     ...(value.review_other_goals === true && value.intent !== "daily_plan" ? { review_other_goals: true } : {}),
     ...(value.use_related_learning === true ? { use_related_learning: true } : {}),
     ...(typeof value.preparation_end === "string" ? { preparation_end: value.preparation_end } : {}),
