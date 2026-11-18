@@ -8,17 +8,14 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-client";
 import { captureStorageScope, getStorageUser } from "@/lib/private-storage";
 import { flushP0Changes } from "@/lib/p0-sync";
 import { COURSE_EVENTS_CHANGED_EVENT } from "@/lib/course-events";
-import { calendarEventDeadline } from "@/lib/shared-calendar-view";
 
 type CourseEvent = {
   id: string; title: string; event_type: string; description: string; exam_scope: string;
   starts_at: string | null; ends_at: string | null; due_at: string | null; status: string;
-  metadata?: { schema_version?: number; calendar_timing?: string } | null;
 };
-const columns = "id,title,event_type,description,exam_scope,starts_at,ends_at,due_at,status,metadata";
+const columns = "id,title,event_type,description,exam_scope,starts_at,ends_at,due_at,status";
 const kinds = { assignment: "과제", exam: "시험", quiz: "퀴즈", presentation: "발표", other: "기타 일정" };
-const canChooseTiming = (kind: string) => kind === "presentation" || kind === "other" || kind === "project";
-const empty = { title: "", event_type: "assignment", description: "", exam_scope: "", date: "", end: "", deadline: true };
+const empty = { title: "", event_type: "assignment", description: "", exam_scope: "", date: "", end: "" };
 function inputDate(value: string | null) {
   if (!value) return "";
   const date = new Date(value);
@@ -26,12 +23,10 @@ function inputDate(value: string | null) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 function eventTime(row: CourseEvent) {
-  const due = calendarEventDeadline(row);
-  const value = due ?? row.starts_at;
+  const value = row.due_at ?? row.starts_at;
   if (!value) return "일시 미지정";
   const start = new Date(value);
   const date = new Intl.DateTimeFormat("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
-  if (due) return `${date.format(start)} 마감`;
   if (!row.ends_at) return date.format(start);
   const end = new Date(row.ends_at);
   const sameDay = start.toDateString() === end.toDateString();
@@ -104,8 +99,7 @@ export function CourseEvents({ courseId }: { courseId: string }) {
     setEditing(row?.id ?? null);
     setFormError("");
     if (row) {
-      const due = calendarEventDeadline(row);
-      setForm({ title: row.title, event_type: row.event_type, description: row.description ?? "", exam_scope: row.exam_scope ?? "", date: inputDate(due ?? row.starts_at), end: due ? "" : inputDate(row.ends_at), deadline: Boolean(due) || row.event_type === "assignment" });
+      setForm({ title: row.title, event_type: row.event_type, description: row.description ?? "", exam_scope: row.exam_scope ?? "", date: inputDate(row.due_at ?? row.starts_at), end: inputDate(row.ends_at) });
     } else {
       const due = new Date(); due.setHours(23, 59, 0, 0);
       setForm({ ...empty, date: inputDate(due.toISOString()) });
@@ -133,18 +127,17 @@ export function CourseEvents({ courseId }: { courseId: string }) {
       if (!title) throw new Error("제목을 입력해 주세요.");
       if (!form.date || Number.isNaN(Date.parse(form.date))) throw new Error("일시를 입력해 주세요.");
       const date = new Date(form.date).toISOString();
-      const deadline = form.deadline;
-      const end = !deadline && form.end ? new Date(form.end).toISOString() : null;
-      if (!deadline && (!end || end <= date)) throw new Error("종료 시간은 시작 시간 이후로 설정해 주세요.");
-      const previous = events.find(row => row.id === editing);
+      const assignment = form.event_type === "assignment";
+      const end = form.end ? new Date(form.end).toISOString() : null;
+      if (!assignment && (!end || end <= date)) throw new Error("종료 시간은 시작 시간 이후로 설정해 주세요.");
       const payload = { user_id: data.user.id, goal_id: goalId, title, event_type: form.event_type,
-        description: form.description.trim(), exam_scope: form.event_type === "assignment" ? "" : form.exam_scope.trim(),
-        due_at: deadline ? date : null, starts_at: deadline ? null : date,
-        ends_at: end, is_blocking: !deadline, status: previous?.status ?? "scheduled",
-        metadata: { schema_version: 1, ...(!editing ? { source: "course-event" } : previous?.metadata), calendar_timing: deadline ? "deadline" : "scheduled" } };
+        description: form.description.trim(), exam_scope: assignment ? "" : form.exam_scope.trim(),
+        due_at: assignment ? date : null, starts_at: assignment ? null : date,
+        ends_at: assignment ? null : end, is_blocking: !assignment,
+        status: events.find(row => row.id === editing)?.status ?? "scheduled" };
       const query = editing
         ? db.from("calendar_events").update(payload).eq("id", editing).eq("user_id", data.user.id).eq("goal_id", goalId)
-        : db.from("calendar_events").insert(payload);
+        : db.from("calendar_events").insert({ ...payload, metadata: { schema_version: 1, source: "course-event" } });
       const result = await query.select(columns).single();
       if (result.error) throw result.error;
       assertCurrent();
@@ -189,7 +182,7 @@ export function CourseEvents({ courseId }: { courseId: string }) {
 
   const current = events.find(row => row.id === editing);
   const control = "mt-1.5 w-full rounded-lg border bg-white px-3 py-2.5 text-sm";
-  const sorted = [...events].sort((a, b) => (calendarEventDeadline(a) ?? a.starts_at ?? "9999").localeCompare(calendarEventDeadline(b) ?? b.starts_at ?? "9999"));
+  const sorted = [...events].sort((a, b) => (a.due_at ?? a.starts_at ?? "9999").localeCompare(b.due_at ?? b.starts_at ?? "9999"));
   const completedEvents = sorted.filter(row => row.status === "completed" || isPastExam(row, now));
   const visibleEvents = sorted.filter(row => row.status !== "completed" && !isPastExam(row, now));
 
@@ -237,10 +230,7 @@ export function CourseEvents({ courseId }: { courseId: string }) {
         <DialogHeader><DialogTitle>{editing ? "과제·시험·일정 상세" : "과제·시험·일정 추가"}</DialogTitle></DialogHeader>
         <form onSubmit={event => void save(event)} className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-[10rem_1fr]">
-            <label className="block text-sm">종류<select className={control} value={form.event_type} disabled={busy} onChange={event => {
-              const kind = event.target.value;
-              setForm({ ...form, event_type: kind, deadline: kind === "assignment" || (canChooseTiming(kind) && form.deadline) });
-            }}>
+            <label className="block text-sm">종류<select className={control} value={form.event_type} disabled={busy} onChange={event => setForm({ ...form, event_type: event.target.value })}>
               {Object.entries(kinds).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
             </select></label>
             <label className="block text-sm">제목<input className={control} required maxLength={200} disabled={busy} value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} /></label>
@@ -248,12 +238,8 @@ export function CourseEvents({ courseId }: { courseId: string }) {
           <label className="block text-sm">과제 내용·일정 설명<textarea className={control} rows={5} maxLength={10000} disabled={busy} value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} /></label>
           {(form.event_type === "exam" || form.event_type === "quiz") && <label className="block text-sm">시험 범위<textarea className={control} rows={4} maxLength={5000} disabled={busy} value={form.exam_scope} onChange={event => setForm({ ...form, exam_scope: event.target.value })} /></label>}
           <div className="grid gap-4 sm:grid-cols-2">
-            {canChooseTiming(form.event_type) && <label className="block text-sm sm:col-span-2">시간 형식<select className={control} disabled={busy} value={form.deadline ? "deadline" : "scheduled"} onChange={event => {
-              const deadline = event.target.value === "deadline";
-              setForm(previous => ({ ...previous, deadline, date: deadline ? previous.end || previous.date : previous.date, end: deadline ? "" : previous.end }));
-            }}><option value="scheduled">시작·종료</option><option value="deadline">기한</option></select></label>}
-            <label className="block text-sm">{form.deadline ? form.event_type === "assignment" ? "제출 마감" : "마감 일시" : "시작 일시"}<input className={control} type="datetime-local" required disabled={busy} value={form.date} onChange={event => setForm({ ...form, date: event.target.value })} /></label>
-            {!form.deadline && <label className="block text-sm">종료 일시<input className={control} type="datetime-local" required disabled={busy} value={form.end} onChange={event => setForm({ ...form, end: event.target.value })} /></label>}
+            <label className="block text-sm">{form.event_type === "assignment" ? "제출 마감" : "시작 일시"}<input className={control} type="datetime-local" required disabled={busy} value={form.date} onChange={event => setForm({ ...form, date: event.target.value })} /></label>
+            {form.event_type !== "assignment" && <label className="block text-sm">종료 일시<input className={control} type="datetime-local" required disabled={busy} value={form.end} onChange={event => setForm({ ...form, end: event.target.value })} /></label>}
           </div>
           {current && <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm font-medium">
             <input type="checkbox" className="size-5 accent-primary" checked={current.status === "completed"} disabled={busy}

@@ -734,7 +734,7 @@ export default function TimetablePage() {
   );
   const recurringEvents = monthlyWorkEvents(workSchedules, monthCells.map(cell=>cell.dateKey));
   const weeklyEvents = [...monthlyEvents, ...personalStudyDeadlineEvents, ...sharedCalendar.events];
-  const calendarEvents: (SharedCalendarEvent & { workScheduleId?: string })[] = [...weeklyEvents, ...recurringEvents];
+  const calendarEvents = [...weeklyEvents, ...recurringEvents];
 
   function openNewEventForDate(dateKey: string) {
     openScheduleDialog({ date: dateKey });
@@ -889,7 +889,7 @@ export default function TimetablePage() {
               value={viewTab}
               onValueChange={(value) => setViewTab(value as "weekly" | "monthly")}
             >
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-3 mb-3">
                 <TabsList className="bg-white border shadow-sm">
                   <TabsTrigger value="weekly">주간 시간표</TabsTrigger>
                   <TabsTrigger value="monthly">월간 일정</TabsTrigger>
@@ -1044,7 +1044,7 @@ export default function TimetablePage() {
                                 openNewEventForDate(dateKey);
                               }
                             }}
-                            className={`min-h-28 border-b border-r p-1 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-primary sm:p-2 ${
+                            className={`min-h-28 border-b border-r p-2 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-primary ${
                               inMonth ? "bg-white" : "bg-muted/20 text-muted-foreground"
                             }`}
                           >
@@ -1088,11 +1088,9 @@ export default function TimetablePage() {
                                   }}
                                   className="block w-full truncate rounded px-1.5 py-1 text-left text-[11px] font-medium text-white shadow-sm"
                                   style={{ backgroundColor: event.color }}
-                                  aria-label={event.deadlineTime ? event.title : undefined}
                                   title={event.allDay ? event.title : `${event.startTime} ${event.title}`}
                                 >
-                                  {event.deadlineTime ? <><span className="sm:hidden">마감</span><span className="hidden sm:inline">{event.title}</span></>
-                                    : event.allDay ? event.title : `${event.startTime} ${event.title}`}
+                                  {event.allDay ? event.title : `${event.startTime} ${event.title}`}
                                 </button>
                               ))}
 
@@ -1598,9 +1596,7 @@ export default function TimetablePage() {
                     <div className="flex items-center gap-2">
                       <Clock className="h-3.5 w-3.5" />
                       <span>
-                        {selectedEvent.deadlineTime
-                          ? `${selectedEvent.deadlineTime} 마감`
-                          : selectedEvent.allDay
+                        {selectedEvent.allDay
                           ? "하루 종일"
                           : `${selectedEvent.startTime} - ${selectedEvent.endTime}`}
                       </span>

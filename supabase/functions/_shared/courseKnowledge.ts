@@ -9,7 +9,7 @@ export type KnowledgeTask = {
   id?: string; task_key: string; kind: "index" | "overview" | "detail" | "research" | "refresh";
   status?: "processing" | "ready" | "failed"; note_id: string | null; source_revision: string | null;
   source_hash: string | null; page_start: number | null; page_end: number | null;
-  payload?: Record<string, unknown>; error_message?: string | null; created_at?: string; attempts?: number;
+  payload?: Record<string, unknown>; error_message?: string | null; created_at?: string;
   analysis_epoch?: string | null;
 };
 export type Unit = {
@@ -82,17 +82,6 @@ export function parseExtraction(raw: unknown, start: number, end: number): Extra
   if (!result.readable && (result.units.length || result.syllabus.length)) throw new Error("Unreadable PDF cannot contain confirmed extraction");
   return result;
 }
-/** Validate slice-local references, then store original page numbers for every evidence type. */
-export function parseExtractionSlice(raw: unknown, start: number, end: number): Extraction {
-  const result = parseExtraction(raw, 1, end - start + 1);
-  const offset = start - 1;
-  return { ...result,
-    sections: result.sections.map((section) => ({ ...section, page_start: section.page_start + offset, page_end: section.page_end + offset })),
-    units: result.units.map((unit) => ({ ...unit, page_start: unit.page_start + offset, page_end: unit.page_end + offset })),
-    syllabus: result.syllabus.map((fact) => ({ ...fact, page: fact.page + offset })),
-  };
-}
-
 export function revision(note: KnowledgeNote): string {
   return JSON.stringify([note.version, note.updated_at, note.file_path, note.drive_file_id, note.drive_modified_time]);
 }
@@ -126,18 +115,8 @@ export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[]
   const add = async (kind: KnowledgeTask["kind"], note: KnowledgeNote | null, hash: string | null, a: number | null, b: number | null, extra: unknown = null) => {
     const sourceRevision = note ? revision(note) : null;
     const analysisEpoch = note ? epoch(note) : null;
-    let key = await digest([kind === "research" ? RESEARCH_VERSION : KNOWLEDGE_VERSION, kind, kind === "research" ? searchModel : model, note?.id, kind === "index" ? sourceRevision : hash, a, b, kind === "research" ? researchIdentity(extra) : extra, analysisEpoch]);
-    let previous = saved.find((t) => t.task_key === key);
-    if (kind === "index" && previous?.status === "failed" && previous.error_message === "PDF는 1~50페이지까지 분석할 수 있습니다.") {
-      key = await digest([key, "full-pdf-index"]);
-      previous = saved.find((t) => t.task_key === key);
-    }
-    // Give a pre-recovery failure one new job identity without invalidating successful slices.
-    if ((kind === "overview" || kind === "detail") && previous?.status === "failed" &&
-        previous.error_message === "AI 분석 요청에 실패했습니다. 모델의 PDF·검색 지원과 API 설정을 확인해 주세요.") {
-      key = await digest([key, "provider-recovery-v1"]);
-      previous = saved.find((t) => t.task_key === key);
-    }
+    const key = await digest([kind === "research" ? RESEARCH_VERSION : KNOWLEDGE_VERSION, kind, kind === "research" ? searchModel : model, note?.id, kind === "index" ? sourceRevision : hash, a, b, kind === "research" ? researchIdentity(extra) : extra, analysisEpoch]);
+    const previous = saved.find((t) => t.task_key === key);
     const task: KnowledgeTask = { ...previous, task_key: key, kind, note_id: note?.id ?? null, source_revision: sourceRevision, source_hash: hash, page_start: a, page_end: b, analysis_epoch: analysisEpoch,
       ...(kind === "research" ? { payload: { ...previous?.payload, concepts: extra } } : {}) };
     // Retain saved research payload for context; extra is only its request on a cache miss.
@@ -149,7 +128,7 @@ export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[]
     const index = await add("index", note, null, null, null);
     if (!index) { overviewComplete = false; detailComplete = false; continue; }
     const count = Number(index.payload?.page_count); const hash = String(index.payload?.source_hash ?? "");
-    if (!Number.isSafeInteger(count) || count < 1 || !/^[a-f0-9]{64}$/.test(hash)) throw new Error("Invalid stored PDF index");
+    if (!Number.isInteger(count) || count < 1 || count > 50 || !/^[a-f0-9]{64}$/.test(hash)) throw new Error("Invalid stored PDF index");
     let complete = true;
     for (const [a, b] of ranges(1, count, OVERVIEW_PAGES)) {
       const overview = await add("overview", note, hash, a, b);
@@ -236,7 +215,7 @@ export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[]
 }
 
 export type KnowledgeRange = { note_id: string; page_start: number; page_end: number };
-export function knowledgeContext(plan: KnowledgePlan, focus: string[] = [], ranges: KnowledgeRange[] = [], selectedNotes?: string[]) {
+export function knowledgeContext(plan: KnowledgePlan, focus: string[] = [], ranges: KnowledgeRange[] = []) {
   // This is retrieval ordering only, not a study priority/time allocation algorithm.
   const termsFrom = (values: string[]) => [...new Set(values.join(" ").toLowerCase().match(/[\p{L}\p{N}_]{2,}/gu) ?? [])]
     .filter((t) => !["study", "review", "learn", "lecture", "공부", "학습", "복습"].includes(t)).slice(0, 60);
@@ -288,21 +267,7 @@ export function knowledgeContext(plan: KnowledgePlan, focus: string[] = [], rang
     Number(currentTitles.has(normalize(String((b.payload?.concepts as { title?: string })?.title ?? "")))) - Number(currentTitles.has(normalize(String((a.payload?.concepts as { title?: string })?.title ?? "")))));
   // Reserve a separate bounded budget for supplementary research so long PDFs cannot crowd it out.
   remaining = 8000; const research = bound(take(ranked(researchTasks), 4));
-  // Reserve one compact extract per requested PDF before spending the shared detail budget.
-  remaining = 24000;
-  const required = selectedNotes?.flatMap(id => overview.find(t => t.note_id === id) ?? []) ?? [];
-  const coverage = required.flatMap(t => {
-    const e = t.payload?.extraction as Extraction | undefined;
-    if (!e?.readable) return [];
-    const units = take(rankedUnits(e.units,t.note_id),3).map(u => ({ title: clipText(u.title,120), page_start: u.page_start, page_end: u.page_end,
-      required_depth: clipText(u.required_depth,260), concepts: take(u.concepts,4).map(v=>clipText(v,100)) }));
-    const item = { artifact_id: t.id, note_id: t.note_id, source_hash: t.source_hash, note_version: t.payload?.note_version,
-      pages: [t.page_start,t.page_end], kind: "overview", content: { summary: clipText(e.summary,630), readable: true, units } };
-    remaining -= JSON.stringify(item).length;
-    includedArtifacts++;includedUnits+=units.length;return [item];
-  });
-  const optionalOverviews = overview.filter(t=>!required.includes(t));
-  const content = [...coverage,...bound([...rankedTasks(details), ...rankedTasks(optionalOverviews.filter((t) => relevant.has(t.note_id))), ...take(rankedTasks(optionalOverviews.filter((t) => !relevant.has(t.note_id))), 2)])];
+  remaining = 24000; const content = bound([...rankedTasks(details), ...rankedTasks(overview.filter((t) => relevant.has(t.note_id))), ...take(rankedTasks(overview.filter((t) => !relevant.has(t.note_id))), 2)]);
   return { version: KNOWLEDGE_VERSION, overview_complete: plan.overview_complete, detail_complete: plan.detail_complete,
     research_status: plan.research_status, actual_class_progress: take(plan.actual_progress, 20),
     warnings: take(plan.warnings, 10), syllabus_facts: syllabus, content, research, context_truncated: truncated,

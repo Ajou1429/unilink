@@ -66,14 +66,11 @@ test('assistant endpoint uses the richer protocol while preserving record-only c
   let response=await send({...body,message:'안녕',assistant_protocol:1});
   assert.equal(response.status,200);assert.equal((await response.json()).result.protocol_version,1);
   assert.equal(sent.store,false);assert.equal(sent.max_output_tokens,3500);assert.ok(sent.text.format.schema.properties.tools);
-  assert.equal(sent.model,'gpt-6.1-terra');
   response=await send(body);assert.equal(response.status,200);assert.equal((await response.json()).result.protocol_version,undefined);
   assert.equal(sent.max_output_tokens,1200);assert.equal(sent.text.format.schema.properties.tools,undefined);
-  assert.equal(sent.model,'configured-model');
   response=await send({...body,assistant_protocol:2});assert.equal(response.status,200);
   const confirmed=(await response.json()).result;assert.equal(confirmed.protocol_version,2);assert.deepEqual(confirmed.commands,[]);
   assert.ok(sent.text.format.schema.properties.commands);assert.match(sent.instructions,/NEVER a tool that merely opens a form/);
-  assert.equal(sent.model,'gpt-6.1-terra');assert.match(sent.instructions,/수업 시간 중/);
 });
 
 test('assistant metadata expansion requires fresh consent; old server cannot silently pretend tool support',async()=>{

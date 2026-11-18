@@ -42,8 +42,6 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
         const storedUsage = existing.usage_payload?.model && existing.usage_payload?.totals
           ? existing.usage_payload : undefined;
         return jsonResponse({ schema_version: 2, status: "proposal", proposal: stored, proposal_run_id: existing.id,
-          ...(request.material_note_id ? { material_note_id: request.material_note_id } : {}),
-          ...(request.material_note_ids ? { material_note_ids: request.material_note_ids } : {}),
           prompt_version: existing.prompt_version, policy_version: existing.policy_version,
           ...(storedUsage ? { usage: storedUsage } : {}), proposal_persisted: true, persisted: false, replayed: true });
       }
@@ -53,10 +51,8 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
     const settings = await loadCoachingSettings(admin);
     const modelName = synthesisModel((key) => Deno.env.get(key), settings);
     if (!modelName) throw new CoachingError("Coaching model is not configured", 503);
-    const knowledgeEnabled = featureEnabled(Deno.env.get("COURSE_KNOWLEDGE_ENABLED"), settings.knowledge_enabled);
-    if ((request.material_note_id || request.material_note_ids) && !knowledgeEnabled) throw new CoachingError("선택한 PDF의 과목 분석이 활성화되어야 합니다.", 503);
     const context = await loadCoachingContext(admin, user.id, request,
-      knowledgeEnabled ? knowledgeModels((key) => Deno.env.get(key), settings) : undefined);
+      featureEnabled(Deno.env.get("COURSE_KNOWLEDGE_ENABLED"), settings.knowledge_enabled) ? knowledgeModels((key) => Deno.env.get(key), settings) : undefined);
     if (context.approval_revision === undefined) throw new CoachingError("코칭 DB 0032 적용 후 사용할 수 있습니다.", 503);
     const { data: jobId, error: reservationError } = await admin.rpc("reserve_coaching_proposal", { p_user_id: user.id });
     if (reservationError) {
@@ -111,8 +107,6 @@ export async function handleCoachingProposal(req: Request): Promise<Response> {
       }).eq("id", runId).eq("user_id", user.id).eq("status", "generating");
       if (persistError) throw new CoachingError("Coaching proposal could not be saved", 503);
       return jsonResponse({ schema_version: 2, status: "proposal", proposal, proposal_run_id: runId,
-        ...(request.material_note_id ? { material_note_id: request.material_note_id } : {}),
-        ...(request.material_note_ids ? { material_note_ids: request.material_note_ids } : {}),
         prompt_version: COACHING_PROMPT_VERSION, policy_version: COACHING_POLICY_VERSION,
         usage, proposal_persisted: true, persisted: false, replayed: false });
     } catch (error) {

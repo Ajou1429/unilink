@@ -33,7 +33,7 @@ type Usage = { model: string; attempt_count: number; pricing_version: string; to
   total_tokens: number; estimated_cost_usd: number | null;
 } };
 type Result = { schema_version: number; prompt_version?: string; proposal: Proposal; persisted: boolean; proposal_run_id?: string; proposal_persisted?: boolean; usage?: Usage };
-export type ChatCoachingResult = Result & { material_note_id?: string };
+export type ChatCoachingResult = Result;
 
 const intents = [
   ["weekly_plan", "이번 주 계획"], ["daily_plan", "오늘 계획"], ["exam_prep", "시험 대비"],

@@ -30,8 +30,7 @@ export function snapshotThread(thread:ThreadItem[],files:IntakeRecord[]=[]):Hist
       }
       if(item.status==="running")card.content.push("처리 중 연결이 끊긴 요청: 현재 데이터에서 결과를 확인해야 하며 자동 재실행하지 않음");
       if(item.message&&["done","cancelled","error","running"].includes(item.status))card.content.push(item.message);
-      // A timetable-derived window is a preview, not an explicitly announced start time.
-      const draft=readCommandDraft({version:1,command:p?.payload.classWindow===true?item.command:p?.command??item.command,source:item.source.slice(0,4000),status:item.status,question:item.message});
+      const draft=readCommandDraft({version:1,command:p?.command??item.command,source:item.source.slice(0,4000),status:item.status,question:item.message});
       return [{id:item.id,kind:"archive",text,card,...(draft?{draft}:{})}];
     }
     if(item.kind==="records")return [{id:item.id,kind:"archive",recordDraft:readRecordDraft({version:1,entries:item.entries.filter(e=>e.status==="waiting"&&!e.applied).map(e=>({action:e.action,source:e.source.slice(0,4000),requestId:e.requestId,observedAt:e.observedAt,missing:e.missing}))}),text:item.entries.map(e=>[
