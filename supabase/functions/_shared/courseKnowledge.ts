@@ -126,8 +126,12 @@ export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[]
   const add = async (kind: KnowledgeTask["kind"], note: KnowledgeNote | null, hash: string | null, a: number | null, b: number | null, extra: unknown = null) => {
     const sourceRevision = note ? revision(note) : null;
     const analysisEpoch = note ? epoch(note) : null;
-    const key = await digest([kind === "research" ? RESEARCH_VERSION : KNOWLEDGE_VERSION, kind, kind === "research" ? searchModel : model, note?.id, kind === "index" ? sourceRevision : hash, a, b, kind === "research" ? researchIdentity(extra) : extra, analysisEpoch]);
-    const previous = saved.find((t) => t.task_key === key);
+    let key = await digest([kind === "research" ? RESEARCH_VERSION : KNOWLEDGE_VERSION, kind, kind === "research" ? searchModel : model, note?.id, kind === "index" ? sourceRevision : hash, a, b, kind === "research" ? researchIdentity(extra) : extra, analysisEpoch]);
+    let previous = saved.find((t) => t.task_key === key);
+    if (kind === "index" && previous?.status === "failed" && previous.error_message === "PDF는 1~50페이지까지 분석할 수 있습니다.") {
+      key = await digest([key, "full-pdf-index"]);
+      previous = saved.find((t) => t.task_key === key);
+    }
     const task: KnowledgeTask = { ...previous, task_key: key, kind, note_id: note?.id ?? null, source_revision: sourceRevision, source_hash: hash, page_start: a, page_end: b, analysis_epoch: analysisEpoch,
       ...(kind === "research" ? { payload: { ...previous?.payload, concepts: extra } } : {}) };
     // Retain saved research payload for context; extra is only its request on a cache miss.
@@ -139,7 +143,7 @@ export async function planKnowledge(notes: KnowledgeNote[], progress: Progress[]
     const index = await add("index", note, null, null, null);
     if (!index) { overviewComplete = false; detailComplete = false; continue; }
     const count = Number(index.payload?.page_count); const hash = String(index.payload?.source_hash ?? "");
-    if (!Number.isInteger(count) || count < 1 || count > 50 || !/^[a-f0-9]{64}$/.test(hash)) throw new Error("Invalid stored PDF index");
+    if (!Number.isSafeInteger(count) || count < 1 || !/^[a-f0-9]{64}$/.test(hash)) throw new Error("Invalid stored PDF index");
     let complete = true;
     for (const [a, b] of ranges(1, count, OVERVIEW_PAGES)) {
       const overview = await add("overview", note, hash, a, b);

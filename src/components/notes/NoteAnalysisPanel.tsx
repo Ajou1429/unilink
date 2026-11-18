@@ -129,7 +129,7 @@ export function NoteAnalysisPanel({ note }: { note: MyNote }) {
   const stale = Boolean(analysis && (analysis.note_version !== note.version || Date.parse(analysis.note_updated_at) !== Date.parse(note.updatedAt)));
   return <section className="space-y-4 rounded-lg border p-4" aria-label="자료 분석 및 등록">
     <h3 className="font-semibold">자료에서 수업 주제·과제·시험 찾기</h3>
-    <p className="text-xs text-muted-foreground">PDF 분석 · 최대 20MB / 50페이지 · 하루 최대 5회</p>
+    <p className="text-xs text-muted-foreground">PDF 분석 · 최대 20MB · 하루 최대 5회</p>
     <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />이 PDF를 OpenAI에 전송해 분석하는 데 동의합니다.</label>
     <button type="button" className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50" disabled={busy || processing || !consent} onClick={() => void start()}>{busy ? "시작 중…" : processing ? "분석 중…" : "PDF 분석하기"}</button>
     <p role="status" className="text-sm">{message || (processing ? "분석 결과는 저장됩니다. 노트를 다시 열어도 진행 상태를 확인할 수 있습니다." : "")}</p>

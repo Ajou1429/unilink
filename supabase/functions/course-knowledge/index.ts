@@ -2,7 +2,7 @@ import { PDFDocument } from "npm:pdf-lib@1.17.1";
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { getAdminClient, getUserFromAuthHeader } from "../_shared/supabaseAdmin.ts";
 import { readSmallJson, readLimitedBody, RequestError } from "../_shared/requestLimits.ts";
-import { validatePageCount } from "../_shared/pdfLimits.ts";
+import { validateLecturePageCount } from "../_shared/pdfLimits.ts";
 import { readNotePdf, pdfBase64 } from "../_shared/noteSource.ts";
 import { KNOWLEDGE_VERSION, RESEARCH_VERSION, extractionSchema, parseExtractionSlice, researchSchemaForSources, parseResearch, digest, revision, type KnowledgeTask, type KnowledgeNote } from "../_shared/courseKnowledge.ts";
 import { loadKnowledge, knowledgeModels, publicKnowledgeStatus } from "../_shared/courseKnowledgeStore.ts";
@@ -114,7 +114,7 @@ async function execute(userId: string, goalId: string, task: KnowledgeTask, clai
       const bytes = await readNotePdf(db, userId, note, signal);
       stage = "pdf_open";
       const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes).buffer)), (b) => b.toString(16).padStart(2, "0")).join("");
-      const pdf = await PDFDocument.load(bytes); const count = pdf.getPageCount(); validatePageCount(count);
+      const pdf = await PDFDocument.load(bytes); const count = pdf.getPageCount(); validateLecturePageCount(count);
       if (task.kind === "index") payload = { ...payload, source_hash: hash, page_count: count };
       else {
         if (hash !== task.source_hash) throw new RequestError("PDF가 변경되었습니다. Drive 변경 반영 후 다시 시도해 주세요.");

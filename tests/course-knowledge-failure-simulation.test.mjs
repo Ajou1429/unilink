@@ -65,12 +65,19 @@ test('course preparation failures with actual Edge handler, PDF parser and SQL t
       ? { select: () => ({ eq: () => ({ single: async () => ({ data: { refresh_token_encrypted: 'fixture', refresh_token_iv: 'fixture' }, error: null }) }) }) }
       : realFrom(name);
     const env = { COURSE_KNOWLEDGE_ENABLED: 'true', COURSE_RESEARCH_ENABLED: 'false', COURSE_KNOWLEDGE_MODEL: 'mock-pdf', OPENAI_API_KEY: 'mock-only' };
-    const load = moduleLoader({ console: { error: (label, fields) => diagnostics.push({ label, ...fields }) },
+    const load = moduleLoader({ AbortController, console: { error: (label, fields) => diagnostics.push({ label, ...fields }) },
       Deno: { env: { get: key => env[key] }, serve: fn => { handler = fn; } },
       EdgeRuntime: { waitUntil: promise => pending.push(promise) },
       fetch: async (url, options) => {
         assert.equal(url, 'https://api.openai.com/v1/responses');
         const body = JSON.parse(options.body);
+        if (body.text.format.name === 'course_note_analysis') {
+          const page = Number(body.input[0].content[0].text.match(/through (\d+)/)[1]);
+          const file = body.input[0].content[1].file_data;
+          assert.equal((await PDFDocument.load(Buffer.from(file.split(',')[1],'base64'))).getPageCount(),page);
+          const result = { summary:'Lecture fixture', candidates:[{kind:'topic',title:'Deadlock',description:'',exam_scope:'',date_text:'',page,quote:'wait cycle'}] };
+          return Response.json({status:'completed',usage:{input_tokens:2,output_tokens:1},output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(result)}]}]});
+        }
         const count = Number(body.input[0].content[0].text.match(/submitted physical pages 1-(\d+)/)[1]);
         modelCalls.push(count);
         if (provider === 'http_error') return new Response('', { status: 503 });
@@ -208,11 +215,23 @@ test('course preparation failures with actual Edge handler, PDF parser and SQL t
       assert.equal(diagnostics.at(-1).stage, 'source_read');
     });
 
+    await t.test('a 51-page lecture reaches and persists the final page', async () => {
+      const f = await fixture([{ bytes: longPdf }]);
+      await f.invoke();
+      await db.query("update course_knowledge_tasks set status='failed', error_message='PDF는 1~50페이지까지 분석할 수 있습니다.' where goal_id=$1 and kind='index'",[f.goal]);
+      const before = modelCalls.length;
+      for (let i=0;i<7;i++) await f.invoke();
+      const state = await f.status();
+      assert.equal(state.status,'ready');
+      assert.deepEqual(modelCalls.slice(before),[10,10,10,10,10,1]);
+      const tasks = await f.tasks();
+      assert.ok(tasks.some(row=>row.kind==='overview'&&row.page_start===51&&row.status==='ready'));
+    });
+
     for (const [name, source, message] of [
       ['missing Storage PDF', {}, 'PDF를 불러오지 못했습니다.'],
       ['plain non-PDF bytes', { bytes: new TextEncoder().encode('not a PDF') }, '유효한 PDF 파일이 필요합니다.'],
       ['encrypted PDF', { bytes: encryptedPdf }, '암호화된 PDF는 분석할 수 없습니다. 암호가 없는 원본 PDF를 사용해 주세요.'],
-      ['51-page PDF', { bytes: longPdf }, 'PDF는 1~50페이지까지 분석할 수 있습니다.'],
       ['modified Drive PDF', { drive: 'changed' }, 'Drive 자료가 변경되었습니다. Drive 변경 반영 후 다시 분석해 주세요.'],
       ['non-PDF Drive file', { drive: 'not_pdf' }, 'Drive 원본이 PDF 형식이 아닙니다.'],
       ['oversized Drive PDF', { drive: 'oversized' }, 'PDF는 20MB 이하만 분석할 수 있습니다.'],
@@ -350,6 +369,20 @@ test('course preparation failures with actual Edge handler, PDF parser and SQL t
       assert.ok((await f.tasks()).every(row => row.note_id === f.notes[0].note));
       assert.deepEqual(JSON.parse(JSON.stringify(proposals[0].day_budgets)), [{ date: '2026-11-18', minutes: 60, windows: [{ start: '19:00', end: '22:00' }] }]);
       assert.equal(approvals, 0);
+    });
+    await t.test('standalone note analysis retains original page numbers across all slices', async () => {
+      const f = await fixture([{ bytes: longPdf }]);
+      env.NOTE_ANALYSIS_MODEL='mock-pdf';
+      load(path.join(root, 'supabase/functions/note-analyze/index.ts'));
+      const result=await handler(new Request('https://local.test/note-analyze',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({noteId:f.notes[0].note,consent:true})}));
+      assert.equal(result.status,202);
+      const {analysis_id}=await result.json();
+      await Promise.all(pending.splice(0));
+      const analysis=(await db.query('select status,page_count,usage_payload from note_analyses where id=$1',[analysis_id])).rows[0];
+      assert.deepEqual(analysis,{status:'completed',page_count:51,usage_payload:{input_tokens:12,output_tokens:6}});
+      const pages=(await db.query('select page from note_analysis_candidates where analysis_id=$1 order by page',[analysis_id])).rows.map(row=>row.page);
+      assert.deepEqual(pages,[10,20,30,40,50,51]);
     });
   } finally { await db.close(); }
 });
