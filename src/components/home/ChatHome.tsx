@@ -34,6 +34,7 @@ import { AUTH_CHANGED_EVENT } from "@/lib/auth-storage";
 import { ChatCommandCard, type CommandStatus } from "./ChatCommandCard";
 import { discardChatDrafts, discardPreparedCommand, executePreparedCommand, parseConfirmation, prepareChatCommand, type PreparedCommand } from "@/lib/chat-command-executor";
 import { mergePlanFollowup, parseCommands, type ChatCommand } from "../../../supabase/functions/_shared/chatCommands";
+import { requestedPlanChapters } from "@/lib/chat-course-materials";
 
 import { getAgentConsent, requestServiceAgent, serviceAgentEnabled, setAgentConsent, type AgentPlan } from "@/lib/service-agent";
 import type { AgentRequest } from "../../../supabase/functions/_shared/serviceAgent.ts";
@@ -382,6 +383,8 @@ function ChatHomeContent({ greeting, widgets }: { greeting: string; widgets?: Re
         start_time:t.start_hour!==undefined?`${String(t.start_hour).padStart(2,"0")}:00`:null,end_time:t.end_hour!==undefined?`${String(t.end_hour).padStart(2,"0")}:00`:null,
       })),{courses:ctx.courses,notes});
       const retryPlan = pending?.command.kind === "generate_plan" && /^(?:다시\s*(?:진행|시도|해봐)|진행해|시작해|앞에서\s*얘기)/.test(text.trim());
+      const narrowedPlan = pending?.command.kind === "generate_plan" && /장\s*만/.test(text) && requestedPlanChapters(text).length > 0;
+      if (narrowedPlan && pending && commands[0]?.kind !== "generate_plan") commands.splice(0, commands.length, pending.command);
       if (!commands.length && retryPlan && pending) commands.push(pending.command);
       if(commands.length) {
         const first=mergePlanFollowup(pending?.command,commands[0],text),id=nextId();

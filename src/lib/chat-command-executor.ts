@@ -14,7 +14,7 @@ import { listProblems, listSubjects } from "./problem-bank-storage";
 import { getDriveConnectionStatus, syncDriveFolder } from "./drive-connection";
 import { courseKnowledgeEnabled, prepareCourseKnowledge, requestCourseKnowledge } from "./course-knowledge";
 import { getMyNotes, type MyNote } from "./my-notes-storage";
-import { belongsToCourse, isReadablePdfSource, matchMaterialCourse, matchesChapter, requestedChapters, selectChapterMaterials } from "./chat-course-materials";
+import { belongsToCourse, isReadablePdfSource, matchMaterialCourse, matchesChapter, requestedChapters, requestedPlanChapters, selectChapterMaterials } from "./chat-course-materials";
 import type { ChatCommand } from "../../supabase/functions/_shared/chatCommands.ts";
 import type { ChatContext } from "./chat-record/apply";
 import { classWindowsFor } from "./chat-record/plan";
@@ -159,7 +159,8 @@ export async function prepareChatCommand(command:ChatCommand,ctx:ChatContext,not
   }
   if(c.kind==="generate_plan") {
     const materialCourse = matchMaterialCourse(ctx.courses,requestText) ?? course;
-    const chapters = /강의\s*(?:자료|노트)|필기|pdf|분석/i.test(requestText) ? requestedChapters(requestText) : [];
+    const requested = requestedPlanChapters(requestText);
+    const chapters = requested.length ? requested : requestedChapters(c.exam_scope ?? "");
     if(chapters.length && !allowsChatDocumentAnalysis(requestText))return question(c,"본문 분석 없이 진행하는 요청이에요. PDF에서 근거를 읽지 않는 일반 계획으로 진행할지 알려주세요.");
     if(chapters.length > 5)return question(c,"한 계획에서 확인할 장을 최대 5개로 나눠 주세요.");
     if(chapters.length && !materialCourse)return question(c,"어느 과목의 강의자료인지 알려주세요.");

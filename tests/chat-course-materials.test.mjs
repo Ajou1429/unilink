@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { matchMaterialCourse, requestedChapters, selectChapterMaterials } from '../src/lib/chat-course-materials.ts';
+import { matchMaterialCourse, requestedChapters, requestedPlanChapters, selectChapterMaterials } from '../src/lib/chat-course-materials.ts';
 import { matchesMaterialScope, parseMaterialScope } from '../supabase/functions/_shared/materialScope.ts';
 import { mergePlanFollowup } from '../supabase/functions/_shared/chatCommands.ts';
 
 const note = (id, title, linkedId = 'db', driveFileId = `drive-${id}`) => ({ id, title, linkedType: 'course', linkedId, driveFileId });
 const courses = [{ id: 'db', name: '엔지니어링DB' }, { id: 'os', name: '운영체제' }];
 const request = '엔디비 퀴즈 대비 강의노트 6,7,8장 분석하고 공부 계획 짜줘';
+test('an explicit chapter correction replaces the previous range and survives a retry', () => {
+  assert.deepEqual(requestedPlanChapters('강의자료 1~8장으로 계획 짜줘\n6,7,8장만 확인하라니까\n다시 진행\n07장 SQL.pdf'),[6,7,8]);
+  assert.deepEqual(requestedPlanChapters('6,7,8장만 확인하라니까'),[6,7,8]);
+});
 
 test('resolves stored Drive chapters even when they are older than the latest 40 notes', () => {
   const db = matchMaterialCourse(courses, request);

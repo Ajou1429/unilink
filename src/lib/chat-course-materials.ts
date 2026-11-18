@@ -31,6 +31,14 @@ export function requestedChapters(request: string): number[] {
   return [...chapters].filter(n => n > 0).sort((a, b) => a - b);
 }
 
+export function requestedPlanChapters(request: string) {
+  const lines = request.split("\n").filter(line => !/\.pdf\s*$/i.test(line.trim()));
+  const explicit = lines.findLast(line => /장\s*만/.test(line) && requestedChapters(line).length > 0);
+  if (explicit) return requestedChapters(explicit);
+  return /강의\s*(?:자료|노트)|필기|pdf|분석|확인/.test(request.toLowerCase())
+    ? requestedChapters(lines.findLast(line => requestedChapters(line).length > 0) ?? "") : [];
+}
+
 export function matchesChapter(note: Note, chapter: number) {
   const pattern = new RegExp(`(?<![0-9])0*${chapter}\\s*장|(?:chapter|챕터)\\s*0*${chapter}(?![0-9])`, "iu");
   return [note.title, note.fileName].some(name => name && pattern.test(normalized(name)));
