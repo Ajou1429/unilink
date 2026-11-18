@@ -262,7 +262,7 @@ Deno.serve(async (req) => {
     if (task.kind === "research" && body.research_consent !== true) return jsonResponse({ ...status, status: "research_consent_required" });
     if (!Deno.env.get("OPENAI_API_KEY")) throw new RequestError("AI API 설정이 필요합니다.", 503);
     const reserved = await db.rpc("claim_course_knowledge_task", { p_user: user.id, p_goal: body.goal_id, p_task: task, p_retry: mayRetry(task) });
-    if (reserved.error) throw new RequestError("분석 한도(24시간 60단계) 또는 DB 설정을 확인해 주세요.", 429);
+    if (reserved.error) throw new RequestError("새 분석 단계의 등록에 실패했습니다. 잠시 후 다시 시도해 주세요.", 503);
     const claim = Array.isArray(reserved.data) ? reserved.data[0] : reserved.data;
     if (!claim?.id && task.status === "failed") return jsonResponse(status);
     if (claim?.id && claim.lease_token) {

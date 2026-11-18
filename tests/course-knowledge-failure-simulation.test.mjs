@@ -409,6 +409,16 @@ test('course preparation failures with actual Edge handler, PDF parser and SQL t
       assert.deepEqual(JSON.parse(JSON.stringify(proposals[0].day_budgets)), [{ date: '2026-11-18', minutes: 60, windows: [{ start: '19:00', end: '22:00' }] }]);
       assert.equal(approvals, 0);
     });
+    await t.test('course analysis continues beyond 60 daily steps without invalidating other tasks', async () => {
+      const previous=await fixture([]);
+      await db.query(`insert into course_knowledge_tasks(user_id,goal_id,kind,task_key,status)
+        select $1,$2,'research',lpad(to_hex(i),64,'0'),'ready' from generate_series(1,60) i`,[user,previous.goal]);
+      const f=await fixture([{bytes:goodPdf}]);
+      await f.invoke();await f.invoke();
+      assert.equal((await f.status()).status,'ready');
+      assert.equal((await previous.tasks()).length,60);
+    });
+
     await t.test('standalone note analysis retains original page numbers across all slices', async () => {
       const f = await fixture([{ bytes: longPdf }]);
       env.NOTE_ANALYSIS_MODEL='mock-pdf';
