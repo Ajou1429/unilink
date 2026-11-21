@@ -110,7 +110,7 @@ export function AccountBoundary({ children }: { children: React.ReactNode }) {
   if (identity === null) return <p className="p-6 text-sm text-muted-foreground">로그인 상태 확인 중…</p>;
   return <Fragment key={identity}>
     {isDemoMode() && <div role="status" className="flex flex-wrap items-center justify-center gap-3 bg-amber-100 px-4 py-3 text-sm text-amber-950">
-      <span>데모 체험 · 샘플 데이터와 변경사항은 이 탭에만 저장됩니다. 실제 Drive 연결은 로그인 후 이용하세요.</span>
+      <span>데모 체험 · 변경사항은 이 탭에만 저장됩니다. AI 채팅과 하루 3회 계획 추천을 체험하세요.</span>
       <a className="rounded border border-amber-700 px-3 py-1 font-medium" href={`${process.env.NODE_ENV === "production" ? "/unilink" : ""}/dashboard?demo=1`}>전체 기능 체험</a>
       <a className="rounded border border-amber-700 px-3 py-1 font-medium" href={`${process.env.NODE_ENV === "production" ? "/unilink" : ""}/login`} onClick={() => {
         window.sessionStorage.removeItem(DEMO_MODE_KEY);
