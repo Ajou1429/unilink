@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { demoChat, type DemoQuota } from "@/lib/demo-chat";
+import type { DemoResult } from "../../../supabase/functions/_shared/demoChat";
 import {
   ArrowRight,
   BookOpen,
   CalendarDays,
   Check,
-  Cloud,
   FileText,
   GraduationCap,
   MessageSquare,
@@ -58,12 +59,12 @@ const features = [
   },
   {
     id: "notes",
-    title: "노트 · Drive",
-    icon: Cloud,
+    title: "강의노트",
+    icon: FileText,
     href: "/notes",
     subtitle: "흩어진 자료를 연결하고 분류해요",
     details: [
-      "Drive 폴더 선택·PDF 동기화·원본 미리보기",
+      "샘플 PDF 미리보기와 강의노트 관리",
       "서비스에서 파일 업로드와 수업 자동 분류",
       "파일 검색과 개인 학습으로 분류 변경",
       "자료 분석으로 주제·일정·문제 후보 확인",
@@ -131,7 +132,7 @@ const features = [
       "과목별 성적·학점과 전공 평점 관리",
       "재수강 예상 성적과 졸업 학점 계산",
       "자격증·어학·활동 스펙 기록",
-      "설정에서 계정·연동·알림 환경 관리",
+      "설정에서 계정·알림 환경 관리",
     ],
   },
 ] as const;
@@ -140,7 +141,6 @@ type Message = { role: "user" | "assistant"; text: string };
 type DemoState = {
   visited: FeatureId[];
   messages: Message[];
-  drive: number;
   analyzed: boolean;
   approved: boolean;
   eventAdded: boolean;
@@ -152,10 +152,9 @@ const initial: DemoState = {
   messages: [
     {
       role: "assistant",
-      text: "안녕하세요! UniLink 공개 데모예요. 아래 예시를 눌러 학습 질문, 파일 분석, 일정 등록과 계획 추천을 체험해 보세요.",
+      text: "안녕하세요! 실제 AI와 학습 질문, 일정 등록, 계획 추천을 체험해 보세요. 변경은 확인 후 데모에만 반영하며 계획 생성은 하루 3회예요.",
     },
   ],
-  drive: 0,
   analyzed: false,
   approved: false,
   eventAdded: false,
@@ -185,17 +184,19 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
     </section>
   );
 }
-function dateAfter(offset: number) {
-  const date = new Date();
-  date.setDate(date.getDate() + offset);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
 
 export function DemoExperience() {
   const [active, setActive] = useState<FeatureId>("chat");
   const [state, setState] = useState(readState);
   const [input, setInput] = useState("");
-  const [pending, setPending] = useState<"plan" | "event" | null>(null);
+  const [pending, setPending] = useState<DemoResult | null>(null);
+  const [quota, setQuota] = useState<DemoQuota | null>(null);
+  const [busy, setBusy] = useState(false);
+  const requestLock = useRef(false);
+  const generation = useRef(0);
+  const messageList = useRef<HTMLDivElement>(null);
+  useEffect(() => { const list = messageList.current; if (list) list.scrollTop = list.scrollHeight; }, [state.messages]);
+  useEffect(() => { let active = true; demoChat({ status: true }).then(data => { if (active) setQuota(data.quota); }).catch(() => {}); return () => { active = false; }; }, []);
   const [notice, setNotice] = useState("");
   const [preview, setPreview] = useState(false);
   const [mode, setMode] = useState("이번 주 계획");
@@ -228,63 +229,63 @@ export function DemoExperience() {
     if (!state.visited.includes(id))
       update({ visited: [...state.visited, id] });
   }
-  function request(text: string) {
-    if (!text.trim()) return;
-    let reply: string;
-    if (/계획|추천|복습/.test(text)) {
-      setPending("plan");
-      reply =
-        "교착상태 복습과 SQL 연습으로 구성한 계획 예시를 준비했어요. 아래 내용을 확인하고 승인하면 이 탭의 학습 계획에 추가됩니다.";
-    } else if (/일정|시험|과제|마감/.test(text)) {
-      setPending("event");
-      reply =
-        "일정 등록 흐름을 체험해 볼게요. 데모 예시는 운영체제 보고서 제출이며, 시간을 따로 지정하지 않은 마감은 23:59로 표시해요.";
-    } else if (/분석|파일|노트|pdf/i.test(text)) {
-      update({ analyzed: true });
-      reply =
-        "준비된 샘플 노트의 분석 결과예요. 주제: 교착상태의 4가지 조건 / 예방과 회피 / 자원 할당. ‘노트 · Drive’에서 샘플 PDF와 분류 과정을 볼 수 있어요. 실제 업로드 파일의 AI 분석은 실행하지 않습니다.";
-    } else if (/교착|공부|학습|이해/.test(text)) {
-      reply =
-        "교착상태는 서로 가진 자원을 기다리느라 아무도 진행하지 못하는 상태예요. 예를 들어 A는 프린터를, B는 스캐너를 가진 채 서로의 장치를 기다리는 상황입니다. 상호 배제·점유와 대기·비선점·순환 대기가 모두 성립할 때 발생할 수 있어요. ‘문제은행’에서 확인 문제를 풀어 보세요.";
-    } else {
-      reply =
-        "반가워요! 잠깐 쉬면서 오늘 할 공부를 가볍게 정리해 볼까요? 이 데모는 준비된 응답으로 동작해요. ‘교착상태를 설명해줘’, ‘노트를 분석해줘’, ‘공부 계획을 추천해줘’를 입력해 보세요.";
-    }
-    update({
-      messages: [
-        ...state.messages,
-        { role: "user", text },
-        { role: "assistant", text: reply },
-      ],
-    });
+  async function request(text: string) {
+    if (!text.trim() || requestLock.current) return;
+    if (/^(예|네|응|승인|저장|반영)[.!\s]*$/.test(text.trim()) && pending) { approvePending(); setInput(""); return; }
+    if (/^(아니오|아니|취소)[.!\s]*$/.test(text.trim()) && pending) { setPending(null); setInput(""); setNotice("반영하지 않았어요."); return; }
+    requestLock.current = true;
+    setBusy(true);
+    setPending(null);
+    setNotice("");
     setInput("");
+    const turn = generation.current;
+    const messages: Message[] = [...state.messages, { role: "user", text }];
+    update({ messages });
+    try {
+      const data = await demoChat({ message: text, history: state.messages.slice(-10), context: {
+        courses: ["운영체제", "데이터베이스"],
+        plans: getWeeklyStudyPlans().slice(0, 15), events: getMonthlyEvents().slice(0, 15),
+        sampleNote: "교착상태.pdf: 상호 배제, 점유와 대기, 비선점, 순환 대기. 예방은 조건을 제거하고 회피는 안전 상태를 유지한다.",
+        mode, netMinutes: Number(minutes), preferred,
+      }});
+      if (generation.current !== turn) return;
+      setQuota(data.quota);
+      const result = data.result;
+      if (!result) throw new Error("AI 응답을 확인하지 못했습니다.");
+      update({ messages: [...messages, { role: "assistant", text: result.reply }] });
+      if (result.action === "navigate") visit(result.target as FeatureId);
+      else if (result.action !== "reply") { setPending(result); if (result.action === "plan") { setProposal(true); visit("chat"); } }
+    } catch (error) {
+      if (generation.current !== turn) return;
+      update({ messages: [...messages, { role: "assistant", text: error instanceof Error ? error.message : "대화를 처리하지 못했습니다." }] });
+      demoChat({ status: true }).then(data => setQuota(data.quota)).catch(() => {});
+    } finally { requestLock.current = false; setBusy(false); }
+  }
+  function approvePending() {
+    if (!pending) return;
+    if (pending.action === "plan") { approvePlan(); return; }
+    if (pending.action === "event") { approveEvent(); return; }
+    if (pending.action === "classify") classify();
+    else if (pending.action === "complete_plan") {
+      const plans = getWeeklyStudyPlans();
+      if (!plans.some(p => p.id === pending.target)) { setNotice("완료할 계획을 찾지 못했어요. 계획 이름을 다시 알려주세요."); return; }
+      saveWeeklyStudyPlans(plans.map(p => p.id === pending.target ? { ...p, isCompleted: true } : p));
+    } else if (pending.action === "goal") {
+      savePersonalStudies([...getPersonalStudies(), { id: `demo-chat-goal-${Date.now()}`, title: pending.title, category: "기타", goal: pending.details.join("\n"), color: "#4F46E5", createdAt: new Date().toISOString() }]);
+    }
+    setPending(null);
+    setNotice("확인한 내용을 데모에 반영했어요.");
   }
   function approvePlan() {
     const existing = getWeeklyStudyPlans();
-    const duration = Number(minutes);
-    const start = preferred.startsWith("오후") ? 15 * 60 : 19 * 60;
-    const time = (value: number) =>
-      `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
-    const next = ["교착상태 핵심 개념 복습", "SQL JOIN 문제 풀이"].map(
-      (title, index) => ({
-        id: `demo-recommendation-${index}`,
-        userId: "demo",
-        courseId: String(index + 1),
-        courseName: index ? "데이터베이스" : "운영체제",
-        week: 1,
-        title,
-        description: `${mode} · ${time(start)}–${time(start + duration)} · 개념 설명 후 연습문제 2개 확인`,
-        dueDate: dateAfter(index),
-        isCompleted: false,
-        createdAt: new Date().toISOString(),
-        completionCriteria: {
-          schema_version: 1 as const,
-          task_scope: title,
-          observable_check: "핵심 개념을 설명하고 연습문제 2개 풀기",
-          evidence_ids: [],
-        },
-      }),
-    );
+    if (!pending || pending.action !== "plan") return;
+    const next = pending.plans.map((item, index) => ({
+      id: `demo-recommendation-${Date.now()}-${index}`, userId: "demo",
+      courseId: item.course.includes("데이터베이스") ? "2" : "1", courseName: item.course,
+      week: 1, title: item.title, description: `${item.time} · ${item.minutes}분 · ${item.description}`,
+      dueDate: item.date, isCompleted: false, createdAt: new Date().toISOString(),
+      completionCriteria: { schema_version: 1 as const, task_scope: item.title, observable_check: item.description, evidence_ids: [] },
+    }));
     saveWeeklyStudyPlans([
       ...existing,
       ...next.filter((item) => !existing.some((plan) => plan.id === item.id)),
@@ -296,22 +297,11 @@ export function DemoExperience() {
     );
   }
   function approveEvent() {
+    if (!pending || pending.action !== "event") return;
     const events = getMonthlyEvents();
-    if (!events.some((event) => event.id === "demo-chat-assignment"))
-      saveMonthlyEvents([
-        ...events,
-        {
-          id: "demo-chat-assignment",
-          title: "운영체제 보고서 제출",
-          date: dateAfter(2),
-          startTime: "23:59",
-          endTime: "",
-          location: "온라인 제출",
-          memo: "교착상태 예방과 회피 비교 · 데모 대화에서 등록",
-          color: "#4F46E5",
-          createdAt: new Date().toISOString(),
-        },
-      ]);
+    saveMonthlyEvents([...events, { id: `demo-chat-event-${Date.now()}`, title: pending.title,
+      date: pending.date, startTime: pending.time || "23:59", endTime: "", location: "",
+      memo: pending.details.join("\n"), color: "#4F46E5", createdAt: new Date().toISOString() }]);
     update({ eventAdded: true });
     setPending(null);
     setNotice(
@@ -346,9 +336,6 @@ export function DemoExperience() {
       "분류 변경을 저장했어요. 나의 노트에서 개인 학습으로 옮겨진 샘플을 확인할 수 있어요.",
     );
   }
-  const total = Number(minutes);
-  const planStart = preferred.startsWith("오후") ? "15:00" : "19:00";
-  const planEnd = `${String(Number(planStart.slice(0, 2)) + Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
@@ -362,7 +349,8 @@ export function DemoExperience() {
             <button
               className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm hover:bg-white/10"
               onClick={() => {
-                resetDemoData();
+                generation.current++;
+                  resetDemoData();
                 window.location.reload();
               }}
             >
@@ -387,9 +375,9 @@ export function DemoExperience() {
           </div>
         </section>
         <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm leading-6 text-indigo-950">
-          AI 응답·분석·Drive 연결은 준비된 시뮬레이션입니다. 실제 API 호출·Drive
-          변경·계정 저장 없이 이 탭의 샘플만 변경합니다. 자유 입력도 아래 예시
-          시나리오로 응답합니다.
+          채팅과 계획 추천은 실제 AI가 처리합니다. 대화와 데모 학습 정보가 OpenAI로 전송되며 개인정보는 입력하지 마세요.
+          승인한 변경은 이 탭의 데모에만 저장합니다. 파일 분석은 샘플 자료 체험입니다.
+          계획 생성은 한국시간 자정 기준 같은 네트워크에서 하루 3회입니다. 남은 횟수: {quota ? `${quota.remaining}/3회` : "확인 중"}.
         </div>
         <nav
           aria-label="데모 기능"
@@ -413,6 +401,8 @@ export function DemoExperience() {
             {active === "chat" && (
               <Panel title="대화로 시작하는 학습 관리">
                 <div
+                  ref={messageList}
+                  aria-busy={busy}
                   className="mb-5 max-h-96 space-y-3 overflow-y-auto"
                   aria-live="polite"
                 >
@@ -422,7 +412,7 @@ export function DemoExperience() {
                       className={`w-fit max-w-[95%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-7 ${message.role === "user" ? "ml-auto bg-indigo-600 text-white" : "bg-slate-100 text-slate-800"}`}
                     >
                       <span className="mb-1 block text-xs opacity-70">
-                        {message.role === "user" ? "나" : "UniLink · 데모 응답"}
+                        {message.role === "user" ? "나" : "UniLink · AI"}
                       </span>
                       {message.text}
                     </div>
@@ -430,31 +420,16 @@ export function DemoExperience() {
                 </div>
                 {pending && (
                   <div className="mb-4 rounded-2xl border-2 border-indigo-200 p-5">
-                    <h4 className="text-xl font-bold">
-                      {pending === "plan"
-                        ? "운영체제 · SQL 학습 계획"
-                        : "운영체제 과제 마감"}
-                    </h4>
+                    <h4 className="text-xl font-bold">{pending.title}</h4>
                     <ul className="my-4 list-disc space-y-2 pl-5 text-sm">
-                      <li>
-                        {pending === "plan"
-                          ? "핵심 개념 복습과 연습문제 풀이"
-                          : "교착상태 예방과 회피 비교 보고서"}
-                      </li>
-                      <li>승인 후 샘플 데이터에 한 번만 반영</li>
+                      {pending.details.map((detail, i) => <li key={i}>{detail}</li>)}
+                      {pending.plans.map((item, i) => <li key={`plan-${i}`}><strong>{item.title}</strong> · {item.description}<p className="mt-2 border-t pt-2 text-slate-500">{item.date} {item.time} · {item.minutes}분</p></li>)}
                     </ul>
-                    <p className="border-t pt-3 text-sm text-slate-600">
-                      {dateAfter(pending === "plan" ? 0 : 2)} ·{" "}
-                      {pending === "plan"
-                        ? `${planStart}–${planEnd}`
-                        : "23:59 마감"}
-                    </p>
+                    {pending.date && <p className="border-t pt-3 text-sm text-slate-600">{pending.date} · {pending.time}</p>}
                     <div className="mt-4 flex gap-2">
                       <button
                         className={primary}
-                        onClick={
-                          pending === "plan" ? approvePlan : approveEvent
-                        }
+                        onClick={approvePending}
                       >
                         예, 반영하기
                       </button>
@@ -473,10 +448,14 @@ export function DemoExperience() {
                     "노트를 분석해줘",
                     "공부 계획을 추천해줘",
                     "과제 일정을 등록해줘",
+                    "문제은행을 보여줘",
+                    "저장된 계획을 보여줘",
+                    "시간표를 보여줘",
                   ].map((text) => (
                     <button
                       key={text}
                       className={button}
+                      disabled={busy}
                       onClick={() => request(text)}
                     >
                       {text}
@@ -497,8 +476,8 @@ export function DemoExperience() {
                     onChange={(event) => setInput(event.target.value)}
                     placeholder="질문하거나 예시를 눌러 보세요"
                   />
-                  <button className={primary} disabled={!input.trim()}>
-                    보내기
+                  <button className={primary} disabled={busy || !input.trim()}>
+                    {busy ? "응답 중…" : "보내기"}
                   </button>
                 </form>
                 <button
@@ -552,116 +531,22 @@ export function DemoExperience() {
               </Panel>
             )}
             {active === "notes" && (
-              <Panel title="Drive에서 노트로 · 단계별 체험">
-                <ol className="mb-5 flex flex-wrap gap-2 text-xs">
-                  {["연결", "폴더 선택", "동기화", "분석"].map(
-                    (label, index) => (
-                      <li
-                        key={label}
-                        className={`rounded-full px-3 py-2 ${state.drive > index ? "bg-indigo-600 text-white" : "bg-slate-100"}`}
-                      >
-                        {index + 1}. {label}
-                      </li>
-                    ),
-                  )}
-                </ol>
-                <p className="mb-4 text-sm leading-7 text-slate-600">
-                  사용자가 동기화 대상을 고릅니다. 폴더 선택은 서비스 내부
-                  설정이며 Drive 권한 자체를 해당 폴더로 제한하지 않습니다.
-                </p>
-                {state.drive === 0 && (
-                  <button
-                    className={primary}
-                    onClick={() => update({ drive: 1 })}
-                  >
-                    Google Drive 연결 체험
-                  </button>
-                )}
-                {state.drive === 1 && (
-                  <div className="space-y-3">
-                    <p className="text-sm">연결됨 · 가상의 데모 계정</p>
-                    <button
-                      className={button}
-                      onClick={() => update({ drive: 2 })}
-                    >
-                      운영체제 폴더 선택 · PDF 1개
-                    </button>
-                  </div>
-                )}
-                {state.drive >= 2 && (
-                  <div className="space-y-4">
-                    <div className="rounded-xl border p-4 text-sm">
-                      <Cloud className="mb-2 text-indigo-600" size={22} />
-                      <strong>운영체제 / 교착상태.pdf</strong>
-                      <p className="mt-1 text-slate-500">
-                        선택한 데모 폴더 · 개인정보 없는 자체 샘플
-                      </p>
+              <Panel title="강의노트 · 샘플 자료">
+                <p className="mb-4 text-sm text-slate-600">개인정보 없는 샘플 PDF로 미리보기·분석·분류를 체험하세요.</p>
+                <label className="block text-sm">노트 검색
+                  <input className="mt-2 w-full rounded-xl border p-3" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="교착상태" />
+                </label>
+                {"교착상태 운영체제".includes(query.trim()) ? (
+                  <div className="mt-4 rounded-xl bg-slate-50 p-4">
+                    <p className="font-bold">교착상태 강의노트</p>
+                    <p className="my-2 text-sm">{state.classified ? "개인 학습" : "운영체제 수업"} · 샘플 PDF</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button className={button} onClick={() => setPreview(!preview)}>{preview ? "미리보기 닫기" : "PDF 미리보기"}</button>
+                      <button className={button} onClick={() => update({ analyzed: true })}>주제 분석 체험</button>
+                      <button className={button} disabled={state.classified} onClick={classify}>개인 학습으로 분류</button>
                     </div>
-                    {state.drive === 2 ? (
-                      <button
-                        className={primary}
-                        onClick={() => {
-                          update({ drive: 3 });
-                          setNotice(
-                            "샘플 PDF가 노트 목록에 표시되었습니다. 실제 Drive 통신은 하지 않았어요.",
-                          );
-                        }}
-                      >
-                        선택 폴더 동기화 체험
-                      </button>
-                    ) : (
-                      <>
-                        <label className="block text-sm">
-                          노트 검색
-                          <input
-                            className="mt-2 w-full rounded-xl border p-3"
-                            value={query}
-                            onChange={(event) => setQuery(event.target.value)}
-                            placeholder="교착상태"
-                          />
-                        </label>
-                        {"교착상태 운영체제".includes(query.trim()) ? (
-                          <div className="rounded-xl bg-slate-50 p-4">
-                            <p className="font-bold">교착상태 강의노트</p>
-                            <p className="mb-3 mt-1 text-xs text-slate-500">
-                              {state.classified
-                                ? "개인 학습으로 분류됨"
-                                : "운영체제 수업으로 분류됨"}{" "}
-                              · 샘플 PDF
-                            </p>
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                className={button}
-                                onClick={() => setPreview(!preview)}
-                              >
-                                {preview ? "미리보기 닫기" : "PDF 미리보기"}
-                              </button>
-                              <button
-                                className={button}
-                                onClick={() =>
-                                  update({ analyzed: true, drive: 4 })
-                                }
-                              >
-                                주제 분석 체험
-                              </button>
-                              <button
-                                className={button}
-                                disabled={state.classified}
-                                onClick={classify}
-                              >
-                                개인 학습으로 분류
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="text-sm text-slate-500">
-                            검색 결과가 없어요.
-                          </p>
-                        )}
-                      </>
-                    )}
                   </div>
-                )}
+                ) : <p className="mt-4 text-sm">검색 결과가 없어요.</p>}
                 {preview && (
                   <div className="mt-5">
                     <iframe
@@ -690,8 +575,8 @@ export function DemoExperience() {
                     <button
                       className={`${button} mt-4`}
                       onClick={() => {
-                        visit("coaching");
-                        setProposal(true);
+                        visit("chat");
+                        void request("교착상태 강의노트 내용으로 학습 계획을 추천해줘");
                       }}
                     >
                       이 주제로 계획 추천
@@ -798,59 +683,11 @@ export function DemoExperience() {
                         : "선택한 목표와 이번 주 일정을 바탕으로 계획합니다."}{" "}
                   이 체험에서는 두 과목의 고정된 예시를 설정 시간에 표시합니다.
                 </p>
-                <button className={primary} onClick={() => setProposal(true)}>
+                <button className={primary} disabled={busy || quota?.remaining === 0} onClick={() => { visit("chat"); void request(`${mode}을 추천해줘. 순공 ${minutes}분, ${preferred} 안에 배치해줘.`); }}>
                   <Sparkles size={16} />
                   추천 시간표 만들기
                 </button>
-                {proposal && (
-                  <div className="mt-6">
-                    <h4 className="mb-3 font-bold">추천 시간표 · 시뮬레이션</h4>
-                    <div className="overflow-hidden rounded-xl border">
-                      <div className="grid grid-cols-[80px_1fr_1fr] bg-slate-100 p-3 text-center text-sm">
-                        <span>시간</span>
-                        <span>오늘</span>
-                        <span>내일</span>
-                      </div>
-                      <div className="grid grid-cols-[80px_1fr_1fr] gap-2 p-3 text-sm">
-                        <span className="leading-7">
-                          {planStart}
-                          <br />
-                          {planEnd}
-                        </span>
-                        <div className="rounded-lg bg-indigo-100 p-3 text-indigo-950">
-                          운영체제
-                          <br />
-                          <strong>교착상태 복습</strong>
-                          <p className="mt-2 text-xs">
-                            {minutes}분 · 개념 설명 + 2문제
-                          </p>
-                        </div>
-                        <div className="rounded-lg bg-emerald-100 p-3 text-emerald-950">
-                          데이터베이스
-                          <br />
-                          <strong>SQL JOIN 연습</strong>
-                          <p className="mt-2 text-xs">
-                            {minutes}분 · 예제와 오답 정리
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    <p className="my-3 text-xs leading-6 text-slate-500">
-                      휴식은 공부 시간에 포함하지 않습니다. 실제 서비스는 고정
-                      일정 충돌과 최소 연속 시간을 검사합니다. 이 예시는 실제
-                      AI의 최적화 결과가 아닙니다.
-                    </p>
-                    <button
-                      className={primary}
-                      disabled={state.approved}
-                      onClick={approvePlan}
-                    >
-                      {state.approved
-                        ? "학습 계획에 반영됨"
-                        : "이 계획 승인·저장"}
-                    </button>
-                  </div>
-                )}
+                {proposal && <p className="mt-4 text-sm text-slate-600">AI 대화에서 실제 추천 결과와 일시를 확인한 뒤 승인해 주세요.</p>}
               </Panel>
             )}
             {active === "timetable" && (
@@ -1116,7 +953,7 @@ export function DemoExperience() {
             <div className="rounded-2xl bg-slate-900 p-5 text-white">
               <h3 className="font-semibold">추천 시연 순서</h3>
               <p className="mt-3 text-sm leading-7 text-slate-300">
-                노트 · Drive → 주제 분석 → AI 학습코칭 → 계획 승인 → 학습 계획
+                채팅 → 강의노트 → 주제 분석 → AI 학습코칭 → 계획 승인 → 학습 계획
                 완료 → 문제은행
               </p>
               <button

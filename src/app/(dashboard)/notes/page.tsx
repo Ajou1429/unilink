@@ -1,5 +1,7 @@
 "use client";
 
+import { isDemoMode } from "@/lib/demo-mode";
+
 import { getAllStoredCourses } from "@/lib/course-storage";
 import { docTypeLabelFromTags } from "@/lib/file-intake/classify-local";
 import { captureStorageScope, privateStorage } from "@/lib/private-storage";
@@ -343,7 +345,7 @@ export default function NotesPage() {
   }
 
   async function loadDriveStatus() {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured || isDemoMode()) return;
     const status = await getDriveConnectionStatus();
     setDriveStatus(status);
     const savedFolders = status.folderIds.map((id, index) => ({
@@ -374,7 +376,7 @@ export default function NotesPage() {
     }
 
     async function initializeDrive() {
-      if (!isSupabaseConfigured) return;
+      if (!isSupabaseConfigured || isDemoMode()) return;
       const params = new URLSearchParams(window.location.search);
       const driveParam = params.get("drive");
 
@@ -1169,8 +1171,8 @@ export default function NotesPage() {
                           {noteSaveError}
                         </p>
                       )}
-                      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={saveToDrive} onChange={(e) => setSaveToDrive(e.target.checked)} />Google Drive에도 저장하기</label>
-                      <p className="text-xs text-muted-foreground">선택한 수업·개인 학습 분류를 유지하며 Drive에 폴더를 자동 생성합니다.</p>
+                      {!isDemoMode() && <><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={saveToDrive} onChange={(e) => setSaveToDrive(e.target.checked)} />Google Drive에도 저장하기</label>
+                      <p className="text-xs text-muted-foreground">선택한 수업·개인 학습 분류를 유지하며 Drive에 폴더를 자동 생성합니다.</p></>}
                       <Button onClick={handleAddNote} className="w-full" disabled={noteSaving}>
                         {noteSaving ? "저장 중..." : "저장하기"}
                       </Button>
@@ -1197,7 +1199,7 @@ export default function NotesPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-0 shadow-sm">
+          {!isDemoMode() && <Card className="border-0 shadow-sm">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between gap-3">
                 <CardTitle className="flex items-center gap-2 text-lg">
@@ -1475,7 +1477,7 @@ export default function NotesPage() {
                 이 브라우저의 마지막 수동 동기화 성공: {lastSyncAt ? formatDate(lastSyncAt) : "성공 기록 없음"}
               </p>
             </CardContent>
-          </Card>
+          </Card>}
         </section>
 
         <section className="space-y-4">

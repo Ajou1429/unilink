@@ -62,3 +62,6 @@ verify_jwt = true
 
 [functions.file-classify]
 verify_jwt = true
+
+[functions.demo-chat]
+verify_jwt = false

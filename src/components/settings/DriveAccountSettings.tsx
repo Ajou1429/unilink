@@ -123,6 +123,8 @@ export function DriveAccountSettings() {
     }
   }
 
+  if (isDemoMode()) return null;
+
   return (
     <Card id="google-drive" className="scroll-mt-6 border-0 shadow-sm">
       <CardHeader className="pb-3">
