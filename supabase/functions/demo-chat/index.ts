@@ -42,7 +42,7 @@ export async function handleDemoChat(req: Request): Promise<Response> {
     let finalQuota=quota;
     if(result.action==='plan') {
       finalQuota=await reserve('plan');
-      if(!finalQuota.allowed) return jsonResponse({error:'오늘 계획 생성 3회를 모두 사용했어요. 내일 다시 이용해 주세요.',quota:finalQuota},{status:429});
+      if(!finalQuota.allowed) return jsonResponse({error:finalQuota.remaining > 0 ? '공개 데모의 오늘 전체 계획 생성 한도에 도달했어요. 내일 다시 이용해 주세요.' : '오늘 계획 생성 3회를 모두 사용했어요. 내일 다시 이용해 주세요.',quota:finalQuota},{status:429});
     }
     return jsonResponse({result,quota:finalQuota});
   } catch(error) {

@@ -28,6 +28,9 @@ test('server quota blocks fourth plan, preserves chat, and denies browser roles'
       await assert.rejects(()=>db.query('select * from demo_ai_usage'),/permission denied/);
       await db.exec('reset role');
     }
+    await db.exec("update demo_ai_usage set chats=1000, plans=100 where visitor='global' and day=(now() at time zone 'Asia/Seoul')::date;");
+    assert.equal((await reserve('chat')).allowed,false);
+    assert.equal((await reserve('plan')).allowed,false);
     await assert.rejects(()=>reserve('invalid'),/Invalid demo/);
   } finally { await db.close(); }
 });

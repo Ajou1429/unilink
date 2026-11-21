@@ -242,9 +242,10 @@ export function DemoExperience() {
     const messages: Message[] = [...state.messages, { role: "user", text }];
     update({ messages });
     try {
-      const data = await demoChat({ message: text, history: state.messages.slice(-10), context: {
+      const data = await demoChat({ message: text, history: state.messages.slice(-8).map(message => ({ ...message, text: message.text.slice(0, 1000) })), context: {
         courses: ["운영체제", "데이터베이스"],
-        plans: getWeeklyStudyPlans().slice(0, 15), events: getMonthlyEvents().slice(0, 15),
+        plans: getWeeklyStudyPlans().slice(0, 10).map(p => ({ id: p.id, title: p.title, courseName: p.courseName, dueDate: p.dueDate, description: p.description.slice(0, 400), isCompleted: p.isCompleted })),
+        events: getMonthlyEvents().slice(0, 10).map(e => ({ id: e.id, title: e.title, date: e.date, startTime: e.startTime, endTime: e.endTime, memo: e.memo?.slice(0, 400) })),
         sampleNote: "교착상태.pdf: 상호 배제, 점유와 대기, 비선점, 순환 대기. 예방은 조건을 제거하고 회피는 안전 상태를 유지한다.",
         mode, netMinutes: Number(minutes), preferred,
       }});

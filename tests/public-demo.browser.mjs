@@ -56,6 +56,13 @@ try {
   await page.getByTitle('샘플 강의노트 PDF').waitFor();
   await page.screenshot({path:`/tmp/unilink-public-demo/${device}-real-ai.png`,fullPage:true});
   assert.equal(await page.locator('body').evaluate(el=>el.scrollWidth>innerWidth+2),false);
+  await page.goto(base+'/notes');
+  await page.getByRole('link',{name:'전체 기능 체험',exact:true}).waitFor();
+  assert.equal(await page.getByText('Drive 변경 반영',{exact:true}).count(),0);
+  await page.goto(base+'/settings');
+  await page.getByRole('link',{name:'전체 기능 체험',exact:true}).waitFor();
+  assert.equal(await page.locator('#google-drive').count(),0);
+  await page.goto(base+'/dashboard?demo=1');
   await page.getByRole('button',{name:'처음부터 체험'}).click();
   await page.getByText(/남은 횟수: 0\/3회/).waitFor();
   assert.equal(await page.evaluate(()=>localStorage.getItem('unilink:private:user:real-user:unilink:courses')),'PRIVATE_SENTINEL');
